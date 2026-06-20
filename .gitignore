@@ -1,0 +1,43 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Gradle distributions (you have *.tar.gz but not *.tar)
+*.tar
+*.tar.gz
+*.zip
+*.jar
+*.war
+*.ear
+
+# Java
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# Generated assets (your build.gradle generates this)
+assets/assets.txt
+
+# IDE — Gradle can regenerate Eclipse/IDEA config
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+bin/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime / local config (you have tracked copies under lwjgl3/build/libs/)
+settings.json
+lwjgl3/build/libs/settings.json
+
+# Notes
+server host commands.txt
