@@ -5,8 +5,8 @@ cd /d "%~dp0"
 echo Starting server (headless) via Gradle...
 call gradlew.bat headless:run %*
 
-if %ERRORLEVEL% neq 0 (
-    echo.
-    echo Application exited with an error (Exit Code: %ERRORLEVEL%).
+if errorlevel 1 (
+    echo:
+    echo Application exited with an error. Exit Code: %ERRORLEVEL%
     pause
 )
