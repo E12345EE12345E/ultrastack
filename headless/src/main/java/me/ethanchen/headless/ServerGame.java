@@ -100,6 +100,10 @@ public class ServerGame {
                     me.ethanchen.game.board.Piece piece = board.getActivePiece(playerId);
                     boolean blocked = piece != null && piece.isBlockedFromSpawning;
 
+                    if (blocked && move != MoveType.HOLD) {
+                        System.out.println("[SERVER-DEBUG] Rejecting " + move + " for player " + playerId + " (blocked)");
+                    }
+
                     if (move == MoveType.HOLD) {
                         if (blocked) {
                             // Blocked hold: only allowed when at minimum interval and not during explode countdown
