@@ -12,7 +12,6 @@ import me.ethanchen.network.packets.c2s.*;
 import me.ethanchen.network.packets.other.*;
 import me.ethanchen.network.packets.s2c.*;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
-import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class NetworkRegister {
     public static final byte PROTOCOL_VERSION = 3;
@@ -31,12 +30,10 @@ public class NetworkRegister {
         kryo.register(LightGameStateBroadcast.class);
         kryo.register(ParticleBroadcast.class);
         kryo.register(LobbyPlayerListBroadcast.class);
-        kryo.register(EndGameBroadcast.class);
         // Other Packets
         kryo.register(DisconnectPacket.class);
         // Gamemode
         kryo.register(ScoreModeData.class);
-        kryo.register(ScoreModeEndData.class);
         // Other Objects
         kryo.register(byte[].class);
         kryo.register(boolean[].class);

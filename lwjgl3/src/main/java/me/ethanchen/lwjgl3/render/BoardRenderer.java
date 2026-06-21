@@ -125,7 +125,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null);
     }
 
     /**
@@ -135,22 +135,11 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f);
-    }
-
-    /**
-     * Full drawBoard with blocked-piece explode countdown support.
-     * @param pieceExplodeCountdown the current explode countdown (0 = not active or no explode,
-     *   0..1 = gray-to-white interpolation, 1..2 = pieces invisible).
-     */
-    public void drawBoard(Board board, float originX, float originY, float tileSize,
-                          SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows,
-                          float pieceExplodeCountdown) {
-        drawGlow(board, originX, originY, tileSize, glowStrengths, pieceExplodeCountdown);
+        drawGlow(board, originX, originY, tileSize, glowStrengths);
         sprites.begin();
         drawLockedTiles(board, originX, originY, tileSize, sprites);
-        drawShadowPieces(board, shadows, originX, originY, tileSize, sprites, pieceExplodeCountdown);
-        drawActivePieces(board, originX, originY, tileSize, sprites, pieceExplodeCountdown);
+        drawShadowPieces(board, shadows, originX, originY, tileSize, sprites);
+        drawActivePieces(board, originX, originY, tileSize, sprites);
         sprites.setColor(Color.WHITE);
         sprites.end();
     }
@@ -162,23 +151,11 @@ public class BoardRenderer {
      */
     public void drawGlow(Board board, float originX, float originY, float tileSize,
                          float[] glowStrengths) {
-        drawGlow(board, originX, originY, tileSize, glowStrengths, 0f);
-    }
-
-    /**
-     * Draws the glow halo for active pieces, with explode-countdown awareness.
-     * Pieces are invisible (no glow) when pieceExplodeCountdown >= 1.
-     */
-    public void drawGlow(Board board, float originX, float originY, float tileSize,
-                         float[] glowStrengths, float pieceExplodeCountdown) {
         if (!blurShader.isCompiled()) return;
         if (glowStrengths == null) return;
 
         boolean anyGlow = false;
         for (int i = 0; i < board.getActivePieces().size(); i++) {
-            Piece piece = board.getActivePieces().get(i);
-            // During second half of countdown, pieces are invisible
-            if (piece.isBlockedFromSpawning && pieceExplodeCountdown >= 1f) continue;
             if (glowAt(glowStrengths, i) > 0f) {
                 anyGlow = true;
                 break;
@@ -199,8 +176,6 @@ public class BoardRenderer {
         Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE); // additive so overlapping pieces accumulate
         for (int i = 0; i < board.getActivePieces().size(); i++) {
             Piece piece = board.getActivePieces().get(i);
-            // Invisible during second half of explode countdown
-            if (piece.isBlockedFromSpawning && pieceExplodeCountdown >= 1f) continue;
             float strength = glowAt(glowStrengths, i);
             if (piece.tiles == null || piece.location == null || strength <= 0f) continue;
             float r, g, b;
@@ -238,7 +213,7 @@ public class BoardRenderer {
                               ShapeRenderer shapes) {
         boolean[][] allowed = board.getAllowedTiles();
         shapes.begin(ShapeRenderer.ShapeType.Line);
-        shapes.setColor(Color.LIGHT_GRAY);
+        shapes.setColor(Color.WHITE);
         for (int y = 0; y < board.bh(); y++) {
             for (int x = 0; x < board.bw(); x++) {
                 if (!allowed[y][x]) continue;
@@ -401,7 +376,7 @@ public class BoardRenderer {
         sprites.end();
         font.getData().setScale(savedX, savedY);
 
-        // Draw held piece centered in the box (if any)
+        // Draw held piece centred in the box (if any)
         if (heldType != 0) {
             Piece piece = Piece.defaultPiece(heldType);
             // Compute bounding box of the tiles (relative to piece origin, ignoring location offset)
@@ -537,19 +512,16 @@ public class BoardRenderer {
      * When {@code shadow.wouldPlace == false} the shadow is drawn gray (piece is hovering over
      * another active piece and would not lock).
      * The shadow is skipped when it is at the same board position as the live piece.
-     * Shadows are also hidden when a piece is blocked or during the second half of explode countdown.
      */
     private void drawShadowPieces(Board board, Board.ShadowInfo[] shadows,
                                   float originX, float originY, float tileSize,
-                                  SpriteBatch sprites, float pieceExplodeCountdown) {
+                                  SpriteBatch sprites) {
         if (shadows == null) return;
         for (int i = 0; i < shadows.length && i < board.getActivePieces().size(); i++) {
             Board.ShadowInfo shadow = shadows[i];
             if (shadow == null) continue;
             Piece piece = board.getActivePieces().get(i);
             if (piece.tiles == null || piece.location == null || piece.type == Tile.EMPTY) continue;
-            // No shadow for blocked pieces or during invisible phase
-            if (piece.isBlockedFromSpawning) continue;
 
             // Skip when the shadow is coincident with the piece itself
             if (Math.abs(shadow.locationX - piece.location.x) < 0.01f
@@ -590,32 +562,17 @@ public class BoardRenderer {
     }
 
     private void drawActivePieces(Board board, float originX, float originY, float tileSize,
-                                  SpriteBatch sprites, float pieceExplodeCountdown) {
+                                  SpriteBatch sprites) {
         for (Piece piece : board.getActivePieces()) {
             if (piece.tiles == null || piece.location == null || piece.type == Tile.EMPTY) continue;
-
-            // During the second half of the explode countdown, blocked pieces are invisible
-            if (piece.isBlockedFromSpawning && pieceExplodeCountdown >= 1f) continue;
-
             for (int i = 0; i < piece.tiles.length; i++) {
                 float sx = originX + (piece.location.x + piece.tiles[i].x) * tileSize;
                 float sy = originY + (piece.location.y + piece.tiles[i].y) * tileSize;
                 byte connection = piece.tileconnectionstates != null
                     ? piece.tileconnectionstates[i]
                     : Tile.SINGLE_TILE;
-                if (piece.isBlockedFromSpawning) {
-                    // Gray tint, interpolated to white during the first half of explode countdown
-                    float t = Math.min(pieceExplodeCountdown, 1f); // 0..1
-                    float gray = 0.45f + (1f - 0.45f) * t;
-                    Color bgGray = new Color(gray * 0.4f, gray * 0.4f, gray * 0.4f, 1f);
-                    sprites.setColor(bgGray);
-                    sprites.draw(tileBackground, sx, sy, tileSize, tileSize);
-                    sprites.setColor(gray, gray, gray, 1f);
-                    sprites.draw(tileRegions[connection & 0xF], sx, sy, tileSize, tileSize);
-                } else {
-                    drawTileBackground(sprites, sx, sy, tileSize, piece.type);
-                    drawTile(sprites, sx, sy, tileSize, piece.type, connection);
-                }
+                drawTileBackground(sprites, sx, sy, tileSize, piece.type);
+                drawTile(sprites, sx, sy, tileSize, piece.type, connection);
             }
         }
     }

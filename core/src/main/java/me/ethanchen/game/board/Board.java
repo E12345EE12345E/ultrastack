@@ -19,25 +19,6 @@ public class Board {
     private byte heldPieceType = 0;   // 0 = empty
     private boolean[] playerHoldUsed; // indexed by player; true until that player hard drops
 
-    // Blocked-spawn state
-    /** Per-player: seconds remaining in the current cycle interval. Counts down to 0 then cycles. */
-    private float[] blockedCycleElapsed;   // seconds elapsed since last cycle
-    /** Per-player: the current interval length (starts 1.0s, multiplied by 0.8 each cycle). */
-    private float[] timeBetweenNextPiece;  // current cycle interval, clamped to >= 0.25s
-    /** System-time milliseconds at the last cycle swap for each player (for coyote-time). */
-    private long[] lastCycleSwapMs;
-    /** Previous piece type before the last cycle swap (for coyote-time hold). */
-    private byte[] prevCycledPieceType;
-    /** Countdown in seconds for the "all blocked → explode" sequence (0 = not active). */
-    private float pieceExplodeCountdown = 0f;
-    /** True once pieceExplodeCountdown has been triggered and is running. */
-    private boolean pieceExplodeActive = false;
-
-    private static final float BLOCKED_INITIAL_INTERVAL = 1.0f;
-    private static final float BLOCKED_INTERVAL_MULTIPLIER = 0.8f;
-    private static final float BLOCKED_MIN_INTERVAL = 0.25f;
-    private static final float PIECE_EXPLODE_TOTAL = 2.0f;
-
     public boolean[][] getAllowedTiles() { return allowedTiles; }
     public Tile[][] getBoard() { return board; }
     public int bw() { return width; }
@@ -166,17 +147,9 @@ public class Board {
         for (PieceQueue q : pieceQueues) {
             q.refill();
         }
-        // Init blocked-spawn tracking arrays
-        int n = spawnPositions.length;
-        blockedCycleElapsed  = new float[n];
-        timeBetweenNextPiece = new float[n];
-        lastCycleSwapMs      = new long[n];
-        prevCycledPieceType  = new byte[n];
-        java.util.Arrays.fill(timeBetweenNextPiece, BLOCKED_INITIAL_INTERVAL);
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < spawnPositions.length; i++) {
             Piece piece = Piece.defaultPiece(pieceQueues[i].takeNext());
             piece.location.add(spawnPositions[i]);
-            checkAndMarkBlocked(i, piece);
             activePieces.add(piece);
         }
     }
@@ -393,8 +366,7 @@ public class Board {
     }
 
     public void doGravityTick() {
-        for (int i = 0; i < activePieces.size(); i++) {
-            if (activePieces.get(i).isBlockedFromSpawning) continue; // blocked pieces don't fall
+        for (int i=0; i<activePieces.size(); i++) {
             moveDown(i);
         }
     }
@@ -593,199 +565,12 @@ public class Board {
     /**
      * Spawns the next piece from {@code pieceQueues[id]} into {@code activePieces[id]}.
      * If the queue or spawn position for {@code id} doesn't exist the call is silently ignored.
-     * After spawning, checks if the new piece is blocked and sets {@code isBlockedFromSpawning}.
      */
     public void spawnNextPiece(int id) {
         if (id < 0 || id >= pieceQueues.length || id >= spawnPositions.length) return;
         Piece next = Piece.defaultPiece(pieceQueues[id].takeNext());
         next.location.add(spawnPositions[id]);
-        checkAndMarkBlocked(id, next);
         activePieces.set(id, next);
-    }
-
-    /**
-     * Checks whether the given piece (already positioned at spawn) collides with any
-     * solid board tile or !allowedTiles cell and sets {@code isBlockedFromSpawning} accordingly.
-     */
-    private void checkAndMarkBlocked(int id, Piece piece) {
-        boolean blocked = false;
-        for (Vector2 offset : piece.tiles) {
-            int mx = (int) Math.floor(piece.location.x + offset.x);
-            int my = (int) Math.floor(piece.location.y + offset.y);
-            if (mx < 0 || mx >= width || my < 0 || my >= height) { blocked = true; break; }
-            if (!allowedTiles[my][mx]) { blocked = true; break; }
-            if (board[my][mx].get() != Tile.EMPTY) { blocked = true; break; }
-            // Also check overlap with other active pieces
-            for (int j = 0; j < activePieces.size(); j++) {
-                if (j == id) continue;
-                Piece other = activePieces.get(j);
-                if (other.tiles == null || other.location == null) continue;
-                for (Vector2 ot : other.tiles) {
-                    if (mx == (int)Math.floor(other.location.x + ot.x)
-                            && my == (int)Math.floor(other.location.y + ot.y)) {
-                        blocked = true;
-                        break;
-                    }
-                }
-                if (blocked) break;
-            }
-            if (blocked) break;
-        }
-        piece.isBlockedFromSpawning = blocked;
-    }
-
-    /**
-     * Updates per-player blocked-spawn cycle timers and the piece-explode countdown.
-     * Should be called once per game update with the elapsed delta time in milliseconds.
-     *
-     * @return true if the game is over (all players exploded — caller should send EndGameBroadcast)
-     */
-    public boolean updateBlockedPieces(int deltaTimeMs) {
-        if (activePieces.isEmpty() || blockedCycleElapsed == null) return false;
-        float dt = deltaTimeMs / 1000f;
-        int n = activePieces.size();
-
-        // ---- Per-player cycle timer ----
-        for (int i = 0; i < n; i++) {
-            Piece p = activePieces.get(i);
-            if (!p.isBlockedFromSpawning) continue;
-
-            blockedCycleElapsed[i] += dt;
-            float interval = timeBetweenNextPiece[i];
-            if (blockedCycleElapsed[i] >= interval) {
-                blockedCycleElapsed[i] -= interval;
-                // Record prev piece type for coyote time
-                prevCycledPieceType[i] = p.type;
-                lastCycleSwapMs[i] = System.currentTimeMillis();
-                // Cycle to the next piece
-                spawnNextPiece(i);
-                // Shorten interval
-                timeBetweenNextPiece[i] = Math.max(BLOCKED_MIN_INTERVAL, interval * BLOCKED_INTERVAL_MULTIPLIER);
-            }
-        }
-
-        // ---- Explode countdown logic ----
-        if (!pieceExplodeActive) {
-            // Check: all players blocked AND all at minimum interval
-            if (isAllPlayersBlocked() && isAllPlayersAtMinInterval()) {
-                pieceExplodeActive = true;
-                pieceExplodeCountdown = 0f;
-            }
-        } else {
-            // Check: if any player was freed, cancel the countdown via nearDeathSave (caller checks)
-            // (nearDeathSave is called externally when a player's piece becomes unblocked during countdown)
-            pieceExplodeCountdown += dt;
-            // During 0–1s: interpolate cycle intervals between MIN and 0.1s
-            if (pieceExplodeCountdown <= 1.0f) {
-                float t = pieceExplodeCountdown; // 0..1
-                for (int i = 0; i < n; i++) {
-                    Piece p = activePieces.get(i);
-                    if (p.isBlockedFromSpawning) {
-                        timeBetweenNextPiece[i] = BLOCKED_MIN_INTERVAL + (0.1f - BLOCKED_MIN_INTERVAL) * t;
-                    }
-                }
-            }
-            if (pieceExplodeCountdown >= PIECE_EXPLODE_TOTAL) {
-                return true; // game over
-            }
-        }
-        return false;
-    }
-
-    /** Returns true when all active players have isBlockedFromSpawning. */
-    public boolean isAllPlayersBlocked() {
-        if (activePieces.isEmpty()) return false;
-        for (Piece p : activePieces) {
-            if (!p.isBlockedFromSpawning) return false;
-        }
-        return true;
-    }
-
-    /** Returns true when all blocked players have reached the minimum cycle interval. */
-    private boolean isAllPlayersAtMinInterval() {
-        if (timeBetweenNextPiece == null) return false;
-        for (int i = 0; i < activePieces.size(); i++) {
-            if (activePieces.get(i).isBlockedFromSpawning
-                    && timeBetweenNextPiece[i] > BLOCKED_MIN_INTERVAL + 0.001f) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Called when a player's piece is freed during the explode countdown.
-     * Resets the countdown and continues the game for all remaining blocked players.
-     */
-    public void nearDeathSave(int id) {
-        pieceExplodeActive = false;
-        pieceExplodeCountdown = 0f;
-        // Reset intervals for all still-blocked players
-        if (timeBetweenNextPiece != null) {
-            for (int i = 0; i < activePieces.size(); i++) {
-                if (activePieces.get(i).isBlockedFromSpawning) {
-                    timeBetweenNextPiece[i] = BLOCKED_INITIAL_INTERVAL;
-                    blockedCycleElapsed[i] = 0f;
-                }
-            }
-        }
-    }
-
-    /**
-     * Performs a "hold while blocked" for the given player.
-     * Uses coyote-time logic: if the hold was pressed within 50ms of the last cycle swap,
-     * the previous piece type is used instead of the current one.
-     * Resets timeBetweenNextPiece to 1s and clears elapsed.
-     *
-     * @param playerId     the player holding
-     * @param receivedMs   System.currentTimeMillis() when the server received the hold request
-     * @return true if the hold was executed
-     */
-    public boolean useHoldBlocked(int playerId, long receivedMs) {
-        if (playerId < 0 || playerId >= activePieces.size()) return false;
-        Piece current = activePieces.get(playerId);
-        if (!current.isBlockedFromSpawning) return false;
-
-        byte typeToHold;
-        long swapMs = (lastCycleSwapMs != null) ? lastCycleSwapMs[playerId] : 0;
-        boolean coyote = (receivedMs - swapMs) <= 50;
-        if (coyote && prevCycledPieceType != null && prevCycledPieceType[playerId] != 0) {
-            typeToHold = prevCycledPieceType[playerId];
-        } else {
-            typeToHold = current.type;
-        }
-
-        byte oldHeld = heldPieceType;
-        heldPieceType = typeToHold;
-        if (oldHeld == 0) {
-            // Hold slot empty — advance queue
-            spawnNextPiece(playerId);
-        } else {
-            // Swap with the old held piece
-            Piece newPiece = Piece.defaultPiece(oldHeld);
-            newPiece.location.add(spawnPositions[playerId]);
-            checkAndMarkBlocked(playerId, newPiece);
-            activePieces.set(playerId, newPiece);
-        }
-        // Reset cycle timer
-        if (timeBetweenNextPiece != null) {
-            timeBetweenNextPiece[playerId] = BLOCKED_INITIAL_INTERVAL;
-            blockedCycleElapsed[playerId] = 0f;
-        }
-        if (playerHoldUsed == null) playerHoldUsed = new boolean[spawnPositions.length];
-        if (playerId < playerHoldUsed.length) playerHoldUsed[playerId] = true;
-        return true;
-    }
-
-    public float getPieceExplodeCountdown() { return pieceExplodeCountdown; }
-    public boolean isPieceExplodeActive() { return pieceExplodeActive; }
-    public float getTimeBetweenNextPiece(int id) {
-        if (timeBetweenNextPiece == null || id < 0 || id >= timeBetweenNextPiece.length) return BLOCKED_INITIAL_INTERVAL;
-        return timeBetweenNextPiece[id];
-    }
-    public long getLastCycleSwapMs(int id) {
-        if (lastCycleSwapMs == null || id < 0 || id >= lastCycleSwapMs.length) return 0;
-        return lastCycleSwapMs[id];
     }
 
     /**
@@ -874,14 +659,6 @@ public class Board {
         retval.playerHoldUsed = (playerHoldUsed != null)
             ? Arrays.copyOf(playerHoldUsed, playerHoldUsed.length)
             : new boolean[spawnPositions.length];
-        // Blocked-spawn data
-        int n = spawnPositions.length;
-        retval.timeBetweenNextPiece = new float[n];
-        for (int i = 0; i < n; i++) {
-            retval.timeBetweenNextPiece[i] = getTimeBetweenNextPiece(i);
-        }
-        retval.pieceExplodeCountdown = pieceExplodeCountdown;
-        retval.pieceExplodeActive = pieceExplodeActive;
         return retval;
     }
 
@@ -955,12 +732,6 @@ public class Board {
         public Piece.NetPiece[] pieces;
         public byte heldPieceType;
         public boolean[] playerHoldUsed;
-        /** Per-player cycle intervals for blocked-spawn state (seconds). */
-        public float[] timeBetweenNextPiece;
-        /** Explode countdown timer in seconds (0 if not active). */
-        public float pieceExplodeCountdown;
-        /** True when the explode countdown is running. */
-        public boolean pieceExplodeActive;
     }
 
     public static NetBoardLight lightNetBoardFrom(NetBoardFull full) {

@@ -5,10 +5,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Random;
 
-import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Color;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.controllers.Controller;
 import com.badlogic.gdx.controllers.ControllerAdapter;
 import com.badlogic.gdx.controllers.Controllers;
@@ -27,7 +24,6 @@ import me.ethanchen.network.packets.s2c.LightGameStateBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
-import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 public class GameScreen extends MenuScreen {
@@ -62,19 +58,6 @@ public class GameScreen extends MenuScreen {
     // Latest score-mode data received from the server (null until first packet arrives)
     private ScoreModeData latestScoreMode;
 
-    // Blocked-spawn state (mirrored from latest server broadcast)
-    /** Per-player cycle interval from server (seconds). */
-    private float[] latestTimeBetweenNextPiece;
-    /** Explode countdown from server (0 = not active). */
-    private float latestPieceExplodeCountdown = 0f;
-    /** True when the explode countdown is active (server-authoritative). */
-    private boolean latestPieceExplodeActive = false;
-    /** Whether the end-game fade has been triggered. */
-    private boolean fadeToBlackStarted = false;
-    /** Fade progress: 0 = normal, 1 = fully black. */
-    private float fadeToBlackProgress = 0f;
-    private static final float FADE_TO_BLACK_DURATION = 1.0f; // seconds
-
     public GameScreen(ClientApp app, StartGameBroadcast b) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
         lastUpdateMs = System.currentTimeMillis();
@@ -103,14 +86,6 @@ public class GameScreen extends MenuScreen {
         deltatime = (int)(System.currentTimeMillis() - lastUpdateMs);
         game.update(deltatime);
         lastUpdateMs = System.currentTimeMillis();
-
-        // Advance fade-to-black
-        if (fadeToBlackStarted) {
-            fadeToBlackProgress += deltatime / 1000f / FADE_TO_BLACK_DURATION;
-            if (fadeToBlackProgress >= 1f) {
-                fadeToBlackProgress = 1f;
-            }
-        }
 
         tickAutoShift();
         tickSoftDrop();
@@ -159,30 +134,12 @@ public class GameScreen extends MenuScreen {
                     Arrays.fill(glowValues, 0.5f);
                 }
 
-                // Override glow for blocked players:
-                // - All blocked players: 0 glow to others
-                // - The local player if blocked and at minimum interval: 2f (max white glow)
-                // - During the explode countdown, hold is forbidden, so no glow signal either
-                for (int i = 0; i < board.getActivePieces().size(); i++) {
-                    me.ethanchen.game.board.Piece p = board.getActivePiece(i);
-                    if (p != null && p.isBlockedFromSpawning) {
-                        if (i == playerID && !latestPieceExplodeActive
-                                && latestTimeBetweenNextPiece != null
-                                && i < latestTimeBetweenNextPiece.length
-                                && latestTimeBetweenNextPiece[i] <= 0.25f + 0.001f) {
-                            glowValues[i] = 2f; // signal: hold available
-                        } else {
-                            glowValues[i] = 0f;
-                        }
-                    }
-                }
-
                 Board.ShadowInfo[] shadows = new Board.ShadowInfo[board.getActivePieces().size()];
                 for (int i = 0; i < shadows.length; i++) {
                     shadows[i] = board.getShadow(i);
                 }
 
-                BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, glowValues, shadows, latestPieceExplodeCountdown);
+                BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, glowValues, shadows);
                 BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
 
                 // Draw repeat-column red highlights
@@ -230,91 +187,6 @@ public class GameScreen extends MenuScreen {
                         board.getHeldPieceType(), holdAvailable,
                         holdBoxX, holdBoxY, holdBoxSize, tileSize,
                         shapes, sprites, font);
-
-                // Fade-to-black overlay
-                if (fadeToBlackProgress > 0f) {
-                    Gdx.gl.glEnable(GL20.GL_BLEND);
-                    Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-                    shapes.begin(ShapeRenderer.ShapeType.Filled);
-                    shapes.setColor(0f, 0f, 0f, fadeToBlackProgress);
-                    shapes.rect(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    shapes.end();
-                    if (fadeToBlackProgress >= 1f && app.latestEndGame != null) {
-                        app.switchMenu(new EndGameScreen(app, app.latestEndGame));
-                        return;
-                    }
-                }
-
-                long startDelay = game.getStartDelay();
-                if (startDelay > 0) {
-                    sprites.begin();
-                    
-                    if (startDelay <= 3000 && app.latestPlayerNames != null) {
-                        float pNameAlpha = (float) Math.sin(((3000 - startDelay) / 3000f) * Math.PI);
-                        if (pNameAlpha > 0) {
-                            float savedX = font.getScaleX(), savedY = font.getScaleY();
-                            font.getData().setScale(1f);
-                            float lh = font.getData().lineHeight;
-                            float fs = 1.5f * (15f / lh) * (com.badlogic.gdx.Gdx.graphics.getHeight() / 640f);
-                            font.getData().setScale(fs);
-                            font.setColor(1f, 1f, 1f, pNameAlpha);
-                            
-                            com.badlogic.gdx.graphics.g2d.GlyphLayout nameLayout = new com.badlogic.gdx.graphics.g2d.GlyphLayout();
-                            for (int i = 0; i < board.getSpawnPositions().length; i++) {
-                                if (i >= app.latestPlayerNames.length) break;
-                                String name = app.latestPlayerNames[i];
-                                nameLayout.setText(font, name);
-                                float spX = originX + board.getSpawnPositions()[i].x * tileSize;
-                                float spY = originY + board.getSpawnPositions()[i].y * tileSize;
-                                
-                                float cx = spX + 1.0f * tileSize;
-                                float cy = spY + 0.5f * tileSize;
-                                
-                                font.draw(sprites, name, cx - nameLayout.width * 0.5f, cy + nameLayout.height * 0.5f);
-                            }
-                            font.getData().setScale(savedX, savedY);
-                        }
-                    }
-
-                    String countdownText = "";
-                    float p = 0;
-                    if (startDelay <= 4000 && startDelay > 3000) {
-                        countdownText = "3";
-                        p = (4000 - startDelay) / 1000f;
-                    } else if (startDelay <= 3000 && startDelay > 2000) {
-                        countdownText = "2";
-                        p = (3000 - startDelay) / 1000f;
-                    } else if (startDelay <= 2000 && startDelay > 1000) {
-                        countdownText = "1";
-                        p = (2000 - startDelay) / 1000f;
-                    } else if (startDelay <= 1000 && startDelay > 0) {
-                        countdownText = "Start";
-                        p = (1000 - startDelay) / 1000f;
-                    }
-
-                    if (!countdownText.isEmpty()) {
-                        float alpha = (float) Math.sin(p * Math.PI);
-                        if (alpha > 0) {
-                            float savedX = font.getScaleX(), savedY = font.getScaleY();
-                            font.getData().setScale(1f);
-                            float lh = font.getData().lineHeight;
-                            
-                            float scaleMult = 1.0f + 1.5f * (float) Math.sin(p * Math.PI);
-                            float fs = 2.0f * scaleMult * (15f / lh) * (com.badlogic.gdx.Gdx.graphics.getHeight() / 640f);
-                            font.getData().setScale(fs);
-                            font.setColor(1f, 1f, 1f, alpha);
-                            
-                            com.badlogic.gdx.graphics.g2d.GlyphLayout cdLayout = new com.badlogic.gdx.graphics.g2d.GlyphLayout();
-                            cdLayout.setText(font, countdownText);
-                            float cx = originX + board.bw() * tileSize * 0.5f - cdLayout.width * 0.5f;
-                            float cy = originY + board.bh() * tileSize * 0.5f + cdLayout.height * 0.5f;
-                            font.draw(sprites, countdownText, cx, cy);
-                            
-                            font.getData().setScale(savedX, savedY);
-                        }
-                    }
-                    sprites.end();
-                }
                 break;
             default:
                 break;
@@ -342,8 +214,6 @@ public class GameScreen extends MenuScreen {
             if (!game.isStarted()) return true;
             Board board = game.getBoards().get(0);
             if (board.getActivePieces().size() <= playerID) return true;
-            // Suppress movement if blocked
-            if (isLocalPlayerBlocked(board)) return true;
             queueMove(isLeft ? MoveType.LEFT : MoveType.RIGHT);
             return true;
         }
@@ -354,7 +224,7 @@ public class GameScreen extends MenuScreen {
             softDropTimer = 0;
             if (game.isStarted() && game.getGravity() > SOFT_DROP_INTERVAL_MS) {
                 Board board = game.getBoards().get(0);
-                if (board.getActivePieces().size() > playerID && !isLocalPlayerBlocked(board)) {
+                if (board.getActivePieces().size() > playerID) {
                     queueMove(MoveType.SOFT_DROP);
                     game.resetGravityTimer();
                 }
@@ -373,11 +243,6 @@ public class GameScreen extends MenuScreen {
         else if (keycode == keys.rotate180 || (keys.rotate180_2 != -1 && keycode == keys.rotate180_2)) type = MoveType.ROTATE_180;
         else if (keycode == keys.hold      || (keys.hold2       != -1 && keycode == keys.hold2))      type = MoveType.HOLD;
         if (type == null) return super.keyDown(keycode);
-
-        // Suppress non-hold moves if blocked; also allow hold only when server says it's available
-        boolean blocked = isLocalPlayerBlocked(board);
-        if (blocked && type != MoveType.HOLD) return true;
-        if (blocked && !holdAvailable) return true;
 
         queueMove(type);
         return true;
@@ -426,19 +291,11 @@ public class GameScreen extends MenuScreen {
         }
     }
 
-    /** True if the local player's piece has isBlockedFromSpawning set in the local board. */
-    private boolean isLocalPlayerBlocked(Board board) {
-        if (playerID < 0 || playerID >= board.getActivePieces().size()) return false;
-        me.ethanchen.game.board.Piece p = board.getActivePiece(playerID);
-        return p != null && p.isBlockedFromSpawning;
-    }
-
     private void tickSoftDrop() {
         if (!softDropHeld || !game.isStarted()) return;
         if (game.getGravity() <= SOFT_DROP_INTERVAL_MS) return;
         Board board = game.getBoards().get(0);
         if (board.getActivePieces().size() <= playerID) return;
-        if (isLocalPlayerBlocked(board)) return; // blocked: no soft-drop
 
         softDropTimer += deltatime;
         while (softDropTimer >= SOFT_DROP_INTERVAL_MS) {
@@ -452,7 +309,6 @@ public class GameScreen extends MenuScreen {
         if (heldDirection == 0 || !game.isStarted()) return;
         Board board = game.getBoards().get(0);
         if (board.getActivePieces().size() <= playerID) return;
-        if (isLocalPlayerBlocked(board)) return; // blocked: no auto-shift
 
         GameSettings s = app.getSettings();
 
@@ -477,14 +333,6 @@ public class GameScreen extends MenuScreen {
             LightGameStateBroadcast p = (LightGameStateBroadcast) w.packet;
             for (int i = 0; i < game.getBoards().size(); i++) {
                 game.getBoards().get(i).updateFromNetBoardLight(p.boards[i]);
-            }
-
-            // Mirror blocked-spawn state from server broadcast
-            if (p.boards != null && p.boards.length > 0) {
-                Board.NetBoardLight nb = p.boards[0];
-                latestTimeBetweenNextPiece = nb.timeBetweenNextPiece;
-                latestPieceExplodeCountdown = nb.pieceExplodeCountdown;
-                latestPieceExplodeActive = nb.pieceExplodeActive;
             }
 
             // Drop moves the server has already processed
@@ -516,48 +364,6 @@ public class GameScreen extends MenuScreen {
             if (p.particles != null) {
                 for (NetParticle np : p.particles) {
                     expandNetParticle(np);
-                }
-            }
-        }
-
-        if (w.packet instanceof EndGameBroadcast) {
-            EndGameBroadcast egb = (EndGameBroadcast) w.packet;
-            app.latestEndGame = egb;
-            // Spawn PIECE_EXPLODE particles for each blocked piece tile
-            if (!game.getBoards().isEmpty()) {
-                spawnPieceExplodeParticles(game.getBoards().get(0));
-            }
-            // Start fade to black
-            fadeToBlackStarted = true;
-            fadeToBlackProgress = 0f;
-        }
-    }
-
-    /**
-     * Spawns PIECE_EXPLODE particles for every tile of every blocked active piece.
-     * 4 particles per tile, solid white, no gravity, outward velocity.
-     */
-    private void spawnPieceExplodeParticles(Board board) {
-        float speed = 3f; // approx. same as TILE_BREAK
-        for (me.ethanchen.game.board.Piece piece : board.getActivePieces()) {
-            if (piece.tiles == null || piece.location == null) continue;
-            if (!piece.isBlockedFromSpawning) continue;
-            for (com.badlogic.gdx.math.Vector2 offset : piece.tiles) {
-                float cx = piece.location.x + offset.x + 0.5f;
-                float cy = piece.location.y + offset.y + 0.5f;
-                for (int k = 0; k < 4; k++) {
-                    Particle shard = new Particle();
-                    shard.kind = Particle.Kind.PIECE_EXPLODE;
-                    shard.x = cx;
-                    shard.y = cy;
-                    float angle = particleRng.nextFloat() * (float)(Math.PI * 2);
-                    float s = speed + particleRng.nextFloat() * 2f;
-                    shard.vx = (float) Math.cos(angle) * s;
-                    shard.vy = (float) Math.sin(angle) * s;
-                    shard.r = 1f; shard.g = 1f; shard.b = 1f;
-                    shard.size = 0.2f + particleRng.nextFloat() * 0.12f;
-                    shard.lifetime = 0.5f + particleRng.nextFloat() * 0.25f;
-                    particles.add(shard);
                 }
             }
         }

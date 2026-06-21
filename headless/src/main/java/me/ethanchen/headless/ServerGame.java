@@ -12,9 +12,7 @@ import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
 import me.ethanchen.network.packets.s2c.NetParticle;
-import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
-import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class ServerGame {
     private volatile boolean inProgress; public boolean isInProgress() { return inProgress; }
@@ -97,34 +95,7 @@ public class ServerGame {
                 highestMoveId[playerId] = ids[i];
                 if (types[i] >= 0 && types[i] < moveValues.length) {
                     MoveType move = moveValues[types[i]];
-                    me.ethanchen.game.board.Piece piece = board.getActivePiece(playerId);
-                    boolean blocked = piece != null && piece.isBlockedFromSpawning;
-
-                    if (move == MoveType.HOLD) {
-                        if (blocked) {
-                            // Blocked hold: only allowed when at minimum interval and not during explode countdown
-                            if (!board.isPieceExplodeActive()
-                                    && board.getTimeBetweenNextPiece(playerId) <= 0.25f + 0.001f) {
-                                long receivedMs = System.currentTimeMillis();
-                                if (board.useHoldBlocked(playerId, receivedMs)) {
-                                    lastHoldUsedMs = System.currentTimeMillis();
-                                    // Check if the newly swapped-in piece freed the player
-                                    me.ethanchen.game.board.Piece newPiece = board.getActivePiece(playerId);
-                                    if (newPiece != null && !newPiece.isBlockedFromSpawning
-                                            && board.isPieceExplodeActive()) {
-                                        board.nearDeathSave(playerId);
-                                    }
-                                }
-                            }
-                        } else {
-                            if (board.useHold(playerId)) {
-                                lastHoldUsedMs = System.currentTimeMillis();
-                            }
-                        }
-                    } else if (blocked) {
-                        // All non-hold moves are rejected for blocked players
-                        continue;
-                    } else if (move == MoveType.HARD_DROP) {
+                    if (move == MoveType.HARD_DROP) {
                         LineClearResult result = board.hardDrop(playerId);
                         if (result != null && result.placed) {
                             piecesPlaced[playerId]++;
@@ -136,34 +107,16 @@ public class ServerGame {
                                     break;
                             }
                             pendingParticles.addAll(resultToParticles(result));
-                            // Check if spawning the new piece freed a previously blocked player
-                            // (nearDeathSave handled by the cleared-lines path — line clears can unblock)
-                            checkNearDeathSaves(board);
+                        }
+                    } else if (move == MoveType.HOLD) {
+                        if (board.useHold(playerId)) {
+                            lastHoldUsedMs = System.currentTimeMillis();
                         }
                     } else {
                         board.applyMove(playerId, move);
                     }
                 }
             }
-        }
-    }
-
-    /**
-     * After a hard drop clears lines, check if any blocked player's piece is now freed
-     * (board tiles below them were cleared). If explode countdown was active, cancel it.
-     */
-    private void checkNearDeathSaves(Board board) {
-        if (!board.isPieceExplodeActive()) return;
-        boolean anySaved = false;
-        for (int i = 0; i < players; i++) {
-            me.ethanchen.game.board.Piece p = board.getActivePiece(i);
-            if (p != null && !p.isBlockedFromSpawning) {
-                anySaved = true;
-                break;
-            }
-        }
-        if (anySaved) {
-            board.nearDeathSave(-1);
         }
     }
 
@@ -358,13 +311,6 @@ public class ServerGame {
         long now = System.currentTimeMillis();
         boolean globalLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < HOLD_GLOBAL_LOCK_MS;
         Board board = game.getBoards().get(0);
-        // Hold is unavailable during the explode countdown
-        if (board.isPieceExplodeActive()) return false;
-        // Hold for blocked players: only available at minimum cycle interval
-        me.ethanchen.game.board.Piece piece = board.getActivePiece(playerId);
-        if (piece != null && piece.isBlockedFromSpawning) {
-            return board.getTimeBetweenNextPiece(playerId) <= 0.25f + 0.001f;
-        }
         return !board.isPlayerHoldUsed(playerId) && !globalLock;
     }
 
@@ -444,33 +390,6 @@ public class ServerGame {
 
     public void updateScoreMode() { // called if gamemode is a scoring type mode
         game.update(deltatime);
-        if (!game.getBoards().isEmpty()) {
-            Board board = game.getBoards().get(0);
-            boolean gameOver = board.updateBlockedPieces(deltatime);
-            if (gameOver) {
-                // Build and send EndGameBroadcast via TCP to all players
-                EndGameBroadcast egb = new EndGameBroadcast();
-                egb.win = false;
-                egb.playerNames = buildPlayerNames();
-                if (gamemode == me.ethanchen.game.GameMode.MULTIPLAYER_SCORE) {
-                    ScoreModeEndData end = new ScoreModeEndData();
-                    end.finalScore = totalScore;
-                    egb.scoreModeEnd = end;
-                }
-                app.broadcastToPlayersTCP(egb);
-                stopGame();
-            }
-        }
-    }
-
-    private String[] buildPlayerNames() {
-        String[] names = new String[players];
-        // Access app's player map — expose via a helper
-        for (int i = 0; i < players; i++) {
-            String n = app.getPlayerName(i);
-            names[i] = (n != null) ? n : "Player " + i;
-        }
-        return names;
     }
 
     public void sendNetUpdates() {
