@@ -117,6 +117,11 @@ public class BoardRenderer {
     // Public draw calls
     // -------------------------------------------------------------------------
 
+    /** Gray color used for blocked pieces (unlit, 50% value). */
+    private static final Color BLOCKED_GRAY = new Color(0.5f, 0.5f, 0.5f, 1f);
+    /** White color used as the fully-lit blocked piece color during the explode countdown. */
+    private static final Color BLOCKED_WHITE = new Color(1f, 1f, 1f, 1f);
+
     /**
      * Draws all non-empty locked tiles and active pieces.
      * {@code glowStrengths} sets per-active-piece glow intensity in [0, 1]; {@code null} disables glow.
@@ -125,7 +130,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f, true);
     }
 
     /**
@@ -135,11 +140,27 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows) {
-        drawGlow(board, originX, originY, tileSize, glowStrengths);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f, true);
+    }
+
+    /**
+     * Full drawBoard overload with blocked-piece tinting and active-piece suppression.
+     *
+     * @param blockedWhiteAmt  0 = full gray for blocked pieces; 1 = full white. Interpolated linearly.
+     * @param drawActivePieces When false, active pieces and their glow are not drawn (used post-explosion).
+     */
+    public void drawBoard(Board board, float originX, float originY, float tileSize,
+                          SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows,
+                          float blockedWhiteAmt, boolean drawActivePieces) {
+        if (drawActivePieces) {
+            drawGlow(board, originX, originY, tileSize, glowStrengths);
+        }
         sprites.begin();
         drawLockedTiles(board, originX, originY, tileSize, sprites);
-        drawShadowPieces(board, shadows, originX, originY, tileSize, sprites);
-        drawActivePieces(board, originX, originY, tileSize, sprites);
+        if (drawActivePieces) {
+            drawShadowPieces(board, shadows, originX, originY, tileSize, sprites);
+            drawActivePiecesWithBlocked(board, originX, originY, tileSize, sprites, blockedWhiteAmt);
+        }
         sprites.setColor(Color.WHITE);
         sprites.end();
     }
@@ -522,6 +543,7 @@ public class BoardRenderer {
             if (shadow == null) continue;
             Piece piece = board.getActivePieces().get(i);
             if (piece.tiles == null || piece.location == null || piece.type == Tile.EMPTY) continue;
+            if (piece.isBlockedFromSpawning) continue; // no drop shadow for blocked pieces
 
             // Skip when the shadow is coincident with the piece itself
             if (Math.abs(shadow.locationX - piece.location.x) < 0.01f
@@ -563,16 +585,38 @@ public class BoardRenderer {
 
     private void drawActivePieces(Board board, float originX, float originY, float tileSize,
                                   SpriteBatch sprites) {
+        drawActivePiecesWithBlocked(board, originX, originY, tileSize, sprites, 0f);
+    }
+
+    /**
+     * Draws active pieces; blocked pieces are tinted between gray (blockedWhiteAmt=0)
+     * and white (blockedWhiteAmt=1), while normal pieces use their standard PieceTints colors.
+     */
+    private void drawActivePiecesWithBlocked(Board board, float originX, float originY, float tileSize,
+                                             SpriteBatch sprites, float blockedWhiteAmt) {
         for (Piece piece : board.getActivePieces()) {
             if (piece.tiles == null || piece.location == null || piece.type == Tile.EMPTY) continue;
+            boolean blocked = piece.isBlockedFromSpawning;
             for (int i = 0; i < piece.tiles.length; i++) {
                 float sx = originX + (piece.location.x + piece.tiles[i].x) * tileSize;
                 float sy = originY + (piece.location.y + piece.tiles[i].y) * tileSize;
                 byte connection = piece.tileconnectionstates != null
                     ? piece.tileconnectionstates[i]
                     : Tile.SINGLE_TILE;
-                drawTileBackground(sprites, sx, sy, tileSize, piece.type);
-                drawTile(sprites, sx, sy, tileSize, piece.type, connection);
+                if (blocked) {
+                    float amt = Math.max(0f, Math.min(1f, blockedWhiteAmt));
+                    float r = BLOCKED_GRAY.r + (BLOCKED_WHITE.r - BLOCKED_GRAY.r) * amt;
+                    float g = BLOCKED_GRAY.g + (BLOCKED_WHITE.g - BLOCKED_GRAY.g) * amt;
+                    float bv = BLOCKED_GRAY.b + (BLOCKED_WHITE.b - BLOCKED_GRAY.b) * amt;
+                    // Background: dark gray -> white
+                    sprites.setColor(r * 0.5f, g * 0.5f, bv * 0.5f, 1f);
+                    sprites.draw(tileBackground, sx, sy, tileSize, tileSize);
+                    sprites.setColor(r, g, bv, 1f);
+                    sprites.draw(tileRegions[connection & 0xF], sx, sy, tileSize, tileSize);
+                } else {
+                    drawTileBackground(sprites, sx, sy, tileSize, piece.type);
+                    drawTile(sprites, sx, sy, tileSize, piece.type, connection);
+                }
             }
         }
     }

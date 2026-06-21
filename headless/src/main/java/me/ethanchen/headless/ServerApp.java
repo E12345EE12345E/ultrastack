@@ -14,6 +14,7 @@ import com.badlogic.gdx.utils.Queue;
 import com.esotericsoftware.kryonet.Connection;
 import com.esotericsoftware.kryonet.Server;
 
+import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.NetEndpoints;
@@ -24,6 +25,7 @@ import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.*;
 import me.ethanchen.network.packets.other.*;
 import me.ethanchen.network.packets.s2c.*;
+import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 import me.ethanchen.util.TextSanitizer;
 
 public class ServerApp extends ApplicationAdapter {
@@ -200,6 +202,8 @@ public class ServerApp extends ApplicationAdapter {
             b.ackMoveId = sg.getHighestMoveId(i);
             b.piecesPlaced = sg.getPiecesPlaced();
             b.holdAvailable = sg.computeHoldAvailable(i);
+            b.explodeProgress = sg.getExplodeProgress();
+            b.ownPieceHoldGlow = sg.computeOwnPieceHoldGlow(i);
             switch (sg.getGame().getMode()) {
                 case MULTIPLAYER_SCORE:
                     b.scoreMode = sg.getScoreModeData();
@@ -212,6 +216,28 @@ public class ServerApp extends ApplicationAdapter {
                 broadcastToPlayerUDP(pb, i);
             }
         }
+    }
+
+    /**
+     * Builds and sends an {@link EndGameBroadcast} to all connected players via TCP.
+     * Called by {@link ServerGame#triggerEndGame()} when the game concludes.
+     */
+    public void sendEndGame(boolean win, ScoreModeEndData scoreEnd) {
+        EndGameBroadcast b = new EndGameBroadcast();
+        b.win = win;
+        b.scoreModeEnd = scoreEnd;
+        if (sg.getGame() != null) {
+            b.mode = sg.getGame().getMode();
+        } else {
+            b.mode = GameMode.NONE;
+        }
+        // Build player names ordered by player id (0..n-1)
+        b.playerNames = new String[playerIDs.size()];
+        for (int i = 0; i < playerIDs.size(); i++) {
+            Player p = players.get(i);
+            b.playerNames[i] = (p != null) ? p.username : "";
+        }
+        broadcastToPlayersTCP(b);
     }
 
     private int getPlayerIDKey(int connectionID) {

@@ -13,6 +13,7 @@ import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
+import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class ServerGame {
     private volatile boolean inProgress; public boolean isInProgress() { return inProgress; }
@@ -30,6 +31,25 @@ public class ServerGame {
     // Hold state
     private long lastHoldUsedMs = 0;
     private static final long HOLD_GLOBAL_LOCK_MS = 1000;
+
+    // Blocked-spawn cycling constants
+    private static final float CYCLE_START       = 1.0f;
+    private static final float CYCLE_MULT        = 0.8f;
+    private static final float CYCLE_MIN         = 0.25f;
+    private static final long  COYOTE_MS         = 50L;
+    private static final float EXPLODE_DURATION  = 2.0f;
+    private static final float EXPLODE_MIN_INTERVAL = 0.1f;
+
+    // Per-player blocked-cycling state (re-initialized in startGame)
+    private float[]  timeBetweenNextPiece;
+    private float[]  cycleTimer;
+    private long[]   lastCycleSwitchMs;
+    private byte[]   previousCyclePieceId;
+    private boolean[] wasBlocked;
+
+    // Explode / end-game state
+    private float   explodeCountdown = -1f;
+    private boolean gameEnded        = false;
 
     // MULTIPLAYER_SCORE mode state
     private long totalScore;
@@ -59,6 +79,15 @@ public class ServerGame {
         Arrays.fill(this.highestMoveId, -1);
         // Hold state reset
         lastHoldUsedMs = 0;
+        // Blocked-cycling state reset
+        timeBetweenNextPiece = new float[players];
+        cycleTimer           = new float[players];
+        lastCycleSwitchMs    = new long[players];
+        previousCyclePieceId = new byte[players];
+        wasBlocked           = new boolean[players];
+        Arrays.fill(timeBetweenNextPiece, CYCLE_START);
+        explodeCountdown = -1f;
+        gameEnded        = false;
         // Score-mode state reset
         totalScore = 0;
         glowPlayerId = -1;
@@ -109,7 +138,11 @@ public class ServerGame {
                             pendingParticles.addAll(resultToParticles(result));
                         }
                     } else if (move == MoveType.HOLD) {
-                        if (board.useHold(playerId)) {
+                        Piece currentPiece = board.getActivePieces().size() > playerId
+                                ? board.getActivePieces().get(playerId) : null;
+                        if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
+                            applyBlockedHold(playerId, board);
+                        } else if (board.useHold(playerId)) {
                             lastHoldUsedMs = System.currentTimeMillis();
                         }
                     } else {
@@ -308,9 +341,15 @@ public class ServerGame {
 
     public boolean computeHoldAvailable(int playerId) {
         if (game == null || game.getBoards().isEmpty()) return true;
+        Board board = game.getBoards().get(0);
+        if (board.getActivePieces().size() > playerId
+                && board.getActivePieces().get(playerId).isBlockedFromSpawning) {
+            // Hold during countdown is disabled
+            if (explodeCountdown >= 0f) return false;
+            return canHoldWhileBlocked(playerId);
+        }
         long now = System.currentTimeMillis();
         boolean globalLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < HOLD_GLOBAL_LOCK_MS;
-        Board board = game.getBoards().get(0);
         return !board.isPlayerHoldUsed(playerId) && !globalLock;
     }
 
@@ -368,6 +407,183 @@ public class ServerGame {
         return out;
     }
 
+    // -------------------------------------------------------------------------
+    // Blocked-spawn cycling, hold-while-blocked, and end-game
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns the effective piece-cycling interval for player {@code i}:
+     * - When the explode countdown is active and in its first second, interpolates 0.25 -> 0.1.
+     * - Otherwise returns {@code timeBetweenNextPiece[i]}.
+     */
+    private float effectiveInterval(int i) {
+        if (explodeCountdown >= 0f) {
+            float t = Math.min(explodeCountdown, 1f); // 0..1 over first second
+            return CYCLE_MIN + (EXPLODE_MIN_INTERVAL - CYCLE_MIN) * t;
+        }
+        return timeBetweenNextPiece[i];
+    }
+
+    /**
+     * Returns true when player {@code i}'s blocked piece may be held (i.e., cycling
+     * has reached min interval and no explode countdown is running).
+     */
+    public boolean canHoldWhileBlocked(int i) {
+        if (timeBetweenNextPiece == null || i < 0 || i >= players) return false;
+        return timeBetweenNextPiece[i] <= CYCLE_MIN && explodeCountdown < 0f;
+    }
+
+    public boolean computeOwnPieceHoldGlow(int playerId) {
+        if (game == null || game.getBoards().isEmpty()) return false;
+        Board board = game.getBoards().get(0);
+        if (board.getActivePieces().size() <= playerId) return false;
+        Piece p = board.getActivePieces().get(playerId);
+        return p.isBlockedFromSpawning && canHoldWhileBlocked(playerId);
+    }
+
+    public float getExplodeProgress() {
+        return explodeCountdown;
+    }
+
+    /**
+     * Core per-frame blocked-cycling update.
+     * Called each server tick while the game is in progress and not yet ended.
+     */
+    private void updateBlockedCycling(float dtSec) {
+        if (game == null || game.getBoards().isEmpty()) return;
+        Board board = game.getBoards().get(0);
+        if (board.getActivePieces().isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+
+        for (int i = 0; i < players; i++) {
+            if (i >= board.getActivePieces().size()) continue;
+            Piece piece = board.getActivePieces().get(i);
+            boolean blocked = piece.isBlockedFromSpawning;
+
+            // Detect transition into blocked state
+            if (blocked && !wasBlocked[i]) {
+                timeBetweenNextPiece[i] = CYCLE_START;
+                cycleTimer[i] = 0f;
+            }
+            // Detect transition out of blocked state (freed by external board change)
+            if (!blocked && wasBlocked[i]) {
+                cycleTimer[i] = 0f;
+                // explode countdown reset handled elsewhere
+            }
+            wasBlocked[i] = blocked;
+
+            if (!blocked) continue;
+
+            // Advance the cycle timer
+            cycleTimer[i] += dtSec;
+            float interval = effectiveInterval(i);
+            while (cycleTimer[i] >= interval) {
+                cycleTimer[i] -= interval;
+                // Store previous piece type for coyote-time hold
+                previousCyclePieceId[i] = board.getActivePieces().get(i).type;
+                lastCycleSwitchMs[i] = now;
+                // Advance to next piece in queue
+                board.spawnNextPiece(i);
+                // Tighten the interval (only clamp timeBetweenNextPiece, not during countdown)
+                timeBetweenNextPiece[i] = Math.max(CYCLE_MIN, timeBetweenNextPiece[i] * CYCLE_MULT);
+                // Recalculate interval in case it changed
+                interval = effectiveInterval(i);
+                // Check if newly spawned piece is freed
+                Piece newPiece = board.getActivePieces().get(i);
+                if (!newPiece.isBlockedFromSpawning) {
+                    wasBlocked[i] = false;
+                    cycleTimer[i] = 0f;
+                    if (explodeCountdown >= 0f) {
+                        nearDeathSave();
+                    }
+                    break;
+                }
+            }
+        }
+
+        // --- Explode countdown trigger and advancement ---
+        boolean allBlockedAtMin = players > 0;
+        for (int i = 0; i < players; i++) {
+            if (i >= board.getActivePieces().size()) { allBlockedAtMin = false; break; }
+            Piece p = board.getActivePieces().get(i);
+            if (!p.isBlockedFromSpawning || timeBetweenNextPiece[i] > CYCLE_MIN) {
+                allBlockedAtMin = false;
+                break;
+            }
+        }
+
+        if (allBlockedAtMin && !gameEnded) {
+            if (explodeCountdown < 0f) {
+                explodeCountdown = 0f;
+            }
+            explodeCountdown += dtSec;
+            if (explodeCountdown >= EXPLODE_DURATION) {
+                triggerEndGame();
+            }
+        } else if (!allBlockedAtMin && explodeCountdown >= 0f && !gameEnded) {
+            // Some player became unblocked outside the cycling loop (shouldn't normally happen,
+            // but guard against it to avoid a phantom countdown)
+            explodeCountdown = -1f;
+        }
+    }
+
+    /**
+     * Applies a hold action for a blocked player, with coyote-time support.
+     * The piece swapped into hold is the previous piece if within the coyote window,
+     * otherwise the currently displayed piece.
+     */
+    private void applyBlockedHold(int playerId, Board board) {
+        if (!canHoldWhileBlocked(playerId)) return;
+        if (board.getActivePieces().size() <= playerId) return;
+
+        long now = System.currentTimeMillis();
+        byte currentType = board.getActivePieces().get(playerId).type;
+        // Coyote: if hold was pressed within COYOTE_MS of the last cycle switch,
+        // use the previous piece type instead.
+        byte effectiveType = (lastCycleSwitchMs[playerId] > 0
+                && (now - lastCycleSwitchMs[playerId]) <= COYOTE_MS)
+                ? previousCyclePieceId[playerId]
+                : currentType;
+
+        byte oldHeld = board.getHeldPieceType();
+        board.setHeldPieceType(effectiveType);
+
+        if (oldHeld == 0) {
+            // Hold was empty: advance queue for a new piece
+            board.spawnNextPiece(playerId);
+        } else {
+            // Swap in the previously held piece
+            board.spawnHeldPiece(playerId, oldHeld);
+        }
+
+        // Reset cycling for this player so they get the full 1s on the new piece
+        timeBetweenNextPiece[playerId] = CYCLE_START;
+        cycleTimer[playerId] = 0f;
+        lastHoldUsedMs = System.currentTimeMillis();
+    }
+
+    /**
+     * Called when a player's piece is freed during the explode countdown.
+     * Resets the countdown so the game can continue.
+     */
+    private void nearDeathSave() {
+        explodeCountdown = -1f;
+    }
+
+    /** Fires the end-game sequence: broadcasts EndGameBroadcast and stops the game. */
+    private void triggerEndGame() {
+        if (gameEnded) return;
+        gameEnded = true;
+        ScoreModeEndData scoreEnd = null;
+        if (gamemode == GameMode.MULTIPLAYER_SCORE) {
+            scoreEnd = new ScoreModeEndData();
+            scoreEnd.finalScore = totalScore;
+        }
+        app.sendEndGame(false, scoreEnd);
+        stopGame();
+    }
+
     public void handleDisconnectedPlayer(int id) {
         stopGame(); // for now, because maybe implement temporary bot player or something later
     }
@@ -390,6 +606,9 @@ public class ServerGame {
 
     public void updateScoreMode() { // called if gamemode is a scoring type mode
         game.update(deltatime);
+        if (game.isStarted() && !gameEnded) {
+            updateBlockedCycling(deltatime / 1000f);
+        }
     }
 
     public void sendNetUpdates() {
