@@ -60,6 +60,8 @@ public class Piece {
     public byte[] tileconnectionstates;
     public byte rotation;
     public boolean lastMoveWasRotation = false;
+    /** True when this piece was spawned into a blocked spawn position. */
+    public boolean isBlockedFromSpawning = false;
     public Piece(byte type) {
         this.type = type;
         this.rotation = 0;
@@ -163,12 +165,14 @@ public class Piece {
         np.doubledlocationx = (byte) Math.floor(location.x * 2);
         np.doubledlocationy = (byte) Math.floor(location.y * 2);
         np.rotation = rotation;
+        np.isBlockedFromSpawning = isBlockedFromSpawning;
         return np;
     }
 
     public void updateFromNetPiece(NetPiece p) {
         if (p.type != type) return; // only works if same type
         location.set(p.doubledlocationx*0.5f, p.doubledlocationy*0.5f);
+        isBlockedFromSpawning = p.isBlockedFromSpawning;
         if (p.rotation != rotation) {
             int a = p.rotation - rotation;
             if (a < 0) a += 4;
@@ -192,6 +196,7 @@ public class Piece {
     public static Piece createFromNetPiece(NetPiece p) {
         Piece retval = defaultPiece(p.type);
         retval.location = new Vector2(p.doubledlocationx*0.5f, p.doubledlocationy*0.5f);
+        retval.isBlockedFromSpawning = p.isBlockedFromSpawning;
         switch (p.rotation) {
             case 1:
                 retval.rotateCW();
@@ -272,5 +277,6 @@ public class Piece {
         public byte doubledlocationx; // I and O pieces have centers on 0.5, so location is doubled to become integer and halved on packet arrival
         public byte doubledlocationy;
         public byte rotation;
+        public boolean isBlockedFromSpawning;
     }
 }

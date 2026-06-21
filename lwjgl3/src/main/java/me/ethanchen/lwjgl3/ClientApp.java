@@ -25,6 +25,7 @@ import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.NetEndpoints;
 import me.ethanchen.network.packets.NetworkPacket;
+import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
 public class ClientApp extends ApplicationAdapter {
@@ -50,6 +51,8 @@ public class ClientApp extends ApplicationAdapter {
     private MenuScreen menuScreen;
     private volatile MenuScreen switchToMenu;
     private GameSettings settings;
+    public String[] latestPlayerNames = new String[0];
+    public EndGameBroadcast latestEndGame;
 
     @Override
     public void create() {

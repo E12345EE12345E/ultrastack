@@ -148,6 +148,12 @@ public class ServerApp extends ApplicationAdapter {
             if (wrapper.packet instanceof StartGameRequest) {
                 compressPlayerIDList();
                 System.out.println(playerIDs);
+                
+                String[] currentNames = new String[playerIDs.size()];
+                for (int i = 0; i < playerIDs.size(); i++) {
+                    currentNames[i] = players.get(i).username;
+                }
+
                 for (int i=0; i<playerIDs.size(); i++) {
                     StartGameRequest req = (StartGameRequest) wrapper.packet;
                     sg.startGame(req.gamemode, playerIDs.size(), 5000);
@@ -161,6 +167,7 @@ public class ServerApp extends ApplicationAdapter {
                     b.totalPlayers = (byte) playerIDs.size();
                     b.playerID = (byte) i;
                     b.startTimeMS = System.currentTimeMillis() + 5000;
+                    b.playerNames = currentNames;
                     broadcastToPlayerTCP(b, i);
                 }
             }
@@ -267,5 +274,11 @@ public class ServerApp extends ApplicationAdapter {
         Integer connectionId = playerIDs.get(playerId);
         if (connectionId == null) return;
         server.sendToUDP(connectionId, packet);
+    }
+
+    /** Returns the username of the player with the given id, or null if not found. */
+    public String getPlayerName(int playerId) {
+        Player p = players.get(playerId);
+        return (p != null) ? p.username : null;
     }
 }

@@ -75,10 +75,13 @@ public class MultiplayerLobby extends MenuScreen {
             chat.set(String.join("\n", chatLines));
         }
         if (w.packet instanceof StartGameBroadcast) {
-            app.switchMenu(new GameScreen(app, (StartGameBroadcast)w.packet));
+            StartGameBroadcast b = (StartGameBroadcast)w.packet;
+            app.latestPlayerNames = b.playerNames;
+            app.switchMenu(new GameScreen(app, b));
         }
         if (w.packet instanceof LobbyPlayerListBroadcast) {
             LobbyPlayerListBroadcast p = (LobbyPlayerListBroadcast) w.packet;
+            app.latestPlayerNames = p.playerNames;
             String playerListing = "";
             for (int i=0; i<p.playerNames.length; i++) {
                 playerListing += "p" + (i+1) + ": " + p.playerNames[i] + "\n";

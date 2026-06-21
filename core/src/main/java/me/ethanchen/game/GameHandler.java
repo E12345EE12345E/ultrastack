@@ -142,6 +142,7 @@ public class GameHandler {
     public int getB2b() { return b2b; }
     public int getCombo() { return combo; }
     public int getPreviousComboPlayerId() { return previousComboPlayerId; }
+    public long getStartDelay() { return startDelay; }
 
     /** Resets the gravity accumulator so the next gravity tick is a full interval away. */
     public void resetGravityTimer() {

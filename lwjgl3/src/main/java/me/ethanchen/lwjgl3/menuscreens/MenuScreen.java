@@ -54,6 +54,9 @@ public abstract class MenuScreen extends InputAdapter {
             onEscPressed();
             return true;
         }
+        for (UIElement el : elements) {
+            el.handleKeyDown(keycode);
+        }
         return false;
     }
 

@@ -23,7 +23,12 @@ public class Particle {
          * Floating bonus-multiplier text (one line per bonus).  Rises at constant speed
          * and fades over ~1 s.
          */
-        POPUP_SCORE_MULTIPLIER
+        POPUP_SCORE_MULTIPLIER,
+        /**
+         * Game-over explosion shard for blocked pieces: white square, flies out in all
+         * directions at speed similar to TILE_BREAK but with NO gravity. Fades over ~0.7 s.
+         */
+        PIECE_EXPLODE
     }
 
     public Kind kind;
@@ -92,6 +97,10 @@ public class Particle {
             y += vy * dt;
         } else if (kind == Kind.POPUP_SCORE_MULTIPLIER) {
             y += MULTIPLIER_RISE_SPEED * dt;
+        } else if (kind == Kind.PIECE_EXPLODE) {
+            // No gravity — just drift outward and fade
+            x += vx * dt;
+            y += vy * dt;
         } else {
             x += vx * dt;
             y += vy * dt;

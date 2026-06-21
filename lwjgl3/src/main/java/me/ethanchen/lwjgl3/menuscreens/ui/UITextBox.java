@@ -147,6 +147,36 @@ public class UITextBox extends UIElement {
     }
 
     @Override
+    public void handleKeyDown(int keycode) {
+        if (!focused) return;
+        boolean ctrl = Gdx.input.isKeyPressed(com.badlogic.gdx.Input.Keys.CONTROL_LEFT) || Gdx.input.isKeyPressed(com.badlogic.gdx.Input.Keys.CONTROL_RIGHT);
+        if (ctrl && keycode == com.badlogic.gdx.Input.Keys.C) {
+            if (text != null && text.length() > 0) {
+                Gdx.app.getClipboard().setContents(text);
+            }
+        } else if (ctrl && keycode == com.badlogic.gdx.Input.Keys.V) {
+            String contents = Gdx.app.getClipboard().getContents();
+            if (contents != null) {
+                for (int i = 0; i < contents.length(); i++) {
+                    char c = contents.charAt(i);
+                    if (c >= 32 && c < 127) {
+                        text += c;
+                    }
+                }
+                switch (sanitize) {
+                    case 1:
+                        text = TextSanitizer.sanitizeChat(text);
+                        break;
+                    case 2:
+                        text = TextSanitizer.sanitizeName(text);
+                        break;
+                }
+                out.set(text);
+            }
+        }
+    }
+
+    @Override
     public String toString() {
         return "UITextBox[text=\"" + text + "\" hasNext=" + (next!=null) + "]"; 
     }

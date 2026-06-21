@@ -25,6 +25,8 @@ public abstract class UIElement {
 
     public abstract void handleKeyTyped(char key);
 
+    public void handleKeyDown(int keycode) {}
+
     public void handleDrag(int screenX, int screenY) {}
 
     public void handleRelease(int screenX, int screenY) {}
