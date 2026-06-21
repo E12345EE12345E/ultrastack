@@ -377,9 +377,6 @@ public class GameScreen extends MenuScreen {
 
         // Suppress non-hold moves if blocked; also allow hold only when server says it's available
         boolean blocked = isLocalPlayerBlocked(board);
-        if (blocked) {
-            System.out.println("[DEBUG] blocked=true, type=" + type + ", holdAvailable=" + holdAvailable);
-        }
         if (blocked && type != MoveType.HOLD) return true;
         if (blocked && !holdAvailable) return true;
 

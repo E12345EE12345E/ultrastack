@@ -54,7 +54,6 @@ public class NetworkRegister {
         kryo.register(Piece.NetPiece[].class);
         kryo.register(PieceQueue.NetQueue[].class);
         kryo.register(PieceQueue.BagTypes.class);
-        kryo.register(float[].class);
         kryo.register(NetParticle.class);
         kryo.register(NetParticle[].class);
     }

@@ -194,7 +194,7 @@ public class Board {
     // Piece
 
     public boolean canMovePiece(int id, int xdiff, int ydiff) {
-        if (id > activePieces.size()) return false;
+        if (id < 0 || id >= activePieces.size()) return false;
         Piece p = activePieces.get(id);
         ArrayList<Vector2> checkLocs = new ArrayList<Vector2>();
         for (int i=0; i<p.tiles.length; i++) {
@@ -349,6 +349,7 @@ public class Board {
             // Swap current piece out, spawn the previously held piece
             Piece newPiece = Piece.defaultPiece(oldHeld);
             newPiece.location.add(spawnPositions[playerId]);
+            checkAndMarkBlocked(playerId, newPiece);
             activePieces.set(playerId, newPiece);
         }
         if (playerId < playerHoldUsed.length) playerHoldUsed[playerId] = true;
@@ -505,11 +506,9 @@ public class Board {
             }
         }
 
-        // Spawn replacement before clearing so the queue advances immediately
-        spawnNextPiece(id);
-
-        // Clear and settle
+        // Clear and settle first; spawn afterwards so checkAndMarkBlocked sees the post-clear board
         clearAndSettle(result);
+        spawnNextPiece(id);
 
         return result;
     }
@@ -606,37 +605,18 @@ public class Board {
     /**
      * Checks whether the given piece (already positioned at spawn) collides with any
      * solid board tile or !allowedTiles cell and sets {@code isBlockedFromSpawning} accordingly.
+     * Other active pieces are intentionally not checked here — they can move away and
+     * must not cause false-positive spawn blocks.
      */
     private void checkAndMarkBlocked(int id, Piece piece) {
-        boolean blocked = false;
-        String reason = "";
         for (Vector2 offset : piece.tiles) {
             int mx = (int) Math.floor(piece.location.x + offset.x);
             int my = (int) Math.floor(piece.location.y + offset.y);
-            if (mx < 0 || mx >= width || my < 0 || my >= height) { blocked = true; reason = "OOB("+mx+","+my+")"; break; }
-            if (!allowedTiles[my][mx]) { blocked = true; reason = "!allowed("+mx+","+my+")"; break; }
-            if (board[my][mx].get() != Tile.EMPTY) { blocked = true; reason = "solid("+mx+","+my+")"; break; }
-            // Also check overlap with other active pieces
-            for (int j = 0; j < activePieces.size(); j++) {
-                if (j == id) continue;
-                Piece other = activePieces.get(j);
-                if (other.tiles == null || other.location == null) continue;
-                for (Vector2 ot : other.tiles) {
-                    if (mx == (int)Math.floor(other.location.x + ot.x)
-                            && my == (int)Math.floor(other.location.y + ot.y)) {
-                        blocked = true;
-                        reason = "overlap(piece"+j+","+mx+","+my+")";
-                        break;
-                    }
-                }
-                if (blocked) break;
-            }
-            if (blocked) break;
+            if (mx < 0 || mx >= width || my < 0 || my >= height) { piece.isBlockedFromSpawning = true; return; }
+            if (!allowedTiles[my][mx]) { piece.isBlockedFromSpawning = true; return; }
+            if (board[my][mx].get() != Tile.EMPTY) { piece.isBlockedFromSpawning = true; return; }
         }
-        piece.isBlockedFromSpawning = blocked;
-        if (blocked) {
-            System.out.println("[BLOCKED] player=" + id + " type=" + piece.type + " loc=(" + piece.location.x + "," + piece.location.y + ") reason=" + reason);
-        }
+        piece.isBlockedFromSpawning = false;
     }
 
     /**
