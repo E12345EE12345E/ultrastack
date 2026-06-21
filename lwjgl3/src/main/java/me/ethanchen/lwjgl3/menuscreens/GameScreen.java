@@ -124,12 +124,11 @@ public class GameScreen extends MenuScreen {
         }
 
         if (!pendingMoves.isEmpty()) {
-            if (pendingMoves.size() > 100) {
-                // If network lags or ARR is too fast, prevent buffer overflow by dropping old moves
-                // instead of disconnecting the client. The server does not enforce strictly sequential IDs.
-                while (pendingMoves.size() > 100) {
-                    pendingMoves.remove(0);
-                }
+            if (pendingMoves.size() > 10) {
+                System.out.println("Too many unacknowledged moves (" + pendingMoves.size() + "); disconnecting.");
+                app.disconnect();
+                app.switchMenu(new MainMenu(app));
+                return;
             }
             MoveListRequest req = new MoveListRequest();
             req.ids = new int[pendingMoves.size()];
