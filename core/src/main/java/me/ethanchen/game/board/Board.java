@@ -609,13 +609,12 @@ public class Board {
      */
     private void checkAndMarkBlocked(int id, Piece piece) {
         boolean blocked = false;
-        String reason = "";
         for (Vector2 offset : piece.tiles) {
             int mx = (int) Math.floor(piece.location.x + offset.x);
             int my = (int) Math.floor(piece.location.y + offset.y);
-            if (mx < 0 || mx >= width || my < 0 || my >= height) { blocked = true; reason = "OOB("+mx+","+my+")"; break; }
-            if (!allowedTiles[my][mx]) { blocked = true; reason = "!allowed("+mx+","+my+")"; break; }
-            if (board[my][mx].get() != Tile.EMPTY) { blocked = true; reason = "solid("+mx+","+my+")"; break; }
+            if (mx < 0 || mx >= width || my < 0 || my >= height) { blocked = true; break; }
+            if (!allowedTiles[my][mx]) { blocked = true; break; }
+            if (board[my][mx].get() != Tile.EMPTY) { blocked = true; break; }
             // Also check overlap with other active pieces
             for (int j = 0; j < activePieces.size(); j++) {
                 if (j == id) continue;
@@ -625,7 +624,6 @@ public class Board {
                     if (mx == (int)Math.floor(other.location.x + ot.x)
                             && my == (int)Math.floor(other.location.y + ot.y)) {
                         blocked = true;
-                        reason = "overlap(piece"+j+","+mx+","+my+")";
                         break;
                     }
                 }
@@ -634,9 +632,6 @@ public class Board {
             if (blocked) break;
         }
         piece.isBlockedFromSpawning = blocked;
-        if (blocked) {
-            System.out.println("[BLOCKED] player=" + id + " type=" + piece.type + " loc=(" + piece.location.x + "," + piece.location.y + ") reason=" + reason);
-        }
     }
 
     /**
