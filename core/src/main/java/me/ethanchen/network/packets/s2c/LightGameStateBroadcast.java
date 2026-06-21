@@ -10,6 +10,12 @@ public class LightGameStateBroadcast extends NetworkPacket {
     public int[] piecesPlaced;
     public boolean holdAvailable; // whether the receiving player can currently use hold
 
+    // Blocked-spawn / explode countdown state
+    /** Seconds into the explode countdown [0, 2]; -1 when inactive. */
+    public float explodeProgress = -1f;
+    /** True when this player's own blocked piece has reached min interval and may be held. */
+    public boolean ownPieceHoldGlow = false;
+
     // Mode-specific (null in all modes except the corresponding one)
     public ScoreModeData scoreMode;
 }

@@ -23,7 +23,12 @@ public class Particle {
          * Floating bonus-multiplier text (one line per bonus).  Rises at constant speed
          * and fades over ~1 s.
          */
-        POPUP_SCORE_MULTIPLIER
+        POPUP_SCORE_MULTIPLIER,
+        /**
+         * End-game piece explosion shard.  Solid white square flying outward with no
+         * gravity, fades over its lifetime.
+         */
+        PIECE_EXPLODE
     }
 
     public Kind kind;
@@ -98,6 +103,7 @@ public class Particle {
             if (kind == Kind.TILE_BREAK) {
                 vy += GRAVITY * dt;
             }
+            // PIECE_EXPLODE: no gravity, purely straight-line velocity
         }
     }
 }

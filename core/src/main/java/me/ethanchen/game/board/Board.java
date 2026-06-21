@@ -30,6 +30,7 @@ public class Board {
     public ArrayList<Piece> getActivePieces() { return activePieces; }
     public Piece getActivePiece(int p) { return activePieces.get(p); }
     public byte getHeldPieceType() { return heldPieceType; }
+    public void setHeldPieceType(byte type) { heldPieceType = type; }
     public boolean isPlayerHoldUsed(int id) {
         return playerHoldUsed != null && id >= 0 && id < playerHoldUsed.length && playerHoldUsed[id];
     }
@@ -150,6 +151,7 @@ public class Board {
         for (int i = 0; i < spawnPositions.length; i++) {
             Piece piece = Piece.defaultPiece(pieceQueues[i].takeNext());
             piece.location.add(spawnPositions[i]);
+            piece.isBlockedFromSpawning = isSpawnBlocked(piece);
             activePieces.add(piece);
         }
     }
@@ -322,6 +324,7 @@ public class Board {
             // Swap current piece out, spawn the previously held piece
             Piece newPiece = Piece.defaultPiece(oldHeld);
             newPiece.location.add(spawnPositions[playerId]);
+            newPiece.isBlockedFromSpawning = isSpawnBlocked(newPiece);
             activePieces.set(playerId, newPiece);
         }
         if (playerId < playerHoldUsed.length) playerHoldUsed[playerId] = true;
@@ -352,6 +355,9 @@ public class Board {
 
     public boolean applyMove(int pieceId, MoveType t) {
         if (pieceId < 0 || pieceId >= activePieces.size()) return false;
+        // Blocked pieces may not be moved, rotated, or hard-dropped by normal input.
+        // HOLD while blocked is handled server-side via spawnHeldPiece, not here.
+        if (activePieces.get(pieceId).isBlockedFromSpawning) return false;
         switch (t) {
             case LEFT: return moveLeft(pieceId);
             case RIGHT: return moveRight(pieceId);
@@ -367,6 +373,7 @@ public class Board {
 
     public void doGravityTick() {
         for (int i=0; i<activePieces.size(); i++) {
+            if (activePieces.get(i).isBlockedFromSpawning) continue;
             moveDown(i);
         }
     }
@@ -394,6 +401,7 @@ public class Board {
      */
     public LineClearResult hardDrop(int id) {
         if (id < 0 || id >= activePieces.size()) return null;
+        if (activePieces.get(id).isBlockedFromSpawning) return null;
 
         // Slide down
         int dropDistance = 0;
@@ -570,7 +578,37 @@ public class Board {
         if (id < 0 || id >= pieceQueues.length || id >= spawnPositions.length) return;
         Piece next = Piece.defaultPiece(pieceQueues[id].takeNext());
         next.location.add(spawnPositions[id]);
+        next.isBlockedFromSpawning = isSpawnBlocked(next);
         activePieces.set(id, next);
+    }
+
+    /**
+     * Spawns a piece of {@code type} (from the shared hold slot swap) at {@code spawnPositions[id]}.
+     * Sets the blocked flag appropriately. Used by server-side hold-while-blocked logic.
+     */
+    public void spawnHeldPiece(int id, byte type) {
+        if (id < 0 || id >= spawnPositions.length || id >= activePieces.size()) return;
+        Piece next = Piece.defaultPiece(type);
+        next.location.add(spawnPositions[id]);
+        next.isBlockedFromSpawning = isSpawnBlocked(next);
+        activePieces.set(id, next);
+    }
+
+    /**
+     * Returns true if the given piece overlaps at least one solid tile (out-of-bounds,
+     * disallowed cell, or non-empty board tile) at its current location.
+     * Other active pieces are NOT counted as blockers.
+     */
+    public boolean isSpawnBlocked(Piece p) {
+        if (p == null || p.tiles == null || p.location == null) return false;
+        for (Vector2 offset : p.tiles) {
+            int x = (int) Math.floor(p.location.x + offset.x);
+            int y = (int) Math.floor(p.location.y + offset.y);
+            if (x < 0 || x >= width || y < 0 || y >= height) return true;
+            if (!allowedTiles[y][x]) return true;
+            if (board[y][x] != null && board[y][x].get() != Tile.EMPTY) return true;
+        }
+        return false;
     }
 
     /**

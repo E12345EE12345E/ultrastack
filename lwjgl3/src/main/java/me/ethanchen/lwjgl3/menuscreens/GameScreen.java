@@ -20,6 +20,7 @@ import me.ethanchen.lwjgl3.render.Particle;
 import me.ethanchen.lwjgl3.render.PieceTints;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
+import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.LightGameStateBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
@@ -54,6 +55,15 @@ public class GameScreen extends MenuScreen {
 
     // Hold state (server-authoritative)
     private boolean holdAvailable = true;
+
+    // Blocked-spawn / explode state (server-authoritative)
+    private float latestExplodeProgress = -1f;
+    private boolean ownPieceHoldGlow = false;
+
+    // End-game explosion state
+    private boolean exploded = false;
+    private int fadeTimerMs = 0;
+    private EndGameBroadcast endGamePacket = null;
 
     // Latest score-mode data received from the server (null until first packet arrives)
     private ScoreModeData latestScoreMode;
@@ -98,6 +108,18 @@ public class GameScreen extends MenuScreen {
             if (p.isDead()) pit.remove();
         }
 
+        // End-game fade-to-black
+        if (exploded) {
+            fadeTimerMs += deltatime;
+            if (fadeTimerMs >= 1000 && endGamePacket != null) {
+                EndGameBroadcast pkt = endGamePacket;
+                endGamePacket = null;
+                app.disconnect();
+                app.switchMenu(new EndGameScreen(app, pkt));
+                return;
+            }
+        }
+
         if (!pendingMoves.isEmpty()) {
             if (pendingMoves.size() > 10) {
                 System.out.println("Too many unacknowledged moves (" + pendingMoves.size() + "); disconnecting.");
@@ -134,12 +156,32 @@ public class GameScreen extends MenuScreen {
                     Arrays.fill(glowValues, 0.5f);
                 }
 
-                Board.ShadowInfo[] shadows = new Board.ShadowInfo[board.getActivePieces().size()];
-                for (int i = 0; i < shadows.length; i++) {
-                    shadows[i] = board.getShadow(i);
+                // Override glow for blocked pieces: 0 glow for all blocked, except the
+                // controlling player whose piece reached min interval (show 2f white glow).
+                for (int i = 0; i < board.getActivePieces().size(); i++) {
+                    if (board.getActivePieces().get(i).isBlockedFromSpawning) {
+                        glowValues[i] = 0f;
+                    }
+                }
+                if (ownPieceHoldGlow && playerID >= 0 && playerID < glowValues.length
+                        && board.getActivePieces().size() > playerID
+                        && board.getActivePieces().get(playerID).isBlockedFromSpawning) {
+                    glowValues[playerID] = 2f;
                 }
 
-                BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, glowValues, shadows);
+                // blockedWhiteAmt: ramp from 0->1 during the first second of the explode countdown
+                float blockedWhiteAmt = (latestExplodeProgress >= 0f)
+                        ? Math.min(1f, latestExplodeProgress / 1f) : 0f;
+
+                Board.ShadowInfo[] shadows = new Board.ShadowInfo[board.getActivePieces().size()];
+                if (!exploded) {
+                    for (int i = 0; i < shadows.length; i++) {
+                        shadows[i] = board.getShadow(i);
+                    }
+                }
+
+                BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
+                        glowValues, shadows, blockedWhiteAmt, !exploded);
                 BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
 
                 // Draw repeat-column red highlights
@@ -191,6 +233,20 @@ public class GameScreen extends MenuScreen {
             default:
                 break;
         }
+
+        // Fade-to-black overlay after explosion
+        if (exploded) {
+            float alpha = Math.min(1f, fadeTimerMs / 1000f);
+            com.badlogic.gdx.Gdx.gl.glEnable(com.badlogic.gdx.graphics.GL20.GL_BLEND);
+            com.badlogic.gdx.Gdx.gl.glBlendFunc(com.badlogic.gdx.graphics.GL20.GL_SRC_ALPHA,
+                    com.badlogic.gdx.graphics.GL20.GL_ONE_MINUS_SRC_ALPHA);
+            shapes.begin(com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType.Filled);
+            shapes.setColor(0f, 0f, 0f, alpha);
+            shapes.rect(0, 0, com.badlogic.gdx.Gdx.graphics.getWidth(),
+                    com.badlogic.gdx.Gdx.graphics.getHeight());
+            shapes.end();
+        }
+
         elements.forEach(element -> element.render(shapes, sprites, font));
     }
 
@@ -353,9 +409,47 @@ public class GameScreen extends MenuScreen {
             // Update hold availability
             holdAvailable = p.holdAvailable;
 
+            // Cache blocked / explode state
+            latestExplodeProgress = p.explodeProgress;
+            ownPieceHoldGlow = p.ownPieceHoldGlow;
+
             // Cache score-mode data
             if (p.scoreMode != null) {
                 latestScoreMode = p.scoreMode;
+            }
+        }
+
+        if (w.packet instanceof EndGameBroadcast && !exploded) {
+            EndGameBroadcast egp = (EndGameBroadcast) w.packet;
+            endGamePacket = egp;
+            exploded = true;
+            fadeTimerMs = 0;
+            // Spawn piece-explode particles for every tile of every active piece
+            if (!game.getBoards().isEmpty()) {
+                Board board = game.getBoards().get(0);
+                for (me.ethanchen.game.board.Piece piece : board.getActivePieces()) {
+                    if (piece.tiles == null || piece.location == null) continue;
+                    for (com.badlogic.gdx.math.Vector2 offset : piece.tiles) {
+                        float cx = piece.location.x + offset.x + 0.5f;
+                        float cy = piece.location.y + offset.y + 0.5f;
+                        for (int k = 0; k < 4; k++) {
+                            Particle shard = new Particle();
+                            shard.kind = Particle.Kind.PIECE_EXPLODE;
+                            shard.x = cx;
+                            shard.y = cy;
+                            float angle = particleRng.nextFloat() * (float)(Math.PI * 2);
+                            float speed = 2f + particleRng.nextFloat() * 4f;
+                            shard.vx = (float) Math.cos(angle) * speed;
+                            shard.vy = (float) Math.sin(angle) * speed;
+                            shard.r = 1f;
+                            shard.g = 1f;
+                            shard.b = 1f;
+                            shard.size = 0.18f + particleRng.nextFloat() * 0.14f;
+                            shard.lifetime = 0.4f + particleRng.nextFloat() * 0.2f;
+                            particles.add(shard);
+                        }
+                    }
+                }
             }
         }
 
