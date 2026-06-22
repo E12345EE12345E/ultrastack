@@ -12,6 +12,7 @@ import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
 import me.ethanchen.network.packets.s2c.NetParticle;
+import me.ethanchen.network.packets.s2c.ParticleSpawner;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
@@ -26,6 +27,7 @@ public class ServerGame {
     private int t;
     private int[] highestMoveId;
     private final ArrayList<NetParticle> pendingParticles = new ArrayList<>();
+    private final ArrayList<ParticleSpawner> pendingSpawners = new ArrayList<>();
     private int[] piecesPlaced;
 
     // Hold state
@@ -51,6 +53,11 @@ public class ServerGame {
     private float   explodeCountdown = -1f;
     private boolean gameEnded        = false;
 
+    // Timer state
+    private long gameStartMs;
+    private long gameEndTargetMs;
+    private static final long TIMER_DURATION_MS = 4L * 60 * 1000;
+
     // MULTIPLAYER_SCORE mode state
     private long totalScore;
     private int glowPlayerId;
@@ -74,6 +81,8 @@ public class ServerGame {
         this.players = players;
         this.game = new GameHandler(players);
         this.game.init(gamemode, msToStart);
+        gameStartMs     = System.currentTimeMillis() + msToStart;
+        gameEndTargetMs = gameStartMs + TIMER_DURATION_MS;
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
         Arrays.fill(this.highestMoveId, -1);
@@ -127,15 +136,7 @@ public class ServerGame {
                     if (move == MoveType.HARD_DROP) {
                         LineClearResult result = board.hardDrop(playerId);
                         if (result != null && result.placed) {
-                            piecesPlaced[playerId]++;
-                            switch (gamemode) {
-                                case MULTIPLAYER_SCORE:
-                                    scoreHardDrop(result);
-                                    break;
-                                default:
-                                    break;
-                            }
-                            pendingParticles.addAll(resultToParticles(result));
+                            processPlacement(result);
                         }
                     } else if (move == MoveType.HOLD) {
                         Piece currentPiece = board.getActivePieces().size() > playerId
@@ -147,6 +148,10 @@ public class ServerGame {
                         }
                     } else {
                         board.applyMove(playerId, move);
+                        LineClearResult lockResult = board.tryMovementLock(playerId);
+                        if (lockResult != null && lockResult.placed) {
+                            processPlacement(lockResult);
+                        }
                     }
                 }
             }
@@ -154,13 +159,41 @@ public class ServerGame {
     }
 
     /**
-     * Returns the accumulated particle events and clears the internal list.
+     * Shared post-placement logic: increments the placement counter, scores the result,
+     * and queues particles.  Used by hard drops, movement-overflow locks, and timer locks.
+     */
+    private void processPlacement(LineClearResult result) {
+        piecesPlaced[result.playerId]++;
+        switch (gamemode) {
+            case MULTIPLAYER_SCORE:
+                scoreHardDrop(result);
+                break;
+            default:
+                break;
+        }
+        queueResultParticles(result);
+    }
+
+    /**
+     * Returns the accumulated individual particle events and clears the internal list.
      * Called by {@link ServerApp#sendNetUpdates()} each broadcast cycle.
      */
     public ArrayList<NetParticle> getAndClearPendingParticles() {
         if (pendingParticles.isEmpty()) return null;
         ArrayList<NetParticle> copy = new ArrayList<>(pendingParticles);
         pendingParticles.clear();
+        return copy;
+    }
+
+    /**
+     * Returns the accumulated compact spawner events and clears the internal list.
+     * Called by {@link ServerApp#sendNetUpdates()} each broadcast cycle alongside
+     * {@link #getAndClearPendingParticles()}.
+     */
+    public ArrayList<ParticleSpawner> getAndClearPendingSpawners() {
+        if (pendingSpawners.isEmpty()) return null;
+        ArrayList<ParticleSpawner> copy = new ArrayList<>(pendingSpawners);
+        pendingSpawners.clear();
         return copy;
     }
 
@@ -239,6 +272,10 @@ public class ServerGame {
 
         // --- Update global counters ---
         game.applyClearToCounters(result);
+
+        // --- Gravity ramp: each cleared line speeds up gravity by 50ms ---
+        int newGravity = Math.max(50, game.getGravity() - lines * 50);
+        game.setGravity(newGravity);
     }
 
     private static long baseScore(SpinType spinType, int lines) {
@@ -365,36 +402,55 @@ public class ServerGame {
     // -------------------------------------------------------------------------
 
     /**
-     * Translates a {@link LineClearResult} into {@link NetParticle} spawn events.
+     * Translates a {@link LineClearResult} into compact {@link ParticleSpawner} events and
+     * any remaining individual {@link NetParticle} events, then queues them for the next
+     * broadcast cycle.
+     *
      * <ul>
-     *   <li>Placed cells → FLASH (kind=0) white particles at each locked mino.</li>
-     *   <li>Cleared cells → TILE_BREAK (kind=1) particles of the cleared tile's color.</li>
-     *   <li>Broken cells (landed on allowedTiles=false) → TILE_BREAK particles.</li>
+     *   <li>Placed cells → one {@code TYPE_HARD_DROP} spawner; the client reconstructs the
+     *       FLASH positions from the piece type, anchor, and rotation.</li>
+     *   <li>Each cleared row → one {@code TYPE_LINE_CLEAR} spawner carrying a tile-id array
+     *       of board width; {@code -1} at positions that had no cleared tile.</li>
+     *   <li>Broken cells (landed on allowedTiles=false) → individual TILE_BREAK
+     *       {@link NetParticle} objects (edge-case, not row-aligned).</li>
      * </ul>
      */
-    private ArrayList<NetParticle> resultToParticles(LineClearResult result) {
-        ArrayList<NetParticle> out = new ArrayList<>();
-        // Flash at each successfully locked cell
-        for (int[] cell : result.placedCells) {
-            NetParticle np = new NetParticle();
-            np.boardIndex = 0;
-            np.kind = 0; // FLASH
-            np.tileType = result.pieceType;
-            np.x = cell[0];
-            np.y = cell[1];
-            out.add(np);
+    private void queueResultParticles(LineClearResult result) {
+        // Hard-drop flash: one spawner encodes the whole piece
+        if (!result.placedCells.isEmpty()) {
+            ParticleSpawner ps = new ParticleSpawner();
+            ps.spawnerType = ParticleSpawner.TYPE_HARD_DROP;
+            ps.boardIndex = 0;
+            ps.pieceType = result.pieceType;
+            ps.doubledX = (byte) Math.floor(result.restingCenterX * 2);
+            ps.doubledY = (byte) Math.floor(result.restingCenterY * 2);
+            ps.pieceRotation = result.pieceRotation;
+            pendingSpawners.add(ps);
         }
-        // Tile-break for every cleared cell
-        for (int[] cell : result.clearedCells) {
-            NetParticle np = new NetParticle();
-            np.boardIndex = 0;
-            np.kind = 1; // TILE_BREAK
-            np.tileType = (byte) cell[2];
-            np.x = cell[0];
-            np.y = cell[1];
-            out.add(np);
+
+        // Line-clear tile-break: one spawner per cleared row
+        if (result.clearedRows.length > 0) {
+            Board board = game.getBoards().get(0);
+            int boardWidth = board.bw();
+
+            for (int row : result.clearedRows) {
+                byte[] tileIds = new byte[boardWidth];
+                Arrays.fill(tileIds, (byte) -1);
+                for (int[] cell : result.clearedCells) {
+                    if (cell[1] == row) {
+                        tileIds[cell[0]] = (byte) cell[2];
+                    }
+                }
+                ParticleSpawner ps = new ParticleSpawner();
+                ps.spawnerType = ParticleSpawner.TYPE_LINE_CLEAR;
+                ps.boardIndex = 0;
+                ps.lineY = (byte) row;
+                ps.tileIds = tileIds;
+                pendingSpawners.add(ps);
+            }
         }
-        // Tile-break for cells that landed on a wall
+
+        // Broken cells (mino landed on allowedTiles=false): kept as individual NetParticles
         for (int[] cell : result.brokenCells) {
             NetParticle np = new NetParticle();
             np.boardIndex = 0;
@@ -402,9 +458,8 @@ public class ServerGame {
             np.tileType = (byte) cell[2];
             np.x = cell[0];
             np.y = cell[1];
-            out.add(np);
+            pendingParticles.add(np);
         }
-        return out;
     }
 
     // -------------------------------------------------------------------------
@@ -519,7 +574,7 @@ public class ServerGame {
             }
             explodeCountdown += dtSec;
             if (explodeCountdown >= EXPLODE_DURATION) {
-                triggerEndGame();
+                triggerEndGame(false);
             }
         } else if (!allBlockedAtMin && explodeCountdown >= 0f && !gameEnded) {
             // Some player became unblocked outside the cycling loop (shouldn't normally happen,
@@ -572,15 +627,16 @@ public class ServerGame {
     }
 
     /** Fires the end-game sequence: broadcasts EndGameBroadcast and stops the game. */
-    private void triggerEndGame() {
+    private void triggerEndGame(boolean win) {
         if (gameEnded) return;
         gameEnded = true;
         ScoreModeEndData scoreEnd = null;
         if (gamemode == GameMode.MULTIPLAYER_SCORE) {
             scoreEnd = new ScoreModeEndData();
             scoreEnd.finalScore = totalScore;
+            scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
         }
-        app.sendEndGame(false, scoreEnd);
+        app.sendEndGame(win, scoreEnd);
         stopGame();
     }
 
@@ -606,8 +662,14 @@ public class ServerGame {
 
     public void updateScoreMode() { // called if gamemode is a scoring type mode
         game.update(deltatime);
+        for (LineClearResult r : game.getAndClearPendingLockResults()) {
+            if (r.placed) processPlacement(r);
+        }
         if (game.isStarted() && !gameEnded) {
             updateBlockedCycling(deltatime / 1000f);
+            if (System.currentTimeMillis() >= gameEndTargetMs) {
+                triggerEndGame(true);
+            }
         }
     }
 

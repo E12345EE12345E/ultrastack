@@ -61,6 +61,8 @@ public class Piece {
     public byte rotation;
     public boolean lastMoveWasRotation = false;
     public boolean isBlockedFromSpawning = false;
+    public float lockTime = 0f;
+    public int lockedMovementCounter = 0;
     public Piece(byte type) {
         this.type = type;
         this.rotation = 0;
@@ -256,6 +258,8 @@ public class Piece {
         }
         switch (type) {
             case I:
+                piece.location = new Vector2(0.5f, -0.5f); // differs from base game (1 lower center)
+                break;
             case O:
                 piece.location = new Vector2(0.5f, 0.5f);
                 break;

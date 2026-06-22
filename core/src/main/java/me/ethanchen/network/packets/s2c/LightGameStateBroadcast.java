@@ -16,6 +16,12 @@ public class LightGameStateBroadcast extends NetworkPacket {
     /** True when this player's own blocked piece has reached min interval and may be held. */
     public boolean ownPieceHoldGlow = false;
 
+    // Gravity sync (used for client-side prediction accuracy)
+    /** Current gravity interval in ms (server-authoritative). */
+    public int gravity;
+    /** Server's gravity tick accumulator at broadcast time (ms). */
+    public int gravityTickCounter;
+
     // Mode-specific (null in all modes except the corresponding one)
     public ScoreModeData scoreMode;
 }

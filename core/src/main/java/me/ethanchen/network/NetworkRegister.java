@@ -15,7 +15,7 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class NetworkRegister {
-    public static final byte PROTOCOL_VERSION = 4;
+    public static final byte PROTOCOL_VERSION = 5;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -58,5 +58,7 @@ public class NetworkRegister {
         kryo.register(float[].class);
         kryo.register(NetParticle.class);
         kryo.register(NetParticle[].class);
+        kryo.register(ParticleSpawner.class);
+        kryo.register(ParticleSpawner[].class);
     }
 }

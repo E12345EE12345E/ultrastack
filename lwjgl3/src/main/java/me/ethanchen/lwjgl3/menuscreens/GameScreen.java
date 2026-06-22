@@ -6,6 +6,7 @@ import java.util.Iterator;
 import java.util.Random;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.controllers.Controller;
 import com.badlogic.gdx.controllers.ControllerAdapter;
 import com.badlogic.gdx.controllers.Controllers;
@@ -24,7 +25,9 @@ import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.LightGameStateBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
+import me.ethanchen.network.packets.s2c.ParticleSpawner;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
+import me.ethanchen.game.board.Piece;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 public class GameScreen extends MenuScreen {
@@ -68,6 +71,9 @@ public class GameScreen extends MenuScreen {
     // Latest score-mode data received from the server (null until first packet arrives)
     private ScoreModeData latestScoreMode;
 
+    // Absolute wall-clock ms when the 4-minute countdown expires
+    private long gameEndTargetMs;
+
     public GameScreen(ClientApp app, StartGameBroadcast b) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
         lastUpdateMs = System.currentTimeMillis();
@@ -75,6 +81,7 @@ public class GameScreen extends MenuScreen {
         playerID = b.playerID;
         game = new GameHandler(b.totalPlayers);
         game.init(b.mode, startGameTimer);
+        gameEndTargetMs = b.startTimeMS + 4L * 60 * 1000;
         for (int i = 0; i < b.boards.length; i++) {
             Board board = new Board(b.boards[i]);
             game.getBoards().set(i, board);
@@ -228,6 +235,14 @@ public class GameScreen extends MenuScreen {
                 BoardRenderer.getInstance().drawHoldBox(
                         board.getHeldPieceType(), holdAvailable,
                         holdBoxX, holdBoxY, holdBoxSize, tileSize,
+                        shapes, sprites, font);
+
+                // Draw timer box at the bottom-left of the board (mirrors hold box at the top)
+                float timerBoxSize = tileSize * 4f;
+                float timerBoxX = originX - timerBoxSize - tileSize * 0.5f;
+                float timerBoxY = originY;
+                BoardRenderer.getInstance().drawTimerBox(
+                        gameEndTargetMs, timerBoxX, timerBoxY, timerBoxSize, tileSize,
                         shapes, sprites, font);
                 break;
             default:
@@ -417,6 +432,10 @@ public class GameScreen extends MenuScreen {
             if (p.scoreMode != null) {
                 latestScoreMode = p.scoreMode;
             }
+
+            // Re-anchor gravity to the server's state to prevent prediction drift/jitter
+            game.setGravity(p.gravity);
+            game.setGravityTickCounter(p.gravityTickCounter);
         }
 
         if (w.packet instanceof EndGameBroadcast && !exploded) {
@@ -455,10 +474,58 @@ public class GameScreen extends MenuScreen {
 
         if (w.packet instanceof ParticleBroadcast) {
             ParticleBroadcast p = (ParticleBroadcast) w.packet;
+            if (p.spawners != null) {
+                for (ParticleSpawner ps : p.spawners) {
+                    expandParticleSpawner(ps);
+                }
+            }
             if (p.particles != null) {
                 for (NetParticle np : p.particles) {
                     expandNetParticle(np);
                 }
+            }
+        }
+    }
+
+    /**
+     * Expands a compact {@link ParticleSpawner} into one or more local {@link Particle} objects.
+     *
+     * TYPE_HARD_DROP: reconstructs each mino position from the piece type, anchor, and rotation,
+     *   then emits one FLASH particle per mino cell — identical to what the server previously
+     *   sent as individual FLASH NetParticles.
+     * TYPE_LINE_CLEAR: emits one TILE_BREAK burst per non-(-1) entry in {@code tileIds},
+     *   reproducing the per-cell TILE_BREAK particles the server previously sent individually.
+     */
+    private void expandParticleSpawner(ParticleSpawner ps) {
+        if (ps.spawnerType == ParticleSpawner.TYPE_HARD_DROP) {
+            Piece.NetPiece netPiece = new Piece.NetPiece();
+            netPiece.type = ps.pieceType;
+            netPiece.doubledlocationx = ps.doubledX;
+            netPiece.doubledlocationy = ps.doubledY;
+            netPiece.rotation = ps.pieceRotation;
+            Piece piece = Piece.createFromNetPiece(netPiece);
+            for (Vector2 tile : piece.tiles) {
+                int cx = (int) Math.floor(piece.location.x + tile.x);
+                int cy = (int) Math.floor(piece.location.y + tile.y);
+                NetParticle flash = new NetParticle();
+                flash.boardIndex = ps.boardIndex;
+                flash.kind = 0; // FLASH
+                flash.tileType = ps.pieceType;
+                flash.x = cx;
+                flash.y = cy;
+                expandNetParticle(flash);
+            }
+        } else if (ps.spawnerType == ParticleSpawner.TYPE_LINE_CLEAR) {
+            if (ps.tileIds == null) return;
+            for (int x = 0; x < ps.tileIds.length; x++) {
+                if (ps.tileIds[x] == -1) continue;
+                NetParticle tileBreak = new NetParticle();
+                tileBreak.boardIndex = ps.boardIndex;
+                tileBreak.kind = 1; // TILE_BREAK
+                tileBreak.tileType = ps.tileIds[x];
+                tileBreak.x = x;
+                tileBreak.y = ps.lineY;
+                expandNetParticle(tileBreak);
             }
         }
     }

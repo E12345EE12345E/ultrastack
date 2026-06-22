@@ -57,10 +57,6 @@ public class Board {
                 height = 24;
                 allowedTiles = new boolean[height][width];
                 for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                for (int i=21; i<24; i++) {
-                    allowedTiles[i][4] = false;
-                    allowedTiles[i][5] = false;
-                }
                 board = emptyBoard();
                 spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20)};
                 pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
@@ -72,12 +68,12 @@ public class Board {
                 height = 24;
                 allowedTiles = new boolean[height][width];
                 for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                for (int i=21; i<24; i++) {
+                /*for (int i=21; i<24; i++) {
                     allowedTiles[i][4] = false;
                     allowedTiles[i][5] = false;
                     allowedTiles[i][10] = false;
                     allowedTiles[i][11] = false;
-                }
+                }*/
                 board = emptyBoard();
                 spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20), new Vector2(13, 20)};
                 pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
@@ -89,14 +85,6 @@ public class Board {
                 height = 24;
                 allowedTiles = new boolean[height][width];
                 for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                for (int i=21; i<24; i++) {
-                    allowedTiles[i][4] = false;
-                    allowedTiles[i][5] = false;
-                    allowedTiles[i][10] = false;
-                    allowedTiles[i][11] = false;
-                    allowedTiles[i][16] = false;
-                    allowedTiles[i][17] = false;
-                }
                 board = emptyBoard();
                 spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20), new Vector2(13, 20), new Vector2(19, 20)};
                 pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
@@ -193,6 +181,7 @@ public class Board {
     public boolean moveLeft(int id) {
         if (canMovePiece(id, -1, 0)) {
             Piece p = activePieces.get(id);
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.location.add(-1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -203,6 +192,7 @@ public class Board {
     public boolean moveRight(int id) {
         if (canMovePiece(id, 1, 0)) {
             Piece p = activePieces.get(id);
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.location.add(1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -213,6 +203,7 @@ public class Board {
     public boolean moveDown(int id) {
         if (canMovePiece(id, 0, -1)) {
             Piece p = activePieces.get(id);
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.location.add(0, -1);
             p.lastMoveWasRotation = false;
             return true;
@@ -225,12 +216,14 @@ public class Board {
         byte fromRotation = p.rotation;
         p.rotateCW();
         if (canMovePiece(id, 0, 0)) {
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
         }
         Vector2[] kicks = kickTableFor(p.type);
         if (kicks != null && tryKicks(id, fromRotation * 2, kicks)) {
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -244,6 +237,7 @@ public class Board {
         byte fromRotation = p.rotation;
         p.rotateCCW();
         if (canMovePiece(id, 0, 0)) {
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -251,6 +245,7 @@ public class Board {
         Vector2[] kicks = kickTableFor(p.type);
         int row = (fromRotation == 0) ? 7 : fromRotation * 2 - 1;
         if (kicks != null && tryKicks(id, row, kicks)) {
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -336,6 +331,7 @@ public class Board {
         byte fromRotation = p.rotation;
         p.rotate180();
         if (canMovePiece(id, 0, 0)) {
+            if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
             p.rotateTexCW(); p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -344,6 +340,7 @@ public class Board {
         if (kicks180 != null) {
             int stride = (p.type == Piece.I) ? 1 : 5;
             if (tryKicks180(id, fromRotation, kicks180, stride)) {
+                if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
                 p.rotateTexCW(); p.rotateTexCW();
                 p.lastMoveWasRotation = true;
                 return true;
@@ -419,6 +416,7 @@ public class Board {
         result.restingCenterX = p.location.x;
         result.restingCenterY = p.location.y;
         result.pieceRotation = p.rotation;
+        result.manual = true;
 
         // Check for solid support (floor, board tile, or disallowed cell below each mino)
         boolean hasSolidSupport = false;
@@ -492,6 +490,152 @@ public class Board {
         clearAndSettle(result);
 
         return result;
+    }
+
+    /**
+     * Returns true if piece {@code id} currently has solid support directly below at
+     * least one of its minoes (floor, {@code allowedTiles=false} barrier, or non-empty
+     * board tile).  Other active pieces are NOT counted as solid support — this mirrors
+     * the {@code hasSolidSupport} check inside {@link #hardDrop(int)}.
+     */
+    private boolean hasSolidSupportNow(int id) {
+        Piece p = activePieces.get(id);
+        for (Vector2 offset : p.tiles) {
+            int mx = (int) Math.floor(p.location.x + offset.x);
+            int my = (int) Math.floor(p.location.y + offset.y);
+            int below = my - 1;
+            if (below < 0) return true;
+            if (mx >= 0 && mx < width && below >= 0 && below < height) {
+                if (!allowedTiles[below][mx]) return true;
+                if (board[below][mx].get() != Tile.EMPTY) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Locks piece {@code id} in-place (no drop) — identical to {@link #hardDrop(int)}
+     * but skips the slide-down step.  Sets {@code result.manual = false}.
+     * Returns {@code null} if the id is out of range or the piece is spawn-blocked.
+     */
+    public LineClearResult lockDrop(int id) {
+        if (id < 0 || id >= activePieces.size()) return null;
+        Piece p = activePieces.get(id);
+        if (p.isBlockedFromSpawning) return null;
+
+        LineClearResult result = new LineClearResult();
+        result.playerId = id;
+        result.pieceType = p.type;
+        result.restingX = (int) Math.floor(p.location.x);
+        result.restingY = (int) Math.floor(p.location.y);
+        result.restingCenterX = p.location.x;
+        result.restingCenterY = p.location.y;
+        result.pieceRotation = p.rotation;
+        result.manual = false;
+
+        // Solid-support check (same rules as hardDrop)
+        boolean hasSolidSupport = false;
+        for (Vector2 offset : p.tiles) {
+            int mx = (int) Math.floor(p.location.x + offset.x);
+            int my = (int) Math.floor(p.location.y + offset.y);
+            int below = my - 1;
+            if (below < 0) { hasSolidSupport = true; break; }
+            if (mx >= 0 && mx < width && below >= 0 && below < height) {
+                if (!allowedTiles[below][mx]) { hasSolidSupport = true; break; }
+                if (board[below][mx].get() != Tile.EMPTY) { hasSolidSupport = true; break; }
+            }
+        }
+
+        if (!hasSolidSupport) {
+            result.placed = false;
+            return result;
+        }
+
+        result.placed = true;
+        if (playerHoldUsed != null && id < playerHoldUsed.length) playerHoldUsed[id] = false;
+
+        // Spin detection: dropDistance is 0 by definition for an in-place lock
+        SpinType spinType = SpinType.NONE;
+        if (p.lastMoveWasRotation) {
+            int px = (int) Math.floor(p.location.x);
+            int py = (int) Math.floor(p.location.y);
+            if (p.type == Piece.T) {
+                int[] b1 = rotateOffset(-1, -1, p.rotation), b2 = rotateOffset(1, -1, p.rotation);
+                int[] f1 = rotateOffset(-1,  1, p.rotation), f2 = rotateOffset(1,  1, p.rotation);
+                int back  = (isSolid(px + b1[0], py + b1[1]) ? 1 : 0) + (isSolid(px + b2[0], py + b2[1]) ? 1 : 0);
+                int front = (isSolid(px + f1[0], py + f1[1]) ? 1 : 0) + (isSolid(px + f2[0], py + f2[1]) ? 1 : 0);
+                if (front == 2 && back >= 1) {
+                    spinType = SpinType.T_SPIN;
+                } else if (back == 2 && front == 1) {
+                    spinType = SpinType.T_SPIN_MINI;
+                } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
+                        && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
+                    spinType = SpinType.T_SPIN_MINI;
+                }
+            } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
+                    && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
+                spinType = (p.type == Piece.I3 || p.type == Piece.L3)
+                        ? SpinType.SMALL_SPIN : SpinType.ALL_SPIN;
+            }
+        }
+        result.spinType = spinType;
+
+        for (int i = 0; i < p.tiles.length; i++) {
+            int mx = (int) Math.floor(p.location.x + p.tiles[i].x);
+            int my = (int) Math.floor(p.location.y + p.tiles[i].y);
+            if (mx < 0 || mx >= width || my < 0 || my >= height) continue;
+            if (!allowedTiles[my][mx]) {
+                result.brokenCells.add(new int[]{mx, my, p.type});
+            } else {
+                byte conn = (p.tileconnectionstates != null && i < p.tileconnectionstates.length)
+                    ? p.tileconnectionstates[i] : Tile.SINGLE_TILE;
+                board[my][mx].set(p.type, conn);
+                result.placedCells.add(new int[]{mx, my});
+            }
+        }
+
+        spawnNextPiece(id);
+        clearAndSettle(result);
+
+        return result;
+    }
+
+    /**
+     * If piece {@code id} has moved more than 15 times while grounded ({@code lockedMovementCounter > 15})
+     * AND currently has solid support, locks it immediately via {@link #lockDrop(int)}.
+     * Returns the {@link LineClearResult} if a lock occurred, or {@code null} otherwise.
+     */
+    public LineClearResult tryMovementLock(int id) {
+        if (id < 0 || id >= activePieces.size()) return null;
+        Piece p = activePieces.get(id);
+        if (p.lockedMovementCounter > 15 && hasSolidSupportNow(id))
+            return lockDrop(id);
+        return null;
+    }
+
+    /**
+     * Advances lock timers for all active pieces by {@code deltaMs} milliseconds.
+     * Pieces with solid support accumulate time; pieces without solid support are reset.
+     * Any piece whose timer reaches 500 ms is locked in-place via {@link #lockDrop(int)}.
+     *
+     * @return list of {@link LineClearResult} for any pieces that were auto-locked this tick
+     */
+    public ArrayList<LineClearResult> updateLockTimers(int deltaMs) {
+        ArrayList<LineClearResult> results = new ArrayList<>();
+        for (int i = 0; i < activePieces.size(); i++) {
+            Piece p = activePieces.get(i);
+            if (p.isBlockedFromSpawning) continue;
+            if (hasSolidSupportNow(i)) {
+                p.lockTime += deltaMs;
+                if (p.lockTime >= 500f) {
+                    LineClearResult r = lockDrop(i);
+                    if (r != null) results.add(r);
+                }
+            } else {
+                p.lockTime = 0f;
+            }
+        }
+        return results;
     }
 
     /**

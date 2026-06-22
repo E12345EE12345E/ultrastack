@@ -434,6 +434,52 @@ public class BoardRenderer {
         }
     }
 
+    /**
+     * Draws a countdown timer box at the given position, styled to match the hold box.
+     * Shows a "TIME" label at the top and the remaining MM:SS centered below.
+     */
+    public void drawTimerBox(long endTargetMs, float x, float y, float boxSize, float tileSize,
+                             ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
+        // White outline box
+        shapes.begin(ShapeRenderer.ShapeType.Line);
+        shapes.setColor(Color.WHITE);
+        shapes.rect(x, y, boxSize, boxSize);
+        shapes.end();
+
+        GlyphLayout layout = new GlyphLayout();
+        float savedX = font.getScaleX(), savedY = font.getScaleY();
+        font.getData().setScale(1f);
+        float lh = font.getData().lineHeight;
+        float fs = 0.6f * (tileSize / lh);
+        font.getData().setScale(fs);
+
+        // "TIME" label near the top of the box
+        layout.setText(font, "TIME");
+        float labelX = x + (boxSize - layout.width) * 0.5f;
+        float labelY = y + boxSize - layout.height * 0.3f;
+        sprites.begin();
+        font.setColor(Color.WHITE);
+        font.draw(sprites, "TIME", labelX, labelY);
+        sprites.end();
+
+        // MM:SS remaining, centered in the lower portion
+        long remaining = Math.max(0, endTargetMs - System.currentTimeMillis());
+        long mins = remaining / 60000;
+        long secs = (remaining % 60000) / 1000;
+        String timeText = mins + ":" + String.format("%02d", secs);
+        float timeFs = 0.75f * (tileSize / lh);
+        font.getData().setScale(timeFs);
+        layout.setText(font, timeText);
+        float timeX = x + (boxSize - layout.width) * 0.5f;
+        float timeY = y + boxSize * 0.42f + layout.height * 0.5f;
+        sprites.begin();
+        font.setColor(Color.WHITE);
+        font.draw(sprites, timeText, timeX, timeY);
+        sprites.end();
+
+        font.getData().setScale(savedX, savedY);
+    }
+
     public void dispose() {
         tileSheet.dispose();
         tileBackground.dispose();

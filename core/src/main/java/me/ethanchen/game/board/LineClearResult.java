@@ -65,6 +65,12 @@ public class LineClearResult {
     /** Spin type detected at the moment of placement. */
     public SpinType spinType = SpinType.NONE;
 
+    /**
+     * True when the piece was locked by the player via an explicit hard drop;
+     * false when it was auto-locked by the server (lock delay expiry or movement overflow).
+     */
+    public boolean manual = true;
+
     /** Convenience: number of rows cleared by this drop. */
     public int numClearedRows() {
         return clearedRows.length;

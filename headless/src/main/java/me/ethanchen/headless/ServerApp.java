@@ -184,12 +184,16 @@ public class ServerApp extends ApplicationAdapter {
     }
 
     public void sendNetUpdates() {
-        // Collect particles once and build a shared broadcast object.
+        // Collect particles and spawners once and build a shared broadcast object.
         ArrayList<NetParticle> particles = sg.getAndClearPendingParticles();
+        ArrayList<ParticleSpawner> spawners = sg.getAndClearPendingSpawners();
         ParticleBroadcast pb = null;
-        if (particles != null && !particles.isEmpty()) {
+        boolean hasParticles = particles != null && !particles.isEmpty();
+        boolean hasSpawners = spawners != null && !spawners.isEmpty();
+        if (hasParticles || hasSpawners) {
             pb = new ParticleBroadcast();
-            pb.particles = particles.toArray(new NetParticle[0]);
+            if (hasParticles) pb.particles = particles.toArray(new NetParticle[0]);
+            if (hasSpawners) pb.spawners = spawners.toArray(new ParticleSpawner[0]);
         }
         // Pre-build board snapshots shared across all per-player packets.
         Board.NetBoardLight[] boardSnapshots = new Board.NetBoardLight[sg.getGame().getBoards().size()];
@@ -204,6 +208,8 @@ public class ServerApp extends ApplicationAdapter {
             b.holdAvailable = sg.computeHoldAvailable(i);
             b.explodeProgress = sg.getExplodeProgress();
             b.ownPieceHoldGlow = sg.computeOwnPieceHoldGlow(i);
+            b.gravity = sg.getGame().getGravity();
+            b.gravityTickCounter = sg.getGame().getGravityTickCounter();
             switch (sg.getGame().getMode()) {
                 case MULTIPLAYER_SCORE:
                     b.scoreMode = sg.getScoreModeData();

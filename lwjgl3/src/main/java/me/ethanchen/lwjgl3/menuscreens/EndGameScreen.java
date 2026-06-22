@@ -23,10 +23,15 @@ public class EndGameScreen extends MenuScreen {
             }
         }
 
-        // Score-mode final score
+        // Score-mode final score and time survived
         if (pkt.mode == GameMode.MULTIPLAYER_SCORE && pkt.scoreModeEnd != null) {
             double scoreY = startY - (pkt.playerNames != null ? pkt.playerNames.length : 0) * stepY - 0.04;
             elements.add(new UIText(0.5, scoreY, "Final Score: " + pkt.scoreModeEnd.finalScore, 2.5));
+            long ms = pkt.scoreModeEnd.timeSurvivedMs;
+            long mins = ms / 60000;
+            long secs = (ms % 60000) / 1000;
+            String timeText = "Time: " + mins + ":" + String.format("%02d", secs);
+            elements.add(new UIText(0.5, scoreY - stepY, timeText, 2.5));
         }
 
         elements.add(new UIButton(0.5, 0.15, 0.4, 0.1, "Back to Menu",

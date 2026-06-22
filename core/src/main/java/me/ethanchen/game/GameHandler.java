@@ -14,6 +14,7 @@ public class GameHandler {
     private int gravity;
     private long startDelay;
     private boolean started;
+    private ArrayList<LineClearResult> pendingLockResults = new ArrayList<>();
 
     // Global counters shared across all game modes
     private int b2b = 0;
@@ -33,7 +34,7 @@ public class GameHandler {
             case NONE:
                 break;
             case MULTIPLAYER_SCORE:
-                gravity = 400;
+                gravity = 1000;
                 if (numPlayers == 2) {
                     boards.add(new Board(Board.Presets.STANDARD_DUO));
                 } else if (numPlayers == 3) {
@@ -64,6 +65,7 @@ public class GameHandler {
                 break;
             case MULTIPLAYER_SCORE:
                 doGravity(deltaTime);
+                doLockTimers(deltaTime);
         }
     }
 
@@ -80,6 +82,22 @@ public class GameHandler {
         for (Board b : boards) {
             b.doGravityTick();
         }
+    }
+
+    private void doLockTimers(int deltaTime) {
+        if (!started) return;
+        for (Board b : boards)
+            pendingLockResults.addAll(b.updateLockTimers(deltaTime));
+    }
+
+    /**
+     * Returns all auto-lock results accumulated since the last call and clears the list.
+     */
+    public ArrayList<LineClearResult> getAndClearPendingLockResults() {
+        if (pendingLockResults.isEmpty()) return new ArrayList<>();
+        ArrayList<LineClearResult> copy = new ArrayList<>(pendingLockResults);
+        pendingLockResults.clear();
+        return copy;
     }
 
     /**
@@ -146,5 +164,17 @@ public class GameHandler {
     /** Resets the gravity accumulator so the next gravity tick is a full interval away. */
     public void resetGravityTimer() {
         gravityTickCounter = 0;
+    }
+
+    public void setGravity(int g) {
+        gravity = g;
+    }
+
+    public int getGravityTickCounter() {
+        return gravityTickCounter;
+    }
+
+    public void setGravityTickCounter(int c) {
+        gravityTickCounter = c;
     }
 }

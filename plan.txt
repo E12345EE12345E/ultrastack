@@ -1,9 +1,4 @@
-spawn blocking
-dying
-piece locking
-
 pause menu
 game doesnt crash on other player dc
-win/lose screen
 
-particles sent as particleSpawner (one object) instead of individual
+other gamemodes
