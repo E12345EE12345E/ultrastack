@@ -2,3 +2,5 @@ pause menu
 game doesnt crash on other player dc
 
 other gamemodes
+
+ability to highlight self / show other player names

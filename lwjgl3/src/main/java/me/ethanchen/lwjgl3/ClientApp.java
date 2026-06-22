@@ -138,7 +138,10 @@ public class ClientApp extends ApplicationAdapter {
     }
 
     public void disconnect() {
-        if (netClient != null) netClient.close();
+        if (netClient == null) return;
+        Thread t = new Thread(() -> netClient.close(), "net-disconnect");
+        t.setDaemon(true);
+        t.start();
     }
 
     public void setConnectionCredentials(String newName, long credential) {

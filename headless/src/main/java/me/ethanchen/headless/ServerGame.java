@@ -273,8 +273,11 @@ public class ServerGame {
         // --- Update global counters ---
         game.applyClearToCounters(result);
 
-        // --- Gravity ramp: each cleared line speeds up gravity by 50ms ---
-        int newGravity = Math.max(50, game.getGravity() - lines * 50);
+        // --- Gravity ramp: each cleared line speeds up gravity ---
+        int newGravity = game.getGravity();
+        for (int i = 0; i < lines; i++) {
+            newGravity = (int) Math.max(50, newGravity * 0.95);
+        }
         game.setGravity(newGravity);
     }
 
