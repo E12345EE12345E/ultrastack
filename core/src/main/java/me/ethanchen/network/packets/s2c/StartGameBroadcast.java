@@ -10,4 +10,5 @@ public class StartGameBroadcast extends NetworkPacket {
     public byte totalPlayers;
     public byte playerID; // id is resent since it might have changed
     public long startTimeMS;
+    public String[] playerNames;
 }

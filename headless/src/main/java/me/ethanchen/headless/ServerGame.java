@@ -11,8 +11,10 @@ import me.ethanchen.game.board.LineClearResult;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
+import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
@@ -28,6 +30,8 @@ public class ServerGame {
     private int[] highestMoveId;
     private final ArrayList<NetParticle> pendingParticles = new ArrayList<>();
     private final ArrayList<ParticleSpawner> pendingSpawners = new ArrayList<>();
+    private final ArrayList<PlacementSoundBroadcast> pendingPlacementSounds = new ArrayList<>();
+    private final ArrayList<HoldSoundBroadcast> pendingHoldSounds = new ArrayList<>();
     private int[] piecesPlaced;
 
     // Hold state
@@ -145,6 +149,9 @@ public class ServerGame {
                             applyBlockedHold(playerId, board);
                         } else if (board.useHold(playerId)) {
                             lastHoldUsedMs = System.currentTimeMillis();
+                            HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+                            hsb.playerId = (byte) playerId;
+                            pendingHoldSounds.add(hsb);
                         }
                     } else {
                         board.applyMove(playerId, move);
@@ -164,6 +171,7 @@ public class ServerGame {
      */
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
+        int priorCombo = game.getCombo();
         switch (gamemode) {
             case MULTIPLAYER_SCORE:
                 scoreHardDrop(result);
@@ -171,6 +179,7 @@ public class ServerGame {
             default:
                 break;
         }
+        queuePlacementSound(result, priorCombo);
         queueResultParticles(result);
     }
 
@@ -195,6 +204,50 @@ public class ServerGame {
         ArrayList<ParticleSpawner> copy = new ArrayList<>(pendingSpawners);
         pendingSpawners.clear();
         return copy;
+    }
+
+    /** Returns accumulated placement-sound events and clears the list. */
+    public ArrayList<PlacementSoundBroadcast> getAndClearPendingPlacementSounds() {
+        if (pendingPlacementSounds.isEmpty()) return null;
+        ArrayList<PlacementSoundBroadcast> copy = new ArrayList<>(pendingPlacementSounds);
+        pendingPlacementSounds.clear();
+        return copy;
+    }
+
+    /** Returns accumulated hold-sound events and clears the list. */
+    public ArrayList<HoldSoundBroadcast> getAndClearPendingHoldSounds() {
+        if (pendingHoldSounds.isEmpty()) return null;
+        ArrayList<HoldSoundBroadcast> copy = new ArrayList<>(pendingHoldSounds);
+        pendingHoldSounds.clear();
+        return copy;
+    }
+
+    /**
+     * Builds and queues a {@link PlacementSoundBroadcast} for the given placement result.
+     *
+     * @param priorCombo the combo counter value captured <em>before</em> applyClearToCounters ran
+     */
+    private void queuePlacementSound(LineClearResult result, int priorCombo) {
+        PlacementSoundBroadcast psb = new PlacementSoundBroadcast();
+        psb.playerId = (byte) result.playerId;
+
+        int lines = result.numClearedRows();
+        switch (result.spinType) {
+            case T_SPIN:
+            case T_SPIN_MINI:
+                psb.spinType = 2;
+                break;
+            case ALL_SPIN:
+            case SMALL_SPIN:
+                psb.spinType = 3;
+                break;
+            default:
+                psb.spinType = (lines == 4) ? (byte) 1 : (byte) 0;
+                break;
+        }
+
+        psb.combo = (lines > 0) ? (byte) priorCombo : (byte) -1;
+        pendingPlacementSounds.add(psb);
     }
 
     // -------------------------------------------------------------------------
@@ -619,6 +672,9 @@ public class ServerGame {
         timeBetweenNextPiece[playerId] = CYCLE_START;
         cycleTimer[playerId] = 0f;
         lastHoldUsedMs = System.currentTimeMillis();
+        HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+        hsb.playerId = (byte) playerId;
+        pendingHoldSounds.add(hsb);
     }
 
     /**

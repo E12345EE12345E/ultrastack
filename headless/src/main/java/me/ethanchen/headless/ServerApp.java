@@ -163,6 +163,11 @@ public class ServerApp extends ApplicationAdapter {
                     b.totalPlayers = (byte) playerIDs.size();
                     b.playerID = (byte) i;
                     b.startTimeMS = System.currentTimeMillis() + 5000;
+                    b.playerNames = new String[playerIDs.size()];
+                    for (int j = 0; j < playerIDs.size(); j++) {
+                        Player p = players.get(j);
+                        b.playerNames[j] = (p != null) ? p.username : "";
+                    }
                     broadcastToPlayerTCP(b, i);
                 }
             }
@@ -194,6 +199,20 @@ public class ServerApp extends ApplicationAdapter {
             pb = new ParticleBroadcast();
             if (hasParticles) pb.particles = particles.toArray(new NetParticle[0]);
             if (hasSpawners) pb.spawners = spawners.toArray(new ParticleSpawner[0]);
+        }
+
+        // Sound broadcasts are sent via TCP for guaranteed delivery.
+        ArrayList<PlacementSoundBroadcast> placementSounds = sg.getAndClearPendingPlacementSounds();
+        if (placementSounds != null) {
+            for (PlacementSoundBroadcast psb : placementSounds) {
+                broadcastToPlayersTCP(psb);
+            }
+        }
+        ArrayList<HoldSoundBroadcast> holdSounds = sg.getAndClearPendingHoldSounds();
+        if (holdSounds != null) {
+            for (HoldSoundBroadcast hsb : holdSounds) {
+                broadcastToPlayersTCP(hsb);
+            }
         }
         // Pre-build board snapshots shared across all per-player packets.
         Board.NetBoardLight[] boardSnapshots = new Board.NetBoardLight[sg.getGame().getBoards().size()];

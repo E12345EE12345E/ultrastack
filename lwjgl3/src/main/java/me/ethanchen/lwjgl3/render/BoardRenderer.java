@@ -435,10 +435,11 @@ public class BoardRenderer {
     }
 
     /**
-     * Draws a countdown timer box at the given position, styled to match the hold box.
-     * Shows a "TIME" label at the top and the remaining MM:SS centered below.
+     * Draws a combined countdown timer + score box at the given position, styled to match
+     * the hold box. Shows a "TIME" label at the top, the remaining MM:SS in the middle, and
+     * the current score near the bottom. The timer is capped at 4:00.
      */
-    public void drawTimerBox(long endTargetMs, float x, float y, float boxSize, float tileSize,
+    public void drawTimerBox(long endTargetMs, long score, float x, float y, float boxSize, float tileSize,
                              ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
         // White outline box
         shapes.begin(ShapeRenderer.ShapeType.Line);
@@ -450,31 +451,43 @@ public class BoardRenderer {
         float savedX = font.getScaleX(), savedY = font.getScaleY();
         font.getData().setScale(1f);
         float lh = font.getData().lineHeight;
-        float fs = 0.6f * (tileSize / lh);
-        font.getData().setScale(fs);
 
         // "TIME" label near the top of the box
+        float labelFs = 0.6f * (tileSize / lh);
+        font.getData().setScale(labelFs);
         layout.setText(font, "TIME");
         float labelX = x + (boxSize - layout.width) * 0.5f;
-        float labelY = y + boxSize - layout.height * 0.3f;
+        float labelY = y + boxSize - layout.height * 0.15f;
         sprites.begin();
         font.setColor(Color.WHITE);
         font.draw(sprites, "TIME", labelX, labelY);
         sprites.end();
 
-        // MM:SS remaining, centered in the lower portion
-        long remaining = Math.max(0, endTargetMs - System.currentTimeMillis());
+        // MM:SS remaining (capped at 4:00), centered in the upper-middle portion
+        long remaining = Math.min(4L * 60 * 1000, Math.max(0, endTargetMs - System.currentTimeMillis()));
         long mins = remaining / 60000;
         long secs = (remaining % 60000) / 1000;
         String timeText = mins + ":" + String.format("%02d", secs);
-        float timeFs = 0.75f * (tileSize / lh);
+        float timeFs = 0.8f * (tileSize / lh);
         font.getData().setScale(timeFs);
         layout.setText(font, timeText);
         float timeX = x + (boxSize - layout.width) * 0.5f;
-        float timeY = y + boxSize * 0.42f + layout.height * 0.5f;
+        float timeY = y + boxSize * 0.62f + layout.height * 0.5f;
         sprites.begin();
         font.setColor(Color.WHITE);
         font.draw(sprites, timeText, timeX, timeY);
+        sprites.end();
+
+        // Score in the lower portion
+        String scoreText = String.valueOf(score);
+        float scoreFs = 0.65f * (tileSize / lh);
+        font.getData().setScale(scoreFs);
+        layout.setText(font, scoreText);
+        float scoreX = x + (boxSize - layout.width) * 0.5f;
+        float scoreY = y + boxSize * 0.28f + layout.height * 0.5f;
+        sprites.begin();
+        font.setColor(Color.WHITE);
+        font.draw(sprites, scoreText, scoreX, scoreY);
         sprites.end();
 
         font.getData().setScale(savedX, savedY);

@@ -14,6 +14,7 @@ import com.badlogic.gdx.controllers.Controllers;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.MoveType;
+import me.ethanchen.lwjgl3.AudioManager;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.settings.GameSettings;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
@@ -24,8 +25,10 @@ import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.LightGameStateBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
+import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
@@ -74,11 +77,19 @@ public class GameScreen extends MenuScreen {
     // Absolute wall-clock ms when the 4-minute countdown expires
     private long gameEndTargetMs;
 
+    // Absolute wall-clock ms when gameplay begins (for pre-start countdown rendering)
+    private long startTimeMS;
+
+    // Player names indexed by player ID (received in StartGameBroadcast)
+    private String[] playerNames;
+
     public GameScreen(ClientApp app, StartGameBroadcast b) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
         lastUpdateMs = System.currentTimeMillis();
         long startGameTimer = b.startTimeMS - System.currentTimeMillis();
         playerID = b.playerID;
+        startTimeMS = b.startTimeMS;
+        playerNames = b.playerNames;
         game = new GameHandler(b.totalPlayers);
         game.init(b.mode, startGameTimer);
         gameEndTargetMs = b.startTimeMS + 4L * 60 * 1000;
@@ -205,26 +216,6 @@ public class GameScreen extends MenuScreen {
 
                 BoardRenderer.getInstance().drawParticles(particles, originX, originY, tileSize, shapes);
 
-                // Draw score below the board
-                if (latestScoreMode != null) {
-                    com.badlogic.gdx.graphics.g2d.GlyphLayout scoreLayout =
-                            new com.badlogic.gdx.graphics.g2d.GlyphLayout();
-                    float savedX = font.getScaleX(), savedY = font.getScaleY();
-                    font.getData().setScale(1f);
-                    float lh = font.getData().lineHeight;
-                    float fs = 1.0f * (15f / lh) * (com.badlogic.gdx.Gdx.graphics.getHeight() / 640f);
-                    font.getData().setScale(fs);
-                    String scoreText = String.valueOf(latestScoreMode.totalScore);
-                    scoreLayout.setText(font, scoreText);
-                    sprites.begin();
-                    font.setColor(Color.WHITE);
-                    float scoreX = originX + board.bw() * tileSize * 0.5f - scoreLayout.width * 0.5f;
-                    float scoreY = originY - scoreLayout.height * 0.3f;
-                    font.draw(sprites, scoreText, scoreX, scoreY);
-                    sprites.end();
-                    font.getData().setScale(savedX, savedY);
-                }
-
                 // Draw floating text particles (score popups, bonus multiplier popups)
                 BoardRenderer.getInstance().drawTextParticles(particles, originX, originY, tileSize, sprites, font);
 
@@ -237,13 +228,86 @@ public class GameScreen extends MenuScreen {
                         holdBoxX, holdBoxY, holdBoxSize, tileSize,
                         shapes, sprites, font);
 
-                // Draw timer box at the bottom-left of the board (mirrors hold box at the top)
-                float timerBoxSize = tileSize * 4f;
+                // Draw timer+score box at the bottom-left of the board
+                float timerBoxSize = tileSize * 5f;
                 float timerBoxX = originX - timerBoxSize - tileSize * 0.5f;
                 float timerBoxY = originY;
+                long currentScore = latestScoreMode != null ? latestScoreMode.totalScore : 0;
                 BoardRenderer.getInstance().drawTimerBox(
-                        gameEndTargetMs, timerBoxX, timerBoxY, timerBoxSize, tileSize,
+                        gameEndTargetMs, currentScore, timerBoxX, timerBoxY, timerBoxSize, tileSize,
                         shapes, sprites, font);
+
+                // Pre-start countdown ("3", "2", "1") and post-start "Start!" flash
+                {
+                    long now = System.currentTimeMillis();
+                    long msUntilStart = startTimeMS - now;
+                    String countdownText = null;
+                    float countdownAlpha = 1f;
+
+                    if (!game.isStarted()) {
+                        if (msUntilStart > 2000) {
+                            countdownText = "3";
+                        } else if (msUntilStart > 1000) {
+                            countdownText = "2";
+                        } else if (msUntilStart > 0) {
+                            countdownText = "1";
+                        }
+                    } else {
+                        long elapsedSinceStart = now - startTimeMS;
+                        if (elapsedSinceStart < 1000) {
+                            countdownText = "Start!";
+                            countdownAlpha = Math.max(0f, 1f - elapsedSinceStart / 1000f);
+                        }
+                    }
+
+                    if (countdownText != null) {
+                        com.badlogic.gdx.graphics.g2d.GlyphLayout cdLayout =
+                                new com.badlogic.gdx.graphics.g2d.GlyphLayout();
+                        float savedCdX = font.getScaleX(), savedCdY = font.getScaleY();
+                        font.getData().setScale(1f);
+                        float cdLh = font.getData().lineHeight;
+                        float cdFs = 3.5f * (tileSize / cdLh);
+                        font.getData().setScale(cdFs);
+                        cdLayout.setText(font, countdownText);
+                        float cdX = originX + board.bw() * tileSize * 0.5f - cdLayout.width * 0.5f;
+                        float cdY = originY + board.bh() * tileSize * 0.5f + cdLayout.height * 0.5f;
+                        sprites.begin();
+                        font.setColor(1f, 1f, 1f, countdownAlpha);
+                        font.draw(sprites, countdownText, cdX, cdY);
+                        sprites.end();
+                        font.setColor(com.badlogic.gdx.graphics.Color.WHITE);
+                        font.getData().setScale(savedCdX, savedCdY);
+                    }
+                }
+
+                // Spawn-position username labels: appear at game start, fade out by 500 ms
+                if (game.isStarted() && playerNames != null) {
+                    long elapsedSinceStart = System.currentTimeMillis() - startTimeMS;
+                    if (elapsedSinceStart < 500) {
+                        float nameAlpha = Math.max(0f, 1f - elapsedSinceStart / 500f);
+                        com.badlogic.gdx.graphics.g2d.GlyphLayout nameLayout =
+                                new com.badlogic.gdx.graphics.g2d.GlyphLayout();
+                        float savedNmX = font.getScaleX(), savedNmY = font.getScaleY();
+                        font.getData().setScale(1f);
+                        float nmLh = font.getData().lineHeight;
+                        float nmFs = 0.9f * (tileSize / nmLh);
+                        font.getData().setScale(nmFs);
+                        sprites.begin();
+                        font.setColor(1f, 1f, 1f, nameAlpha);
+                        for (int i = 0; i < playerNames.length; i++) {
+                            if (playerNames[i] == null || playerNames[i].isEmpty()) continue;
+                            Vector2 spawn = board.getSpawnPos(i);
+                            float nameScreenX = originX + (spawn.x + 2f) * tileSize;
+                            float nameScreenY = originY + spawn.y * tileSize;
+                            nameLayout.setText(font, playerNames[i]);
+                            font.draw(sprites, playerNames[i],
+                                    nameScreenX - nameLayout.width * 0.5f, nameScreenY);
+                        }
+                        sprites.end();
+                        font.setColor(com.badlogic.gdx.graphics.Color.WHITE);
+                        font.getData().setScale(savedNmX, savedNmY);
+                    }
+                }
                 break;
             default:
                 break;
@@ -358,7 +422,14 @@ public class GameScreen extends MenuScreen {
         // Hard drop and hold are server-authoritative: do NOT apply locally to avoid
         // desyncing the piece queue during prediction replay.
         if (type != MoveType.HARD_DROP && type != MoveType.HOLD) {
-            board.applyMove(playerID, type);
+            boolean moved = board.applyMove(playerID, type);
+            if (moved) {
+                if (type == MoveType.LEFT || type == MoveType.RIGHT || type == MoveType.SOFT_DROP) {
+                    AudioManager.getInstance().playMoveSound();
+                } else if (type == MoveType.ROTATE_CW || type == MoveType.ROTATE_CCW || type == MoveType.ROTATE_180) {
+                    AudioManager.getInstance().playRotateSound();
+                }
+            }
         }
     }
 
@@ -484,6 +555,19 @@ public class GameScreen extends MenuScreen {
                     expandNetParticle(np);
                 }
             }
+        }
+
+        if (w.packet instanceof PlacementSoundBroadcast) {
+            PlacementSoundBroadcast p = (PlacementSoundBroadcast) w.packet;
+            AudioManager.getInstance().playPlaceSound(p.playerId == playerID);
+            if (p.combo >= 0) {
+                AudioManager.getInstance().playClearSound(p.combo);
+            }
+        }
+
+        if (w.packet instanceof HoldSoundBroadcast) {
+            HoldSoundBroadcast p = (HoldSoundBroadcast) w.packet;
+            AudioManager.getInstance().playHoldSound(p.playerId == playerID);
         }
     }
 
