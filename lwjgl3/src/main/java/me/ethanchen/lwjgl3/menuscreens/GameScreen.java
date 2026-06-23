@@ -237,36 +237,51 @@ public class GameScreen extends MenuScreen {
                         gameEndTargetMs, currentScore, timerBoxX, timerBoxY, timerBoxSize, tileSize,
                         shapes, sprites, font);
 
-                // Pre-start countdown ("3", "2", "1") and post-start "Start!" flash
+                // Pre-start countdown ("3", "2", "1") and post-start "Start" flash
                 {
                     long now = System.currentTimeMillis();
                     long msUntilStart = startTimeMS - now;
                     String countdownText = null;
-                    float countdownAlpha = 1f;
+                    float beatProgress = -1f;
 
                     if (!game.isStarted()) {
-                        if (msUntilStart > 2000) {
+                        if (msUntilStart > 2000 && msUntilStart <= 3000) {
                             countdownText = "3";
-                        } else if (msUntilStart > 1000) {
+                            beatProgress = (3000f - msUntilStart) / 1000f;
+                        } else if (msUntilStart > 1000 && msUntilStart <= 2000) {
                             countdownText = "2";
-                        } else if (msUntilStart > 0) {
+                            beatProgress = (2000f - msUntilStart) / 1000f;
+                        } else if (msUntilStart > 0 && msUntilStart <= 1000) {
                             countdownText = "1";
+                            beatProgress = (1000f - msUntilStart) / 1000f;
                         }
                     } else {
                         long elapsedSinceStart = now - startTimeMS;
                         if (elapsedSinceStart < 1000) {
-                            countdownText = "Start!";
-                            countdownAlpha = Math.max(0f, 1f - elapsedSinceStart / 1000f);
+                            countdownText = "Start";
+                            beatProgress = elapsedSinceStart / 1000f;
                         }
                     }
 
                     if (countdownText != null) {
+                        float countdownAlpha;
+                        float countdownScale;
+                        if (beatProgress < 0f) {
+                            countdownAlpha = 1f;
+                            countdownScale = 1f;
+                        } else {
+                            float fadeInT = Math.min(1f, beatProgress / 0.45f);
+                            float fadeOutT = beatProgress > 0.75f ? (beatProgress - 0.75f) / 0.25f : 0f;
+                            countdownAlpha = fadeInT * (1f - fadeOutT);
+                            countdownScale = 2f - fadeInT;
+                        }
+
                         com.badlogic.gdx.graphics.g2d.GlyphLayout cdLayout =
                                 new com.badlogic.gdx.graphics.g2d.GlyphLayout();
                         float savedCdX = font.getScaleX(), savedCdY = font.getScaleY();
                         font.getData().setScale(1f);
                         float cdLh = font.getData().lineHeight;
-                        float cdFs = 3.5f * (tileSize / cdLh);
+                        float cdFs = 3.5f * (tileSize / cdLh) * countdownScale;
                         font.getData().setScale(cdFs);
                         cdLayout.setText(font, countdownText);
                         float cdX = originX + board.bw() * tileSize * 0.5f - cdLayout.width * 0.5f;
@@ -280,11 +295,11 @@ public class GameScreen extends MenuScreen {
                     }
                 }
 
-                // Spawn-position username labels: appear at game start, fade out by 500 ms
-                if (game.isStarted() && playerNames != null) {
-                    long elapsedSinceStart = System.currentTimeMillis() - startTimeMS;
-                    if (elapsedSinceStart < 500) {
-                        float nameAlpha = Math.max(0f, 1f - elapsedSinceStart / 500f);
+                // Spawn-position username labels: visible before game start, fade out in last 500 ms
+                if (!game.isStarted() && playerNames != null) {
+                    long msUntilStart = startTimeMS - System.currentTimeMillis();
+                    float nameAlpha = msUntilStart > 500 ? 1f : Math.max(0f, msUntilStart / 500f);
+                    if (nameAlpha > 0f) {
                         com.badlogic.gdx.graphics.g2d.GlyphLayout nameLayout =
                                 new com.badlogic.gdx.graphics.g2d.GlyphLayout();
                         float savedNmX = font.getScaleX(), savedNmY = font.getScaleY();

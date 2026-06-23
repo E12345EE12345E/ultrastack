@@ -35,7 +35,9 @@ public class GameHandler {
                 break;
             case MULTIPLAYER_SCORE:
                 gravity = 1000;
-                if (numPlayers == 2) {
+                if (numPlayers == 1) {
+                    boards.add(new Board(Board.Presets.STANDARD_SINGLE));
+                } else if (numPlayers == 2) {
                     boards.add(new Board(Board.Presets.STANDARD_DUO));
                 } else if (numPlayers == 3) {
                     boards.add(new Board(Board.Presets.STANDARD_TRIO));
