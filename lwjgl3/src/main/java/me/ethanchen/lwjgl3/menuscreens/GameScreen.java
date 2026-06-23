@@ -312,7 +312,7 @@ public class GameScreen extends MenuScreen {
                         for (int i = 0; i < playerNames.length; i++) {
                             if (playerNames[i] == null || playerNames[i].isEmpty()) continue;
                             Vector2 spawn = board.getSpawnPos(i);
-                            float nameScreenX = originX + (spawn.x + 2f) * tileSize;
+                            float nameScreenX = originX + (spawn.x + 0.5f) * tileSize;
                             float nameScreenY = originY + spawn.y * tileSize;
                             nameLayout.setText(font, playerNames[i]);
                             font.draw(sprites, playerNames[i],

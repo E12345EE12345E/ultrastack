@@ -44,15 +44,15 @@ public class AudioManager {
     }
 
     public void playMoveSound() {
-        moveSound.play(0.4f);
+        moveSound.play(0.5f);
     }
 
     public void playRotateSound() {
-        rotateSound.play(0.4f);
+        rotateSound.play(0.5f);
     }
 
     public void playPlaceSound(boolean self) {
-        placeSound.play(self ? 0.8f : 0.4f);
+        placeSound.play(self ? 1f : 0.5f);
     }
     
     public void playClearSound(int combo) {
