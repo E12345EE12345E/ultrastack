@@ -48,6 +48,7 @@ public final class PieceTints {
 
     private static final Color scratch  = new Color();
     private static final Color scratch2 = new Color();
+    private static final float[] hsvScratch = new float[3];
 
     static {
         for (int i = 0; i < COLORS.length; i++) {
@@ -84,6 +85,29 @@ public final class PieceTints {
         scratch.fromHsv(h, s, v);
         scratch.a = 1f;
         return scratch;
+    }
+
+    /** Value multiplier applied when fully grayscaled (0 = full color, 1 = this factor). */
+    public static final float GRAYSCALE_VALUE = 0.6f;
+
+    /**
+     * Blends a piece tint toward grayscale.
+     *
+     * @param colorAmt 1 = full color, 0 = fully desaturated at {@link #GRAYSCALE_VALUE} brightness
+     */
+    public static Color blendGrayscale(byte type, float colorAmt, boolean background) {
+        if (colorAmt >= 1f) {
+            return background ? forTileBackground(type) : forType(type);
+        }
+        Color full = background ? forTileBackground(type) : forType(type);
+        full.toHsv(hsvScratch);
+        float amt = Math.max(0f, Math.min(1f, colorAmt));
+        float s = hsvScratch[1] * amt;
+        float v = hsvScratch[2] * (GRAYSCALE_VALUE + (1f - GRAYSCALE_VALUE) * amt);
+        Color out = background ? scratch : scratch2;
+        out.fromHsv(hsvScratch[0], s, v);
+        out.a = 1f;
+        return out;
     }
 
     /** Piece tint with perceptual brightness boost for additive glow rendering. */

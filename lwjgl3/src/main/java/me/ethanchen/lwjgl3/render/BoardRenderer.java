@@ -117,8 +117,8 @@ public class BoardRenderer {
     // Public draw calls
     // -------------------------------------------------------------------------
 
-    /** Gray color used for blocked pieces (unlit, 50% value). */
-    private static final Color BLOCKED_GRAY = new Color(0.5f, 0.5f, 0.5f, 1f);
+    /** Gray color used for blocked pieces (unlit, {@link PieceTints#GRAYSCALE_VALUE} value). */
+    private static final Color BLOCKED_GRAY = new Color(PieceTints.GRAYSCALE_VALUE, PieceTints.GRAYSCALE_VALUE, PieceTints.GRAYSCALE_VALUE, 1f);
     /** White color used as the fully-lit blocked piece color during the explode countdown. */
     private static final Color BLOCKED_WHITE = new Color(1f, 1f, 1f, 1f);
 
@@ -130,7 +130,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f, true);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f, true, -1, 0f);
     }
 
     /**
@@ -140,7 +140,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f, true);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f, true, -1, 0f);
     }
 
     /**
@@ -148,17 +148,21 @@ public class BoardRenderer {
      *
      * @param blockedWhiteAmt  0 = full gray for blocked pieces; 1 = full white. Interpolated linearly.
      * @param drawActivePieces When false, active pieces and their glow are not drawn (used post-explosion).
+     * @param localPlayerId    Index of the local player; {@code -1} disables other-player grayscale.
+     * @param otherPlayerGrayscaleAmt 0 = full color for other players; 1 = fully grayscale.
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows,
-                          float blockedWhiteAmt, boolean drawActivePieces) {
+                          float blockedWhiteAmt, boolean drawActivePieces,
+                          int localPlayerId, float otherPlayerGrayscaleAmt) {
         if (drawActivePieces) {
             drawGlow(board, originX, originY, tileSize, glowStrengths);
         }
         sprites.begin();
         drawLockedTiles(board, originX, originY, tileSize, sprites);
         if (drawActivePieces) {
-            drawShadowPieces(board, shadows, originX, originY, tileSize, sprites);
+            drawShadowPieces(board, shadows, originX, originY, tileSize, sprites,
+                    localPlayerId, otherPlayerGrayscaleAmt);
             drawActivePiecesWithBlocked(board, originX, originY, tileSize, sprites, blockedWhiteAmt);
         }
         sprites.setColor(Color.WHITE);
@@ -234,7 +238,7 @@ public class BoardRenderer {
                               ShapeRenderer shapes) {
         boolean[][] allowed = board.getAllowedTiles();
         shapes.begin(ShapeRenderer.ShapeType.Line);
-        shapes.setColor(Color.WHITE);
+        shapes.setColor(Color.WHITE.r, Color.WHITE.g, Color.WHITE.b, Color.WHITE.a * 0.5f);
         for (int y = 0; y < board.bh(); y++) {
             for (int x = 0; x < board.bw(); x++) {
                 if (!allowed[y][x]) continue;
@@ -593,10 +597,16 @@ public class BoardRenderer {
      * another active piece and would not lock).
      * The shadow is skipped when it is at the same board position as the live piece.
      */
+    /**
+     * @param localPlayerId       Index of the local player; {@code -1} disables other-player grayscale.
+     * @param otherPlayerGrayscaleAmt 0 = full color for other players' shadows; 1 = fully grayscale.
+     */
     private void drawShadowPieces(Board board, Board.ShadowInfo[] shadows,
                                   float originX, float originY, float tileSize,
-                                  SpriteBatch sprites) {
+                                  SpriteBatch sprites,
+                                  int localPlayerId, float otherPlayerGrayscaleAmt) {
         if (shadows == null) return;
+        float grayscaleAmt = Math.max(0f, Math.min(1f, otherPlayerGrayscaleAmt));
         for (int i = 0; i < shadows.length && i < board.getActivePieces().size(); i++) {
             Board.ShadowInfo shadow = shadows[i];
             if (shadow == null) continue;
@@ -610,7 +620,8 @@ public class BoardRenderer {
 
             Color baseColor;
             if (shadow.wouldPlace) {
-                Color c = PieceTints.forType(piece.type);
+                float colorAmt = (localPlayerId >= 0 && i != localPlayerId) ? 1f - grayscaleAmt : 1f;
+                Color c = PieceTints.blendGrayscale(piece.type, colorAmt, false);
                 baseColor = new Color(c.r, c.g, c.b, 0.75f);
             } else {
                 baseColor = SHADOW_GRAY;

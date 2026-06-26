@@ -193,6 +193,13 @@ public class GameScreen extends MenuScreen {
                 float blockedWhiteAmt = (latestExplodeProgress >= 0f)
                         ? Math.min(1f, latestExplodeProgress / 1f) : 0f;
 
+                // Other players' active pieces fade to grayscale over the first 2 seconds after start
+                float otherPlayerGrayscaleAmt = 0f;
+                if (game.isStarted()) {
+                    long elapsedSinceStart = System.currentTimeMillis() - startTimeMS;
+                    otherPlayerGrayscaleAmt = Math.min(1f, Math.max(0f, elapsedSinceStart / 4000f));
+                }
+
                 Board.ShadowInfo[] shadows = new Board.ShadowInfo[board.getActivePieces().size()];
                 if (!exploded) {
                     for (int i = 0; i < shadows.length; i++) {
@@ -201,7 +208,8 @@ public class GameScreen extends MenuScreen {
                 }
 
                 BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
-                        glowValues, shadows, blockedWhiteAmt, !exploded);
+                        glowValues, shadows, blockedWhiteAmt, !exploded,
+                        playerID, otherPlayerGrayscaleAmt);
                 BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
 
                 // Draw repeat-column red highlights

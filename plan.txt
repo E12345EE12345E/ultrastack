@@ -2,9 +2,6 @@ pause menu
 
 other gamemodes
 
-ability to highlight self / show other player names
-other players gray piece
-
 sfx bump
 sfx tspin turn
 sfx clear tetris clear spin
