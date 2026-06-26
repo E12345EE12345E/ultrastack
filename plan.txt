@@ -1,11 +1,8 @@
 pause menu
-sound setting menu
 
 other gamemodes
 
 ability to highlight self / show other player names
-double drop prevention
-music
 other players gray piece
 
 sfx bump

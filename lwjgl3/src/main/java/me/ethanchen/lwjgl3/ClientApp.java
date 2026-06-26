@@ -17,6 +17,9 @@ import com.esotericsoftware.kryonet.Client;
 
 import me.ethanchen.lwjgl3.menuscreens.MainMenu;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
+import me.ethanchen.lwjgl3.music.AudioManager;
+import me.ethanchen.lwjgl3.music.MusicContainer;
+import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.render.PieceTints;
 import me.ethanchen.lwjgl3.settings.GameSettings;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
@@ -55,6 +58,12 @@ public class ClientApp extends ApplicationAdapter {
     public void create() {
         settings = SettingsManager.load();
         PieceTints.applyColorOffsets(settings.colors);
+        AudioManager.getInstance().setVolumeSettings(settings.volume);
+        AudioManager.getInstance().registerMusic(new MusicContainer(
+            "music/mrethantetris_start.wav",
+            new String[]{"music/mrethantetris_loop.wav", "music/mrethantetris_loop2.wav"},
+            new MusicTag[]{MusicTag.MULTIPLAYER_GAME}
+        ));
         rpackets = new Queue<ClientPacketWrapper>();
         reconnectAttempts = 0;
         this.connectIP = NetConfig.HOST;
@@ -131,6 +140,7 @@ public class ClientApp extends ApplicationAdapter {
         batch.dispose();
         font.dispose();
         shapes.dispose();
+        AudioManager.getInstance().dispose();
     }
 
     public void switchMenu(MenuScreen newMenu) {

@@ -14,8 +14,9 @@ import com.badlogic.gdx.controllers.Controllers;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.MoveType;
-import me.ethanchen.lwjgl3.AudioManager;
 import me.ethanchen.lwjgl3.ClientApp;
+import me.ethanchen.lwjgl3.music.AudioManager;
+import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.settings.GameSettings;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
 import me.ethanchen.lwjgl3.render.Particle;
@@ -107,6 +108,7 @@ public class GameScreen extends MenuScreen {
         }
         System.out.println("playerID=" + playerID);
         Controllers.addListener(controllerAdapter);
+        AudioManager.getInstance().playMusic(MusicTag.MULTIPLAYER_GAME);
     }
 
     @Override
@@ -727,6 +729,7 @@ public class GameScreen extends MenuScreen {
     @Override
     public void dispose() {
         Controllers.removeListener(controllerAdapter);
+        AudioManager.getInstance().stopMusic();
     }
 
     private boolean isCtrlLeft(int b) {
