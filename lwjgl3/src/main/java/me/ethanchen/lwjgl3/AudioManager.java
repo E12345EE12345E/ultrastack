@@ -32,7 +32,8 @@ public class AudioManager {
         };
         holdSound = new Sound[] {
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_extra.wav")),
-            Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_hold.wav"))
+            Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_hold.wav")),
+            Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_holdunable.wav")),
         };
     }
 
@@ -62,7 +63,11 @@ public class AudioManager {
     }
 
     public void playHoldSound(boolean self) {
-        holdSound[self ? 0 : 1].play(1f);
+        playHoldSound(self, true);
+    }
+
+    public void playHoldSound(boolean self, boolean success) {
+        holdSound[success ? (self ? 0 : 1) : 2].play(1f);
     }
 
     public void dispose() {

@@ -12,4 +12,6 @@ public class EndGameBroadcast extends NetworkPacket {
     public boolean win;
     /** Score-mode end data; null when mode is not MULTIPLAYER_SCORE. */
     public ScoreModeEndData scoreModeEnd;
+    /** True if the game ended because a player disconnected rather than a natural conclusion. */
+    public boolean disconnected;
 }

@@ -431,6 +431,10 @@ public class GameScreen extends MenuScreen {
     }
 
     private void queueMove(MoveType type) {
+        if (type == MoveType.HOLD && !holdAvailable) {
+            AudioManager.getInstance().playHoldSound(true, false);
+            return;
+        }
         PendingMove pm = new PendingMove(nextMoveId++, type);
         pendingMoves.add(pm);
         Board board = game.getBoards().get(0);
@@ -582,7 +586,11 @@ public class GameScreen extends MenuScreen {
 
         if (w.packet instanceof HoldSoundBroadcast) {
             HoldSoundBroadcast p = (HoldSoundBroadcast) w.packet;
-            AudioManager.getInstance().playHoldSound(p.playerId == playerID);
+            if (p.success) {
+                AudioManager.getInstance().playHoldSound(p.playerId == playerID, true);
+            } else if (p.playerId == playerID) {
+                AudioManager.getInstance().playHoldSound(true, false);
+            }
         }
     }
 

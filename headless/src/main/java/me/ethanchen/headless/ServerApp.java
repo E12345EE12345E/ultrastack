@@ -63,6 +63,7 @@ public class ServerApp extends ApplicationAdapter {
 
     @Override
     public void render() { // 60 times per second
+        try {
         while (actionQueue.notEmpty()) {
             ServerPacketWrapper wrapper = actionQueue.removeFirst();
 
@@ -186,9 +187,14 @@ public class ServerApp extends ApplicationAdapter {
             broadcastToPlayersUDP(b);
         }
         sg.update();
+        } catch (Exception e) {
+            System.err.println("[ServerApp] Uncaught exception in render(): " + e);
+            e.printStackTrace(System.err);
+        }
     }
 
     public void sendNetUpdates() {
+        if (sg.getGame() == null) return;
         // Collect particles and spawners once and build a shared broadcast object.
         ArrayList<NetParticle> particles = sg.getAndClearPendingParticles();
         ArrayList<ParticleSpawner> spawners = sg.getAndClearPendingSpawners();
@@ -247,9 +253,10 @@ public class ServerApp extends ApplicationAdapter {
      * Builds and sends an {@link EndGameBroadcast} to all connected players via TCP.
      * Called by {@link ServerGame#triggerEndGame()} when the game concludes.
      */
-    public void sendEndGame(boolean win, ScoreModeEndData scoreEnd) {
+    public void sendEndGame(boolean win, ScoreModeEndData scoreEnd, boolean disconnected) {
         EndGameBroadcast b = new EndGameBroadcast();
         b.win = win;
+        b.disconnected = disconnected;
         b.scoreModeEnd = scoreEnd;
         if (sg.getGame() != null) {
             b.mode = sg.getGame().getMode();

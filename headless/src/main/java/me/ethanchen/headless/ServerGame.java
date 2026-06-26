@@ -143,15 +143,23 @@ public class ServerGame {
                             processPlacement(result);
                         }
                     } else if (move == MoveType.HOLD) {
-                        Piece currentPiece = board.getActivePieces().size() > playerId
-                                ? board.getActivePieces().get(playerId) : null;
-                        if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
-                            applyBlockedHold(playerId, board);
-                        } else if (board.useHold(playerId)) {
-                            lastHoldUsedMs = System.currentTimeMillis();
+                        if (!computeHoldAvailable(playerId)) {
                             HoldSoundBroadcast hsb = new HoldSoundBroadcast();
                             hsb.playerId = (byte) playerId;
+                            hsb.success = false;
                             pendingHoldSounds.add(hsb);
+                        } else {
+                            Piece currentPiece = board.getActivePieces().size() > playerId
+                                    ? board.getActivePieces().get(playerId) : null;
+                            if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
+                                applyBlockedHold(playerId, board);
+                            } else if (board.useHold(playerId)) {
+                                lastHoldUsedMs = System.currentTimeMillis();
+                                HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+                                hsb.playerId = (byte) playerId;
+                                hsb.success = true;
+                                pendingHoldSounds.add(hsb);
+                            }
                         }
                     } else {
                         board.applyMove(playerId, move);
@@ -674,6 +682,7 @@ public class ServerGame {
         lastHoldUsedMs = System.currentTimeMillis();
         HoldSoundBroadcast hsb = new HoldSoundBroadcast();
         hsb.playerId = (byte) playerId;
+        hsb.success = true;
         pendingHoldSounds.add(hsb);
     }
 
@@ -687,6 +696,11 @@ public class ServerGame {
 
     /** Fires the end-game sequence: broadcasts EndGameBroadcast and stops the game. */
     private void triggerEndGame(boolean win) {
+        triggerEndGame(win, false);
+    }
+
+    /** Fires the end-game sequence with an optional disconnect flag. */
+    private void triggerEndGame(boolean win, boolean disconnected) {
         if (gameEnded) return;
         gameEnded = true;
         ScoreModeEndData scoreEnd = null;
@@ -695,12 +709,12 @@ public class ServerGame {
             scoreEnd.finalScore = totalScore;
             scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
         }
-        app.sendEndGame(win, scoreEnd);
+        app.sendEndGame(win, scoreEnd, disconnected);
         stopGame();
     }
 
     public void handleDisconnectedPlayer(int id) {
-        stopGame(); // for now, because maybe implement temporary bot player or something later
+        triggerEndGame(false, true);
     }
 
     public void update() {
@@ -711,7 +725,7 @@ public class ServerGame {
                 break;
             case MULTIPLAYER_SCORE:
                 updateScoreMode();
-                sendNetUpdates();
+                if (game != null) sendNetUpdates();
                 break;
         }
 
@@ -733,7 +747,7 @@ public class ServerGame {
     }
 
     public void sendNetUpdates() {
-        if (t % 2 == 0) {
+        if (t % 2 == 0 && game != null) {
             app.sendNetUpdates();
         }
     }
