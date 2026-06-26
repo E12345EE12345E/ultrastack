@@ -98,7 +98,8 @@ public class MovementSettingsScreen extends MenuScreen {
             elements.add(ctrl2Btns[i]);
         }
 
-        elements.add(new UIButton(0.5, 0.13, 0.28, ROW_H, "Done", this::saveAndExit));
+        elements.add(new UIButton(0.22, 0.13, 0.20, ROW_H, "Remove Key", this::removeSelectedKey));
+        elements.add(new UIButton(0.50, 0.13, 0.28, ROW_H, "Done", this::saveAndExit));
 
         Controllers.addListener(controllerListener);
     }
@@ -169,6 +170,25 @@ public class MovementSettingsScreen extends MenuScreen {
             if (ctrl2Btns[i].isListening()) return ctrl2Btns[i];
         }
         return null;
+    }
+
+    private void removeSelectedKey() {
+        UIKeybindButton listeningKey = getListeningKeyButton();
+        if (listeningKey != null) {
+            listeningKey.clearKey();
+            return;
+        }
+        UIControllerBindButton listeningCtrl = getListeningCtrlButton();
+        if (listeningCtrl != null) {
+            listeningCtrl.clearButton();
+            return;
+        }
+        for (int i = 0; i < 8; i++) {
+            if (key1Btns[i].hovered)  { key1Btns[i].clearKey();     return; }
+            if (key2Btns[i].hovered)  { key2Btns[i].clearKey();     return; }
+            if (ctrl1Btns[i].hovered) { ctrl1Btns[i].clearButton(); return; }
+            if (ctrl2Btns[i].hovered) { ctrl2Btns[i].clearButton(); return; }
+        }
     }
 
     private void saveAndExit() {

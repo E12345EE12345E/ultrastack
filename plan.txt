@@ -1,10 +1,10 @@
 pause menu
+sound setting menu
 
 other gamemodes
 
 ability to highlight self / show other player names
 double drop prevention
-copy paste into textbox
 music
 other players gray piece
 

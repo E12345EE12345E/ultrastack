@@ -1,10 +1,12 @@
 package me.ethanchen.lwjgl3.menuscreens.ui;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.utils.Clipboard;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 import me.ethanchen.util.TextSanitizer;
 
@@ -134,6 +136,50 @@ public class UITextBox extends UIElement {
         } else if (c >= 32 && c < 127) {
             text += c;
         }
+        commitText();
+        this.tabLock = false;
+    }
+
+    public boolean handleKeyDown(int keycode) {
+        if (!focused || !isShortcutModifierDown()) return false;
+
+        Clipboard clipboard = Gdx.app.getClipboard();
+
+        switch (keycode) {
+            case Input.Keys.C:
+                if (text != null && !text.isEmpty()) {
+                    clipboard.setContents(text);
+                }
+                return true;
+
+            case Input.Keys.X:
+                if (text != null && !text.isEmpty()) {
+                    clipboard.setContents(text);
+                    text = "";
+                    commitText();
+                }
+                return true;
+
+            case Input.Keys.V:
+                String pasted = clipboard.getContents();
+                if (pasted != null && !pasted.isEmpty()) {
+                    pasted = pasted.replace('\r', ' ').replace('\n', ' ');
+                    text += pasted;
+                    commitText();
+                }
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private static boolean isShortcutModifierDown() {
+        return Gdx.input.isKeyPressed(Input.Keys.CONTROL_LEFT)
+            || Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT);
+    }
+
+    private void commitText() {
         switch (sanitize) {
             case 1:
                 text = TextSanitizer.sanitizeChat(text);
@@ -142,8 +188,9 @@ public class UITextBox extends UIElement {
                 text = TextSanitizer.sanitizeName(text);
                 break;
         }
-        out.set(text);
-        this.tabLock = false;
+        if (out != null) {
+            out.set(text);
+        }
     }
 
     @Override

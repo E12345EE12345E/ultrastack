@@ -37,6 +37,10 @@ public class ServerGame {
     // Hold state
     private long lastHoldUsedMs = 0;
     private static final long HOLD_GLOBAL_LOCK_MS = 1000;
+    private static final long HARD_DROP_SUPPRESS_MS = 250L;
+
+    // Per-player hard-drop suppression after auto-lock
+    private long[] hardDropBlockedUntilMs;
 
     // Blocked-spawn cycling constants
     private static final float CYCLE_START       = 1.0f;
@@ -89,6 +93,7 @@ public class ServerGame {
         gameEndTargetMs = gameStartMs + TIMER_DURATION_MS;
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
+        this.hardDropBlockedUntilMs = new long[players];
         Arrays.fill(this.highestMoveId, -1);
         // Hold state reset
         lastHoldUsedMs = 0;
@@ -138,9 +143,13 @@ public class ServerGame {
                 if (types[i] >= 0 && types[i] < moveValues.length) {
                     MoveType move = moveValues[types[i]];
                     if (move == MoveType.HARD_DROP) {
-                        LineClearResult result = board.hardDrop(playerId);
-                        if (result != null && result.placed) {
-                            processPlacement(result);
+                        if (System.currentTimeMillis() < hardDropBlockedUntilMs[playerId]) {
+                            // suppressed after auto-lock
+                        } else {
+                            LineClearResult result = board.hardDrop(playerId);
+                            if (result != null && result.placed) {
+                                processPlacement(result);
+                            }
                         }
                     } else if (move == MoveType.HOLD) {
                         if (!computeHoldAvailable(playerId)) {
@@ -166,6 +175,9 @@ public class ServerGame {
                         LineClearResult lockResult = board.tryMovementLock(playerId);
                         if (lockResult != null && lockResult.placed) {
                             processPlacement(lockResult);
+                            if (!lockResult.manual) {
+                                hardDropBlockedUntilMs[playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
+                            }
                         }
                     }
                 }
@@ -736,7 +748,12 @@ public class ServerGame {
     public void updateScoreMode() { // called if gamemode is a scoring type mode
         game.update(deltatime);
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
-            if (r.placed) processPlacement(r);
+            if (r.placed) {
+                processPlacement(r);
+                if (!r.manual) {
+                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
+                }
+            }
         }
         if (game.isStarted() && !gameEnded) {
             updateBlockedCycling(deltatime / 1000f);
