@@ -19,7 +19,7 @@ public class AudioManager {
     private static final float PLACE_SELF_BASE  = 1.0f;
     private static final float PLACE_OTHER_BASE = 0.5f;
     private static final float HOLD_BASE        = 1.0f;
-    private static final float MUSIC_BASE       = 0.7f;
+    private static final float MUSIC_BASE       = 0.5f;
 
     // -------------------------------------------------------------------------
     // Sound assets
