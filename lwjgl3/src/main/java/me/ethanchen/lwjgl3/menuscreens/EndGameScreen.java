@@ -34,13 +34,24 @@ public class EndGameScreen extends MenuScreen {
             elements.add(new UIText(0.5, scoreY - stepY, timeText, 2.5));
         }
 
-        elements.add(new UIButton(0.5, 0.15, 0.4, 0.1, "Back to Menu",
-                () -> app.switchMenu(new MainMenu(app))));
+        elements.add(new UIButton(0.5, 0.15, 0.4, 0.1, "Back to Menu", () -> {
+            if (app.isLanMode()) {
+                app.switchMenu(new LanMenu(app));
+            } else {
+                app.sendLeaveRoomRequest();
+                app.switchMenu(new RoomBrowserMenu(app));
+            }
+        }));
     }
 
     @Override
     protected void onEscPressed() {
-        app.switchMenu(new MainMenu(app));
+        if (app.isLanMode()) {
+            app.switchMenu(new LanMenu(app));
+        } else {
+            app.sendLeaveRoomRequest();
+            app.switchMenu(new RoomBrowserMenu(app));
+        }
     }
 
     @Override

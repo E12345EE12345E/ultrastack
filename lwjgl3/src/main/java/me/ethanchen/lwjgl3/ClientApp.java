@@ -15,6 +15,7 @@ import com.badlogic.gdx.utils.Queue;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.esotericsoftware.kryonet.Client;
 
+import me.ethanchen.game.GameMode;
 import me.ethanchen.lwjgl3.menuscreens.MainMenu;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 import me.ethanchen.lwjgl3.music.AudioManager;
@@ -28,6 +29,14 @@ import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.NetEndpoints;
 import me.ethanchen.network.packets.NetworkPacket;
+import me.ethanchen.network.packets.c2s.CreateRoomRequest;
+import me.ethanchen.network.packets.c2s.JoinRequest;
+import me.ethanchen.network.packets.c2s.JoinRoomRequest;
+import me.ethanchen.network.packets.c2s.LeaveRoomRequest;
+import me.ethanchen.network.packets.c2s.LoginRequest;
+import me.ethanchen.network.packets.c2s.RegisterRequest;
+import me.ethanchen.network.packets.c2s.RoomListRequest;
+import me.ethanchen.server.ServerCore;
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
 public class ClientApp extends ApplicationAdapter {
@@ -43,6 +52,10 @@ public class ClientApp extends ApplicationAdapter {
     private Queue<ClientPacketWrapper> rpackets;
     private volatile String connectIP;
     private volatile int connectPort;
+
+    // Embedded LAN server
+    private ServerCore lanServer;
+    private boolean lanMode;
 
     // Rendering
     private SpriteBatch batch;
@@ -69,7 +82,7 @@ public class ClientApp extends ApplicationAdapter {
         this.connectIP = NetConfig.HOST;
         this.connectPort = NetConfig.PORT;
         netClient = NetEndpoints.createClient();
-        clientNetworkListener = new ClientNetworkListener(this.rpackets, "default", -1);
+        clientNetworkListener = new ClientNetworkListener(this.rpackets);
         netClient.addListener(clientNetworkListener);
         netClient.start();
 
@@ -136,6 +149,7 @@ public class ClientApp extends ApplicationAdapter {
     @Override
     public void dispose() {
         shuttingDown = true;
+        stopLanServer();
         netClient.close();
         batch.dispose();
         font.dispose();
@@ -143,20 +157,23 @@ public class ClientApp extends ApplicationAdapter {
         AudioManager.getInstance().dispose();
     }
 
+    // -------------------------------------------------------------------------
+    // Screen management
+    // -------------------------------------------------------------------------
+
     public void switchMenu(MenuScreen newMenu) {
         this.switchToMenu = newMenu; // switches to menu on next render() tick
     }
+
+    // -------------------------------------------------------------------------
+    // Connection helpers
+    // -------------------------------------------------------------------------
 
     public void disconnect() {
         if (netClient == null) return;
         Thread t = new Thread(() -> netClient.close(), "net-disconnect");
         t.setDaemon(true);
         t.start();
-    }
-
-    public void setConnectionCredentials(String newName, long credential) {
-        clientNetworkListener.setPlayerName(newName);
-        clientNetworkListener.setCredential(credential);
     }
 
     public void setConnectDestination(String newIP, int newPort) {
@@ -175,6 +192,48 @@ public class ClientApp extends ApplicationAdapter {
         return true;
     }
 
+    // -------------------------------------------------------------------------
+    // Mode
+    // -------------------------------------------------------------------------
+
+    public void setLanMode(boolean lan) {
+        this.lanMode = lan;
+    }
+
+    public boolean isLanMode() {
+        return lanMode;
+    }
+
+    // -------------------------------------------------------------------------
+    // Embedded LAN server
+    // -------------------------------------------------------------------------
+
+    public void startLanServer(int port, long joinCode) {
+        if (lanServer != null) stopLanServer();
+        lanServer = new ServerCore(joinCode, 4);
+        try {
+            lanServer.start(port);
+        } catch (IOException e) {
+            System.err.println("[ClientApp] Failed to start LAN server: " + e.getMessage());
+            lanServer = null;
+        }
+    }
+
+    public void stopLanServer() {
+        if (lanServer != null) {
+            lanServer.stop();
+            lanServer = null;
+        }
+    }
+
+    public boolean isLanServerRunning() {
+        return lanServer != null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Packet send helpers
+    // -------------------------------------------------------------------------
+
     public boolean sendTCP(NetworkPacket packet) {
         if (shuttingDown || packet == null || !netClient.isConnected()) return false;
         return netClient.sendTCP(packet) != -1;
@@ -184,6 +243,51 @@ public class ClientApp extends ApplicationAdapter {
         if (shuttingDown || packet == null || !netClient.isConnected()) return false;
         return netClient.sendUDP(packet) != -1;
     }
+
+    public boolean sendJoinRequest(String username, long credential) {
+        JoinRequest req = new JoinRequest();
+        req.playerName = username;
+        req.credential = credential;
+        return sendTCP(req);
+    }
+
+    public boolean sendLoginRequest(String username, String passcode) {
+        LoginRequest req = new LoginRequest();
+        req.username = username;
+        req.passcode = passcode;
+        return sendTCP(req);
+    }
+
+    public boolean sendRegisterRequest(String username, String passcode) {
+        RegisterRequest req = new RegisterRequest();
+        req.username = username;
+        req.passcode = passcode;
+        return sendTCP(req);
+    }
+
+    public boolean sendRoomListRequest() {
+        return sendTCP(new RoomListRequest());
+    }
+
+    public boolean sendCreateRoomRequest(GameMode gamemode) {
+        CreateRoomRequest req = new CreateRoomRequest();
+        req.gamemode = gamemode;
+        return sendTCP(req);
+    }
+
+    public boolean sendJoinRoomRequest(String roomId) {
+        JoinRoomRequest req = new JoinRoomRequest();
+        req.roomId = roomId;
+        return sendTCP(req);
+    }
+
+    public boolean sendLeaveRoomRequest() {
+        return sendTCP(new LeaveRoomRequest());
+    }
+
+    // -------------------------------------------------------------------------
+    // Connect / reconnect
+    // -------------------------------------------------------------------------
 
     // thread-safe
     public void tryConnect() {
@@ -227,6 +331,10 @@ public class ClientApp extends ApplicationAdapter {
         if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) return;
         tryConnect(RECONNECT_DELAY_MS);
     }
+
+    // -------------------------------------------------------------------------
+    // Getters
+    // -------------------------------------------------------------------------
 
     public GameSettings getSettings() {
         return settings;

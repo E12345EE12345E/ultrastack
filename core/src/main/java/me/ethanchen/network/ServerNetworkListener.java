@@ -1,18 +1,18 @@
 package me.ethanchen.network;
 
-import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.utils.Queue;
 import com.esotericsoftware.kryonet.Connection;
 import com.esotericsoftware.kryonet.Listener;
+
+import java.util.function.Consumer;
 
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.other.DisconnectPacket;
 
 public class ServerNetworkListener implements Listener {
-    private Queue<ServerPacketWrapper> actionQueue;
+    private final Consumer<ServerPacketWrapper> onPacket;
 
-    public ServerNetworkListener(Queue<ServerPacketWrapper> aq) {
-        this.actionQueue = aq;
+    public ServerNetworkListener(Consumer<ServerPacketWrapper> onPacket) {
+        this.onPacket = onPacket;
     }
 
     @Override
@@ -25,21 +25,13 @@ public class ServerNetworkListener implements Listener {
         if (object instanceof NetworkPacket) {
             ServerPacketWrapper wrapper = new ServerPacketWrapper((NetworkPacket) object, connection.getID(), connection);
             System.out.println(wrapper);
-            Gdx.app.postRunnable(new Runnable() {
-                @Override
-                public void run() {
-                    actionQueue.addLast(wrapper);
-                }
-            });
+            onPacket.accept(wrapper);
         }
     }
-    
+
     @Override
     public void disconnected(Connection connection) {
-        Gdx.app.postRunnable(() -> {
-            System.out.println("Player " + connection.getID() + " disconnected.");
-            actionQueue.addLast(new ServerPacketWrapper(new DisconnectPacket(), connection.getID(), null));
-            // Cleanup player data here
-        });
+        System.out.println("Player " + connection.getID() + " disconnected.");
+        onPacket.accept(new ServerPacketWrapper(new DisconnectPacket(), connection.getID(), null));
     }
 }

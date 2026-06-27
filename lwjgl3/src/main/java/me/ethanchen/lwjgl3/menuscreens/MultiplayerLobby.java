@@ -20,10 +20,12 @@ public class MultiplayerLobby extends MenuScreen {
     private TextInput chat;
     private TextInput playerNameList;
     private ArrayDeque<String> chatLines;
+    private boolean isHost;
 
-    public MultiplayerLobby(ClientApp app) {
+    public MultiplayerLobby(ClientApp app, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
 
+        this.isHost = isHost;
         chatLines = new ArrayDeque<String>();
 
         elements.add(new UIText(0.5, 0.8, "Lobby", 4));
@@ -44,16 +46,28 @@ public class MultiplayerLobby extends MenuScreen {
         };
         chatInput.sanitize = 1;
         elements.add(chatInput);
-        elements.add(new UIButton(0.5, 0.125, 0.3, 0.1, "Start Game", () -> {
-            StartGameRequest p = new StartGameRequest();
-            p.gamemode = GameMode.MULTIPLAYER_SCORE;
-            app.sendTCP(p);
-        }));
+        if (isHost) {
+            elements.add(new UIButton(0.5, 0.125, 0.3, 0.1, "Start Game", () -> {
+                StartGameRequest p = new StartGameRequest();
+                p.gamemode = GameMode.MULTIPLAYER_SCORE;
+                app.sendTCP(p);
+            }));
+        }
+    }
+
+    @Override
+    protected void onEscPressed() {
+        app.sendLeaveRoomRequest();
+        app.disconnect();
+        if (app.isLanMode()) {
+            app.switchMenu(new LanMenu(app));
+        } else {
+            app.switchMenu(new RoomBrowserMenu(app));
+        }
     }
 
     @Override
     public void update() {
-        
     }
 
     @Override

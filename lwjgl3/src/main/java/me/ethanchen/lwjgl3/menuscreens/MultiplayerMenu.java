@@ -4,10 +4,13 @@ import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
+import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.s2c.JoinResponse;
 
 public class MultiplayerMenu extends MenuScreen {
     private TextInput messageText;
+    private String pendingUsername;
+    private long pendingCredential;
 
     public MultiplayerMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -56,7 +59,8 @@ public class MultiplayerMenu extends MenuScreen {
                         messageText.set("no authentication code set");
                         shouldTryConnect = false;
                     } else {
-                        app.setConnectionCredentials(username.get().length()==0?"emptyname":username.get(), Long.parseLong(authstring.get()));
+                        pendingUsername = username.get().length()==0?"emptyname":username.get();
+                        pendingCredential = Long.parseLong(authstring.get());
                     }
                 } catch (NumberFormatException exception) {
                     messageText.set("authentication string is not a number");
@@ -89,11 +93,14 @@ public class MultiplayerMenu extends MenuScreen {
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
+        if (w.packet instanceof ConnectionEstablishedPacket) {
+            app.sendJoinRequest(pendingUsername, pendingCredential);
+        }
         if (w.packet instanceof JoinResponse) {
             System.out.println(w.packet);
             JoinResponse p = (JoinResponse) w.packet;
             if (p.accepted) {
-                app.switchMenu(new MultiplayerLobby(app));
+                app.switchMenu(new MultiplayerLobby(app, false));
             } else {
                 messageText.set("Join denied: " + p.reason);
             }
