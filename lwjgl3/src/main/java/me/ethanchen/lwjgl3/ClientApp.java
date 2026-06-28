@@ -1,6 +1,8 @@
 package me.ethanchen.lwjgl3;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -36,6 +38,7 @@ import me.ethanchen.network.packets.c2s.LeaveRoomRequest;
 import me.ethanchen.network.packets.c2s.LoginRequest;
 import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.RoomListRequest;
+import me.ethanchen.network.packets.other.ConnectFailedPacket;
 import me.ethanchen.server.ServerCore;
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
@@ -52,6 +55,7 @@ public class ClientApp extends ApplicationAdapter {
     private Queue<ClientPacketWrapper> rpackets;
     private volatile String connectIP;
     private volatile int connectPort;
+    private volatile boolean autoConnectAttempt;
 
     // Embedded LAN server
     private ServerCore lanServer;
@@ -291,8 +295,21 @@ public class ClientApp extends ApplicationAdapter {
 
     // thread-safe
     public void tryConnect() {
+        autoConnectAttempt = false;
         reconnectAttempts = 0;
         tryConnect(0);
+    }
+
+    /** Connect with a short timeout; posts {@link ConnectFailedPacket} on failure. */
+    public void tryConnectAuto() {
+        autoConnectAttempt = true;
+        reconnectAttempts = 0;
+        tryConnect(0);
+    }
+
+    private void postConnectFailed(String reason) {
+        Gdx.app.postRunnable(() ->
+            rpackets.addLast(new ClientPacketWrapper(new ConnectFailedPacket(reason), null)));
     }
 
     private void tryConnect(long delayBeforeConnectMs) {
@@ -306,6 +323,7 @@ public class ClientApp extends ApplicationAdapter {
 
     private void runConnectAttempt(long delayBeforeConnectMs) {
         boolean shouldReconnect = false;
+        boolean wasAutoConnect = autoConnectAttempt;
         try {
             if (delayBeforeConnectMs > 0) Thread.sleep(delayBeforeConnectMs);
             if (shuttingDown) return;
@@ -313,16 +331,41 @@ public class ClientApp extends ApplicationAdapter {
                 System.out.println("duplicate connect attempt");
                 return;
             }
-            netClient.connect(NetConfig.CONNECT_TIMEOUT_MS, connectIP, connectPort, connectPort);
+            String resolvedHost;
+            try {
+                resolvedHost = resolveHost(connectIP);
+                System.out.println("[ClientApp] Resolved " + connectIP + " -> " + resolvedHost
+                        + ":" + connectPort);
+            } catch (UnknownHostException e) {
+                System.err.println("[ClientApp] DNS resolution failed for " + connectIP + ": "
+                        + e.getMessage());
+                if (wasAutoConnect) {
+                    postConnectFailed("Could not resolve " + connectIP);
+                }
+                return;
+            }
+            int timeout = wasAutoConnect
+                    ? NetConfig.AUTO_CONNECT_TIMEOUT_MS
+                    : NetConfig.CONNECT_TIMEOUT_MS;
+            netClient.connect(timeout, resolvedHost, connectPort, connectPort);
         } catch (IOException e) {
             System.err.println("Connect failed: " + e.getMessage());
-            shouldReconnect = true;
+            if (wasAutoConnect) {
+                postConnectFailed(e.getMessage());
+            } else {
+                shouldReconnect = true;
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
+            autoConnectAttempt = false;
             connectInProgress.set(false);
         }
         if (shouldReconnect) scheduleReconnect();
+    }
+
+    private static String resolveHost(String host) throws UnknownHostException {
+        return InetAddress.getByName(host.trim()).getHostAddress();
     }
 
     private void scheduleReconnect() {

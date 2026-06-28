@@ -49,6 +49,7 @@ public class NetworkRegister {
         // Other Packets
         kryo.register(DisconnectPacket.class);
         kryo.register(ConnectionEstablishedPacket.class);
+        kryo.register(ConnectFailedPacket.class);
         // Gamemode
         kryo.register(ScoreModeData.class);
         kryo.register(ScoreModeEndData.class);
