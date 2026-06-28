@@ -2,6 +2,7 @@ package me.ethanchen.lwjgl3.menuscreens;
 
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
+import me.ethanchen.lwjgl3.settings.SettingsManager;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.packets.s2c.AuthResponse;
 
@@ -20,6 +21,11 @@ public class AuthMenu extends MenuScreen {
         elements.add(new UIText(0.5, 0.65, "Username", 1));
         UITextBox usernameBox = new UITextBox(0.5, 0.58, 0.45, 0.08, usernameOutput);
         usernameBox.sanitize = 2;
+        String savedUsername = app.getSettings().lastUsername;
+        if (savedUsername != null && !savedUsername.isEmpty()) {
+            usernameBox.text = savedUsername;
+            usernameOutput.set(savedUsername);
+        }
         elements.add(usernameBox);
 
         elements.add(new UIText(0.5, 0.505, "Passcode", 1));
@@ -34,6 +40,8 @@ public class AuthMenu extends MenuScreen {
                 messageText.set("Username cannot be empty.");
                 return;
             }
+            app.getSettings().lastUsername = user;
+            SettingsManager.save(app.getSettings());
             messageText.set("Logging in...");
             app.sendLoginRequest(user, pass);
         }));
@@ -45,6 +53,8 @@ public class AuthMenu extends MenuScreen {
                 messageText.set("Username cannot be empty.");
                 return;
             }
+            app.getSettings().lastUsername = user;
+            SettingsManager.save(app.getSettings());
             messageText.set("Registering...");
             app.sendRegisterRequest(user, pass);
         }));

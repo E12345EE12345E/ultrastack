@@ -82,6 +82,22 @@ jar {
 // this last step may help on some OSes that need extra instruction to make runnable JARs.
   doLast {
     file(archiveFile).setExecutable(true, false)
+
+    // --- AUTOMATIC JAR SIGNING ---
+    if (project.hasProperty('RELEASE_STORE_FILE')) {
+        println "Signing JAR file..."
+        ant.signjar(
+            jar: archiveFile.get().asFile.absolutePath,
+            keystore: RELEASE_STORE_FILE,
+            alias: RELEASE_KEY_ALIAS,
+            storepass: RELEASE_STORE_PASSWORD,
+            keypass: RELEASE_KEY_PASSWORD,
+            preservelastmodified: 'true'
+        )
+        println "JAR signed successfully!"
+    } else {
+        println "WARNING: Keystore properties not found. JAR was NOT signed."
+    }
   }
 }
 

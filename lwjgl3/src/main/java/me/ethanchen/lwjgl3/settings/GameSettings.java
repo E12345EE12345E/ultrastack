@@ -8,6 +8,7 @@ public class GameSettings {
     public VolumeSettings volume = new VolumeSettings();
     public int arr = 33;
     public int das = 133;
+    public String lastUsername = "";
 
     public static class VolumeSettings {
         /** Master volume, 0–100. Applied to all audio. Default 50. */
