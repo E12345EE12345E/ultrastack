@@ -141,7 +141,7 @@ public class GameScreen extends MenuScreen {
         }
 
         if (!pendingMoves.isEmpty()) {
-            if (pendingMoves.size() > 10) {
+            if (pendingMoves.size() > 100) {
                 System.out.println("Too many unacknowledged moves (" + pendingMoves.size() + "); disconnecting.");
                 app.disconnect();
                 app.switchMenu(new MainMenu(app));
