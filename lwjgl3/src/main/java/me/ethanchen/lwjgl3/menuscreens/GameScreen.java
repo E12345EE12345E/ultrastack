@@ -14,8 +14,9 @@ import com.badlogic.gdx.controllers.Controllers;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.MoveType;
-import me.ethanchen.lwjgl3.AudioManager;
 import me.ethanchen.lwjgl3.ClientApp;
+import me.ethanchen.lwjgl3.music.AudioManager;
+import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.settings.GameSettings;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
 import me.ethanchen.lwjgl3.render.Particle;
@@ -107,6 +108,7 @@ public class GameScreen extends MenuScreen {
         }
         System.out.println("playerID=" + playerID);
         Controllers.addListener(controllerAdapter);
+        AudioManager.getInstance().playMusic(MusicTag.MULTIPLAYER_GAME);
     }
 
     @Override
@@ -139,7 +141,7 @@ public class GameScreen extends MenuScreen {
         }
 
         if (!pendingMoves.isEmpty()) {
-            if (pendingMoves.size() > 10) {
+            if (pendingMoves.size() > 100) {
                 System.out.println("Too many unacknowledged moves (" + pendingMoves.size() + "); disconnecting.");
                 app.disconnect();
                 app.switchMenu(new MainMenu(app));
@@ -191,6 +193,13 @@ public class GameScreen extends MenuScreen {
                 float blockedWhiteAmt = (latestExplodeProgress >= 0f)
                         ? Math.min(1f, latestExplodeProgress / 1f) : 0f;
 
+                // Other players' active pieces fade to grayscale over the first 2 seconds after start
+                float otherPlayerGrayscaleAmt = 0f;
+                if (game.isStarted()) {
+                    long elapsedSinceStart = System.currentTimeMillis() - startTimeMS;
+                    otherPlayerGrayscaleAmt = Math.min(1f, Math.max(0f, elapsedSinceStart / 4000f));
+                }
+
                 Board.ShadowInfo[] shadows = new Board.ShadowInfo[board.getActivePieces().size()];
                 if (!exploded) {
                     for (int i = 0; i < shadows.length; i++) {
@@ -199,7 +208,8 @@ public class GameScreen extends MenuScreen {
                 }
 
                 BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
-                        glowValues, shadows, blockedWhiteAmt, !exploded);
+                        glowValues, shadows, blockedWhiteAmt, !exploded,
+                        playerID, otherPlayerGrayscaleAmt);
                 BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
 
                 // Draw repeat-column red highlights
@@ -431,6 +441,10 @@ public class GameScreen extends MenuScreen {
     }
 
     private void queueMove(MoveType type) {
+        if (type == MoveType.HOLD && !holdAvailable) {
+            AudioManager.getInstance().playHoldSound(true, false);
+            return;
+        }
         PendingMove pm = new PendingMove(nextMoveId++, type);
         pendingMoves.add(pm);
         Board board = game.getBoards().get(0);
@@ -582,7 +596,11 @@ public class GameScreen extends MenuScreen {
 
         if (w.packet instanceof HoldSoundBroadcast) {
             HoldSoundBroadcast p = (HoldSoundBroadcast) w.packet;
-            AudioManager.getInstance().playHoldSound(p.playerId == playerID);
+            if (p.success) {
+                AudioManager.getInstance().playHoldSound(p.playerId == playerID, true);
+            } else if (p.playerId == playerID) {
+                AudioManager.getInstance().playHoldSound(true, false);
+            }
         }
     }
 
@@ -719,6 +737,7 @@ public class GameScreen extends MenuScreen {
     @Override
     public void dispose() {
         Controllers.removeListener(controllerAdapter);
+        AudioManager.getInstance().stopMusic();
     }
 
     private boolean isCtrlLeft(int b) {

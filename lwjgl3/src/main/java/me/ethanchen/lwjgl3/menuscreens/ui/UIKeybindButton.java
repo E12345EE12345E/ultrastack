@@ -12,6 +12,8 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 
 public class UIKeybindButton extends UIButton {
+    public static final int UNSET = -1;
+
     private boolean listening = false;
     private int boundKey;
 
@@ -34,11 +36,11 @@ public class UIKeybindButton extends UIButton {
         text = keyName(boundKey);
     }
 
-    /** Clears the bound key to unbound (-1). */
+    /** Clears the bound key to {@link #UNSET}. */
     public void clearKey() {
-        boundKey = -1;
+        boundKey = UNSET;
         listening = false;
-        text = keyName(-1);
+        text = keyName(UNSET);
     }
 
     /** Binds the given keycode and exits listening mode. */
@@ -116,7 +118,7 @@ public class UIKeybindButton extends UIButton {
     }
 
     static String keyName(int keycode) {
-        if (keycode == -1) return "";
+        if (keycode == UNSET) return "";
         String name = Input.Keys.toString(keycode);
         return (name != null) ? name : "Key " + keycode;
     }

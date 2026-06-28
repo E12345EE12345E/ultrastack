@@ -9,12 +9,14 @@ public class MainSettingsScreen extends MenuScreen {
     public MainSettingsScreen(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
 
-        elements.add(new UIText(0.5, 0.85, "Settings", 3));
-        elements.add(new UIButton(0.5, 0.65, 0.5, 0.1, "Movement Settings",
+        elements.add(new UIText(0.5, 0.88, "Settings", 3));
+        elements.add(new UIButton(0.5, 0.70, 0.5, 0.1, "Movement Settings",
                 () -> app.switchMenu(new MovementSettingsScreen(app))));
-        elements.add(new UIButton(0.5, 0.50, 0.5, 0.1, "Color Settings",
+        elements.add(new UIButton(0.5, 0.55, 0.5, 0.1, "Color Settings",
                 () -> app.switchMenu(new ColorSettingsScreen(app))));
-        elements.add(new UIButton(0.5, 0.22, 0.3, 0.08, "Back",
+        elements.add(new UIButton(0.5, 0.40, 0.5, 0.1, "Sound Settings",
+                () -> app.switchMenu(new SoundSettingsScreen(app))));
+        elements.add(new UIButton(0.5, 0.20, 0.3, 0.08, "Back",
                 () -> app.switchMenu(new MainMenu(app))));
     }
 

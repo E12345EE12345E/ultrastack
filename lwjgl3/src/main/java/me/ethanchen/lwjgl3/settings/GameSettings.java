@@ -5,8 +5,19 @@ import com.badlogic.gdx.Input;
 public class GameSettings {
     public MovementKeys movement = new MovementKeys();
     public ColorTweaks colors = new ColorTweaks();
+    public VolumeSettings volume = new VolumeSettings();
     public int arr = 33;
     public int das = 133;
+    public String lastUsername = "";
+
+    public static class VolumeSettings {
+        /** Master volume, 0–100. Applied to all audio. Default 50. */
+        public int master = 50;
+        /** SFX volume, 0–100. Applied on top of master for sound effects. Default 100. */
+        public int sfx = 100;
+        /** Music volume, 0–100. Applied on top of master for music. Default 80. */
+        public int music = 80;
+    }
 
     public static class PieceColorTweak {
         public int hue = 0;     // -20 to 20, added directly in degrees

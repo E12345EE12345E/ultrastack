@@ -50,6 +50,14 @@ public abstract class MenuScreen extends InputAdapter {
 
     @Override
     public boolean keyDown(int keycode) {
+        for (UIElement el : elements) {
+            if (el instanceof UITextBox) {
+                UITextBox box = (UITextBox) el;
+                if (box.focused && box.handleKeyDown(keycode)) {
+                    return true;
+                }
+            }
+        }
         if (keycode == Input.Keys.ESCAPE) {
             onEscPressed();
             return true;

@@ -1,23 +1,16 @@
 package me.ethanchen.headless;
 
-import com.badlogic.gdx.Application;
+import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.headless.HeadlessApplication;
 import com.badlogic.gdx.backends.headless.HeadlessApplicationConfiguration;
 
-/** Launches the headless application. Can be converted into a utilities project or a server application. */
 public class HeadlessLauncher {
-    public static void main(String[] args) {
-        createApplication();
-    }
-
-    private static Application createApplication() {
-        // Note: you can use a custom ApplicationListener implementation for the headless project instead of Main.
-        return new HeadlessApplication(new ServerApp(), getDefaultConfiguration());
-    }
-
-    private static HeadlessApplicationConfiguration getDefaultConfiguration() {
-        HeadlessApplicationConfiguration configuration = new HeadlessApplicationConfiguration();
-        configuration.updatesPerSecond = 60;
-        return configuration;
+    public static void main(String[] args) throws Exception {
+        DedicatedServer server = new DedicatedServer();
+        server.start();
+        // Keep JVM alive; use a minimal HeadlessApplication as the app container
+        HeadlessApplicationConfiguration config = new HeadlessApplicationConfiguration();
+        config.updatesPerSecond = -1; // no render loop needed
+        new HeadlessApplication(new ApplicationAdapter() {}, config);
     }
 }

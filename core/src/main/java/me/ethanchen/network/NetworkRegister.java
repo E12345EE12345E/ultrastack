@@ -15,7 +15,7 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class NetworkRegister {
-    public static final byte PROTOCOL_VERSION = 6;
+    public static final byte PROTOCOL_VERSION = 8;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -33,8 +33,23 @@ public class NetworkRegister {
         kryo.register(PlacementSoundBroadcast.class);
         kryo.register(HoldSoundBroadcast.class);
         kryo.register(LobbyPlayerListBroadcast.class);
+        // New c2s auth (fixed IDs)
+        kryo.register(LoginRequest.class, 101);
+        kryo.register(RegisterRequest.class, 102);
+        // New c2s room
+        kryo.register(RoomListRequest.class);
+        kryo.register(CreateRoomRequest.class);
+        kryo.register(JoinRoomRequest.class);
+        kryo.register(LeaveRoomRequest.class);
+        // New s2c auth
+        kryo.register(AuthResponse.class, 201);
+        // New s2c room
+        kryo.register(RoomListBroadcast.class);
+        kryo.register(RoomJoinResponse.class);
         // Other Packets
         kryo.register(DisconnectPacket.class);
+        kryo.register(ConnectionEstablishedPacket.class);
+        kryo.register(ConnectFailedPacket.class);
         // Gamemode
         kryo.register(ScoreModeData.class);
         kryo.register(ScoreModeEndData.class);
@@ -62,5 +77,7 @@ public class NetworkRegister {
         kryo.register(NetParticle[].class);
         kryo.register(ParticleSpawner.class);
         kryo.register(ParticleSpawner[].class);
+        // Room lifecycle
+        kryo.register(RoomClosedBroadcast.class);
     }
 }

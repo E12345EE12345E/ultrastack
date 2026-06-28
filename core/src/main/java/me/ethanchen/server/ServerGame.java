@@ -1,4 +1,4 @@
-package me.ethanchen.headless;
+package me.ethanchen.server;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -25,7 +25,7 @@ public class ServerGame {
     private GameMode gamemode;
     private int players;
     private GameHandler game;
-    private ServerApp app;
+    private GameRoomContext room;
     private int t;
     private int[] highestMoveId;
     private final ArrayList<NetParticle> pendingParticles = new ArrayList<>();
@@ -37,6 +37,10 @@ public class ServerGame {
     // Hold state
     private long lastHoldUsedMs = 0;
     private static final long HOLD_GLOBAL_LOCK_MS = 1000;
+    private static final long HARD_DROP_SUPPRESS_MS = 250L;
+
+    // Per-player hard-drop suppression after auto-lock
+    private long[] hardDropBlockedUntilMs;
 
     // Blocked-spawn cycling constants
     private static final float CYCLE_START       = 1.0f;
@@ -70,15 +74,14 @@ public class ServerGame {
     private float[] glowValues;
     private final Random scoreRng = new Random();
 
-    public ServerGame(ServerApp app) {
+    public ServerGame(GameRoomContext room) {
         inProgress = false;
         gamemode = GameMode.NONE;
-        this.app = app;
+        this.room = room;
     }
 
     public boolean startGame(GameMode gamemode, int players, int msToStart) {
         if (inProgress) return false;
-        // start game depending on gamemode
         inProgress = true;
         lastUpdateMs = System.currentTimeMillis();
         this.gamemode = gamemode;
@@ -89,6 +92,7 @@ public class ServerGame {
         gameEndTargetMs = gameStartMs + TIMER_DURATION_MS;
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
+        this.hardDropBlockedUntilMs = new long[players];
         Arrays.fill(this.highestMoveId, -1);
         // Hold state reset
         lastHoldUsedMs = 0;
@@ -138,26 +142,41 @@ public class ServerGame {
                 if (types[i] >= 0 && types[i] < moveValues.length) {
                     MoveType move = moveValues[types[i]];
                     if (move == MoveType.HARD_DROP) {
-                        LineClearResult result = board.hardDrop(playerId);
-                        if (result != null && result.placed) {
-                            processPlacement(result);
+                        if (System.currentTimeMillis() < hardDropBlockedUntilMs[playerId]) {
+                            // suppressed after auto-lock
+                        } else {
+                            LineClearResult result = board.hardDrop(playerId);
+                            if (result != null && result.placed) {
+                                processPlacement(result);
+                            }
                         }
                     } else if (move == MoveType.HOLD) {
-                        Piece currentPiece = board.getActivePieces().size() > playerId
-                                ? board.getActivePieces().get(playerId) : null;
-                        if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
-                            applyBlockedHold(playerId, board);
-                        } else if (board.useHold(playerId)) {
-                            lastHoldUsedMs = System.currentTimeMillis();
+                        if (!computeHoldAvailable(playerId)) {
                             HoldSoundBroadcast hsb = new HoldSoundBroadcast();
                             hsb.playerId = (byte) playerId;
+                            hsb.success = false;
                             pendingHoldSounds.add(hsb);
+                        } else {
+                            Piece currentPiece = board.getActivePieces().size() > playerId
+                                    ? board.getActivePieces().get(playerId) : null;
+                            if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
+                                applyBlockedHold(playerId, board);
+                            } else if (board.useHold(playerId)) {
+                                lastHoldUsedMs = System.currentTimeMillis();
+                                HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+                                hsb.playerId = (byte) playerId;
+                                hsb.success = true;
+                                pendingHoldSounds.add(hsb);
+                            }
                         }
                     } else {
                         board.applyMove(playerId, move);
                         LineClearResult lockResult = board.tryMovementLock(playerId);
                         if (lockResult != null && lockResult.placed) {
                             processPlacement(lockResult);
+                            if (!lockResult.manual) {
+                                hardDropBlockedUntilMs[playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
+                            }
                         }
                     }
                 }
@@ -167,7 +186,7 @@ public class ServerGame {
 
     /**
      * Shared post-placement logic: increments the placement counter, scores the result,
-     * and queues particles.  Used by hard drops, movement-overflow locks, and timer locks.
+     * and queues particles. Used by hard drops, movement-overflow locks, and timer locks.
      */
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
@@ -185,7 +204,6 @@ public class ServerGame {
 
     /**
      * Returns the accumulated individual particle events and clears the internal list.
-     * Called by {@link ServerApp#sendNetUpdates()} each broadcast cycle.
      */
     public ArrayList<NetParticle> getAndClearPendingParticles() {
         if (pendingParticles.isEmpty()) return null;
@@ -196,8 +214,6 @@ public class ServerGame {
 
     /**
      * Returns the accumulated compact spawner events and clears the internal list.
-     * Called by {@link ServerApp#sendNetUpdates()} each broadcast cycle alongside
-     * {@link #getAndClearPendingParticles()}.
      */
     public ArrayList<ParticleSpawner> getAndClearPendingSpawners() {
         if (pendingSpawners.isEmpty()) return null;
@@ -367,7 +383,6 @@ public class ServerGame {
             default:
                 break;
         }
-        // NONE (or any spin with unspecified line count falls through here)
         switch (lines) {
             case 1: return 100;
             case 2: return 200;
@@ -417,7 +432,6 @@ public class ServerGame {
         int count = players - 1;
         if (count <= 0) return -1;
         int pick = scoreRng.nextInt(count);
-        // Skip over the excluded player id
         if (pick >= excludeId) pick++;
         return pick;
     }
@@ -437,7 +451,6 @@ public class ServerGame {
         Board board = game.getBoards().get(0);
         if (board.getActivePieces().size() > playerId
                 && board.getActivePieces().get(playerId).isBlockedFromSpawning) {
-            // Hold during countdown is disabled
             if (explodeCountdown >= 0f) return false;
             return canHoldWhileBlocked(playerId);
         }
@@ -461,15 +474,6 @@ public class ServerGame {
      * Translates a {@link LineClearResult} into compact {@link ParticleSpawner} events and
      * any remaining individual {@link NetParticle} events, then queues them for the next
      * broadcast cycle.
-     *
-     * <ul>
-     *   <li>Placed cells → one {@code TYPE_HARD_DROP} spawner; the client reconstructs the
-     *       FLASH positions from the piece type, anchor, and rotation.</li>
-     *   <li>Each cleared row → one {@code TYPE_LINE_CLEAR} spawner carrying a tile-id array
-     *       of board width; {@code -1} at positions that had no cleared tile.</li>
-     *   <li>Broken cells (landed on allowedTiles=false) → individual TILE_BREAK
-     *       {@link NetParticle} objects (edge-case, not row-aligned).</li>
-     * </ul>
      */
     private void queueResultParticles(LineClearResult result) {
         // Hard-drop flash: one spawner encodes the whole piece
@@ -506,7 +510,7 @@ public class ServerGame {
             }
         }
 
-        // Broken cells (mino landed on allowedTiles=false): kept as individual NetParticles
+        // Broken cells: kept as individual NetParticles
         for (int[] cell : result.brokenCells) {
             NetParticle np = new NetParticle();
             np.boardIndex = 0;
@@ -523,21 +527,18 @@ public class ServerGame {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns the effective piece-cycling interval for player {@code i}:
-     * - When the explode countdown is active and in its first second, interpolates 0.25 -> 0.1.
-     * - Otherwise returns {@code timeBetweenNextPiece[i]}.
+     * Returns the effective piece-cycling interval for player {@code i}.
      */
     private float effectiveInterval(int i) {
         if (explodeCountdown >= 0f) {
-            float t = Math.min(explodeCountdown, 1f); // 0..1 over first second
-            return CYCLE_MIN + (EXPLODE_MIN_INTERVAL - CYCLE_MIN) * t;
+            float frac = Math.min(explodeCountdown, 1f);
+            return CYCLE_MIN + (EXPLODE_MIN_INTERVAL - CYCLE_MIN) * frac;
         }
         return timeBetweenNextPiece[i];
     }
 
     /**
-     * Returns true when player {@code i}'s blocked piece may be held (i.e., cycling
-     * has reached min interval and no explode countdown is running).
+     * Returns true when player {@code i}'s blocked piece may be held.
      */
     public boolean canHoldWhileBlocked(int i) {
         if (timeBetweenNextPiece == null || i < 0 || i >= players) return false;
@@ -558,7 +559,6 @@ public class ServerGame {
 
     /**
      * Core per-frame blocked-cycling update.
-     * Called each server tick while the game is in progress and not yet ended.
      */
     private void updateBlockedCycling(float dtSec) {
         if (game == null || game.getBoards().isEmpty()) return;
@@ -572,35 +572,26 @@ public class ServerGame {
             Piece piece = board.getActivePieces().get(i);
             boolean blocked = piece.isBlockedFromSpawning;
 
-            // Detect transition into blocked state
             if (blocked && !wasBlocked[i]) {
                 timeBetweenNextPiece[i] = CYCLE_START;
                 cycleTimer[i] = 0f;
             }
-            // Detect transition out of blocked state (freed by external board change)
             if (!blocked && wasBlocked[i]) {
                 cycleTimer[i] = 0f;
-                // explode countdown reset handled elsewhere
             }
             wasBlocked[i] = blocked;
 
             if (!blocked) continue;
 
-            // Advance the cycle timer
             cycleTimer[i] += dtSec;
             float interval = effectiveInterval(i);
             while (cycleTimer[i] >= interval) {
                 cycleTimer[i] -= interval;
-                // Store previous piece type for coyote-time hold
                 previousCyclePieceId[i] = board.getActivePieces().get(i).type;
                 lastCycleSwitchMs[i] = now;
-                // Advance to next piece in queue
                 board.spawnNextPiece(i);
-                // Tighten the interval (only clamp timeBetweenNextPiece, not during countdown)
                 timeBetweenNextPiece[i] = Math.max(CYCLE_MIN, timeBetweenNextPiece[i] * CYCLE_MULT);
-                // Recalculate interval in case it changed
                 interval = effectiveInterval(i);
-                // Check if newly spawned piece is freed
                 Piece newPiece = board.getActivePieces().get(i);
                 if (!newPiece.isBlockedFromSpawning) {
                     wasBlocked[i] = false;
@@ -613,7 +604,6 @@ public class ServerGame {
             }
         }
 
-        // --- Explode countdown trigger and advancement ---
         boolean allBlockedAtMin = players > 0;
         for (int i = 0; i < players; i++) {
             if (i >= board.getActivePieces().size()) { allBlockedAtMin = false; break; }
@@ -633,16 +623,12 @@ public class ServerGame {
                 triggerEndGame(false);
             }
         } else if (!allBlockedAtMin && explodeCountdown >= 0f && !gameEnded) {
-            // Some player became unblocked outside the cycling loop (shouldn't normally happen,
-            // but guard against it to avoid a phantom countdown)
             explodeCountdown = -1f;
         }
     }
 
     /**
      * Applies a hold action for a blocked player, with coyote-time support.
-     * The piece swapped into hold is the previous piece if within the coyote window,
-     * otherwise the currently displayed piece.
      */
     private void applyBlockedHold(int playerId, Board board) {
         if (!canHoldWhileBlocked(playerId)) return;
@@ -650,8 +636,6 @@ public class ServerGame {
 
         long now = System.currentTimeMillis();
         byte currentType = board.getActivePieces().get(playerId).type;
-        // Coyote: if hold was pressed within COYOTE_MS of the last cycle switch,
-        // use the previous piece type instead.
         byte effectiveType = (lastCycleSwitchMs[playerId] > 0
                 && (now - lastCycleSwitchMs[playerId]) <= COYOTE_MS)
                 ? previousCyclePieceId[playerId]
@@ -661,25 +645,22 @@ public class ServerGame {
         board.setHeldPieceType(effectiveType);
 
         if (oldHeld == 0) {
-            // Hold was empty: advance queue for a new piece
             board.spawnNextPiece(playerId);
         } else {
-            // Swap in the previously held piece
             board.spawnHeldPiece(playerId, oldHeld);
         }
 
-        // Reset cycling for this player so they get the full 1s on the new piece
         timeBetweenNextPiece[playerId] = CYCLE_START;
         cycleTimer[playerId] = 0f;
         lastHoldUsedMs = System.currentTimeMillis();
         HoldSoundBroadcast hsb = new HoldSoundBroadcast();
         hsb.playerId = (byte) playerId;
+        hsb.success = true;
         pendingHoldSounds.add(hsb);
     }
 
     /**
      * Called when a player's piece is freed during the explode countdown.
-     * Resets the countdown so the game can continue.
      */
     private void nearDeathSave() {
         explodeCountdown = -1f;
@@ -687,6 +668,11 @@ public class ServerGame {
 
     /** Fires the end-game sequence: broadcasts EndGameBroadcast and stops the game. */
     private void triggerEndGame(boolean win) {
+        triggerEndGame(win, false);
+    }
+
+    /** Fires the end-game sequence with an optional disconnect flag. */
+    private void triggerEndGame(boolean win, boolean disconnected) {
         if (gameEnded) return;
         gameEnded = true;
         ScoreModeEndData scoreEnd = null;
@@ -695,12 +681,12 @@ public class ServerGame {
             scoreEnd.finalScore = totalScore;
             scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
         }
-        app.sendEndGame(win, scoreEnd);
+        room.sendEndGame(win, scoreEnd, disconnected);
         stopGame();
     }
 
     public void handleDisconnectedPlayer(int id) {
-        stopGame(); // for now, because maybe implement temporary bot player or something later
+        triggerEndGame(false, true);
     }
 
     public void update() {
@@ -711,7 +697,7 @@ public class ServerGame {
                 break;
             case MULTIPLAYER_SCORE:
                 updateScoreMode();
-                sendNetUpdates();
+                if (game != null) sendNetUpdates();
                 break;
         }
 
@@ -719,10 +705,15 @@ public class ServerGame {
         t++;
     }
 
-    public void updateScoreMode() { // called if gamemode is a scoring type mode
+    public void updateScoreMode() {
         game.update(deltatime);
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
-            if (r.placed) processPlacement(r);
+            if (r.placed) {
+                processPlacement(r);
+                if (!r.manual) {
+                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
+                }
+            }
         }
         if (game.isStarted() && !gameEnded) {
             updateBlockedCycling(deltatime / 1000f);
@@ -733,8 +724,8 @@ public class ServerGame {
     }
 
     public void sendNetUpdates() {
-        if (t % 2 == 0) {
-            app.sendNetUpdates();
+        if (t % 2 == 0 && game != null) {
+            room.sendNetUpdates();
         }
     }
 
