@@ -238,7 +238,7 @@ public class BoardRenderer {
                               ShapeRenderer shapes) {
         boolean[][] allowed = board.getAllowedTiles();
         shapes.begin(ShapeRenderer.ShapeType.Line);
-        shapes.setColor(Color.WHITE.r, Color.WHITE.g, Color.WHITE.b, Color.WHITE.a * 0.5f);
+        shapes.setColor(Color.WHITE.r * 0.5f, Color.WHITE.g * 0.5f, Color.WHITE.b * 0.5f, Color.WHITE.a * 0.5f);
         for (int y = 0; y < board.bh(); y++) {
             for (int x = 0; x < board.bw(); x++) {
                 if (!allowed[y][x]) continue;

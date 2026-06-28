@@ -9,6 +9,7 @@ import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.LobbyPlayerListBroadcast;
+import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.network.packets.s2c.TextMessageBroadcast;
 import me.ethanchen.util.TextSanitizer;
@@ -29,6 +30,9 @@ public class MultiplayerLobby extends MenuScreen {
         chatLines = new ArrayDeque<String>();
 
         elements.add(new UIText(0.5, 0.8, "Lobby", 4));
+
+        // Leave button — top-left corner
+        elements.add(new UIButton(0.08, 0.93, 0.12, 0.07, "Leave", this::leaveRoom));
 
         chatoutput = new TextBoxOutput();
         chat = new TextInput();
@@ -55,15 +59,20 @@ public class MultiplayerLobby extends MenuScreen {
         }
     }
 
-    @Override
-    protected void onEscPressed() {
+    private void leaveRoom() {
         app.sendLeaveRoomRequest();
-        app.disconnect();
         if (app.isLanMode()) {
+            app.stopLanServer();
+            app.disconnect();
             app.switchMenu(new LanMenu(app));
         } else {
             app.switchMenu(new RoomBrowserMenu(app));
         }
+    }
+
+    @Override
+    protected void onEscPressed() {
+        leaveRoom();
     }
 
     @Override
@@ -98,6 +107,15 @@ public class MultiplayerLobby extends MenuScreen {
                 playerListing += "p" + (i+1) + ": " + p.playerNames[i] + "\n";
             }
             playerNameList.set(playerListing);
+        }
+        if (w.packet instanceof RoomClosedBroadcast) {
+            // Host left the lobby — return to the room browser (stay connected online).
+            if (app.isLanMode()) {
+                app.disconnect();
+                app.switchMenu(new LanMenu(app));
+            } else {
+                app.switchMenu(new RoomBrowserMenu(app));
+            }
         }
     }
 }

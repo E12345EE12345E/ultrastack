@@ -7,6 +7,7 @@ import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
+import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.*;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 import me.ethanchen.util.TextSanitizer;
@@ -67,14 +68,37 @@ public class GameRoom implements Runnable, GameRoomContext {
     }
 
     /**
-     * Called when a client disconnects or leaves.
-     * Removes the member, ends any in-progress game, and updates the player list.
+     * Called when a client disconnects or sends LeaveRoomRequest.
+     * Removes the member from this room. If the host leaves while no game is in progress,
+     * broadcasts {@link RoomClosedBroadcast} to all remaining members and evicts them.
+     *
+     * @return list of connection IDs that were evicted as a side-effect (non-empty only when
+     *         the host leaves in lobby state); callers must clear these sessions' currentRoomId.
      */
-    public synchronized void handleDisconnect(int connId) {
-        if (!connToSlot.containsKey(connId)) return;
+    public synchronized List<Integer> handleDisconnect(int connId) {
+        List<Integer> evicted = new ArrayList<>();
+        if (!connToSlot.containsKey(connId)) return evicted;
+
+        // If the host leaves while no game is in progress, kick everyone else first.
+        if (connId == hostConnId && (serverGame == null || !serverGame.isInProgress())) {
+            RoomClosedBroadcast b = new RoomClosedBroadcast();
+            b.reason = "host_left";
+            for (int otherConnId : slotToConn) {
+                if (otherConnId != connId) {
+                    sender.sendTCP(otherConnId, b);
+                    evicted.add(otherConnId);
+                }
+            }
+            slotToConn.clear();
+            connToSlot.clear();
+            connToName.clear();
+            roomEmpty = true;
+            return evicted;
+        }
+
+        // Normal removal: compact slot list.
         int slot = connToSlot.remove(connId);
         slotToConn.remove(slot);
-        // Re-compact slot list and mappings
         connToSlot.clear();
         for (int i = 0; i < slotToConn.size(); i++) {
             connToSlot.put(slotToConn.get(i), i);
@@ -85,16 +109,12 @@ public class GameRoom implements Runnable, GameRoomContext {
             serverGame.handleDisconnectedPlayer(slot);
         }
 
-        if (connId == hostConnId && serverGame != null && serverGame.isInProgress()) {
-            // Host disconnected during game — end it
-            serverGame.handleDisconnectedPlayer(slot);
-        }
-
         broadcastPlayerList();
 
         if (slotToConn.isEmpty()) {
             roomEmpty = true;
         }
+        return evicted;
     }
 
     public boolean isEmpty() {

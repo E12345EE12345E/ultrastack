@@ -261,8 +261,18 @@ public class ServerCore implements PacketSender, Runnable {
         AuthResponse res = new AuthResponse();
         String error = authProvider.register(req.username, req.passcode);
         if (error == null) {
-            res.success = true;
-            res.reason = "";
+            // Registration succeeded — also authenticate the session so the player
+            // can immediately use room operations without a separate login step.
+            String loginError = authProvider.login(req.username, req.passcode, session);
+            if (loginError == null) {
+                res.success = true;
+                res.reason = "";
+                res.accountUuid = session.accountUuid;
+            } else {
+                // Account was created but immediate login failed (shouldn't happen).
+                res.success = false;
+                res.reason = "registered but login failed: " + loginError;
+            }
         } else {
             res.success = false;
             res.reason = error;
@@ -331,11 +341,16 @@ public class ServerCore implements PacketSender, Runnable {
 
     private void handleLeaveRoom(Session session) {
         if (session.currentRoomId == null) return;
-        GameRoom room = rooms.get(session.currentRoomId);
+        String roomId = session.currentRoomId;
+        GameRoom room = rooms.get(roomId);
         if (room != null) {
-            room.handleDisconnect(session.connectionId);
+            List<Integer> evicted = room.handleDisconnect(session.connectionId);
+            for (int evictedConnId : evicted) {
+                Session evictedSession = sessions.get(evictedConnId);
+                if (evictedSession != null) evictedSession.currentRoomId = null;
+            }
             if (room.isEmpty()) {
-                rooms.remove(session.currentRoomId);
+                rooms.remove(roomId);
                 room.stop();
             }
         }
@@ -352,11 +367,16 @@ public class ServerCore implements PacketSender, Runnable {
         System.out.println("[ServerCore] Disconnected: connId=" + connectionId
                 + " user=" + session.username);
         if (session.currentRoomId != null) {
-            GameRoom room = rooms.get(session.currentRoomId);
+            String roomId = session.currentRoomId;
+            GameRoom room = rooms.get(roomId);
             if (room != null) {
-                room.handleDisconnect(connectionId);
+                List<Integer> evicted = room.handleDisconnect(connectionId);
+                for (int evictedConnId : evicted) {
+                    Session evictedSession = sessions.get(evictedConnId);
+                    if (evictedSession != null) evictedSession.currentRoomId = null;
+                }
                 if (room.isEmpty()) {
-                    rooms.remove(session.currentRoomId);
+                    rooms.remove(roomId);
                     room.stop();
                 }
             }
