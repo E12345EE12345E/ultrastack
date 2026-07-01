@@ -71,6 +71,12 @@ public class LineClearResult {
      */
     public boolean manual = true;
 
+    /**
+     * When {@code placed == false} after a hard drop, the id of the other player whose
+     * active piece is supporting this piece (preventing it from locking).  -1 otherwise.
+     */
+    public int blockedByPlayerId = -1;
+
     /** Convenience: number of rows cleared by this drop. */
     public int numClearedRows() {
         return clearedRows.length;

@@ -178,10 +178,48 @@ public class Board {
         return true;
     }
 
+    /**
+     * Returns the id of another player whose active piece is the sole reason piece {@code id}
+     * cannot move laterally by {@code xdiff} columns.  Returns -1 if the move is blocked by a
+     * wall, the board floor/ceiling, any locked tile, a disallowed cell, or if more than one
+     * other player contributes to the blockage.  This enforces the "fully blocked by a single
+     * other player" requirement for the bump event.
+     */
+    public int getLateralBlocker(int id, int xdiff) {
+        if (id < 0 || id >= activePieces.size()) return -1;
+        Piece p = activePieces.get(id);
+        int blockerId = -1;
+        for (int i = 0; i < p.tiles.length; i++) {
+            float lx = p.location.x + p.tiles[i].x + xdiff;
+            float ly = p.location.y + p.tiles[i].y;
+            // Any wall/floor/ceiling/locked-tile involvement means it is NOT a pure player bump
+            if (lx < 0 || lx >= width || ly < 0 || ly >= height) return -1;
+            int ix = (int) lx, iy = (int) ly;
+            if (!allowedTiles[iy][ix]) return -1;
+            if (board[iy][ix] != null && board[iy][ix].get() != 0) return -1;
+            // Check if another player's active piece occupies this cell
+            for (int j = 0; j < activePieces.size(); j++) {
+                if (j == id) continue;
+                Piece other = activePieces.get(j);
+                for (Vector2 t : other.tiles) {
+                    if (lx == t.x + other.location.x && ly == t.y + other.location.y) {
+                        if (blockerId == -1) {
+                            blockerId = j;
+                        } else if (blockerId != j) {
+                            return -1; // two different players involved
+                        }
+                    }
+                }
+            }
+        }
+        return blockerId;
+    }
+
     public boolean moveLeft(int id) {
         if (canMovePiece(id, -1, 0)) {
             Piece p = activePieces.get(id);
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.location.add(-1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -193,6 +231,7 @@ public class Board {
         if (canMovePiece(id, 1, 0)) {
             Piece p = activePieces.get(id);
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.location.add(1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -217,6 +256,7 @@ public class Board {
         p.rotateCW();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -224,6 +264,7 @@ public class Board {
         Vector2[] kicks = kickTableFor(p.type);
         if (kicks != null && tryKicks(id, fromRotation * 2, kicks)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -238,6 +279,7 @@ public class Board {
         p.rotateCCW();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -246,6 +288,7 @@ public class Board {
         int row = (fromRotation == 0) ? 7 : fromRotation * 2 - 1;
         if (kicks != null && tryKicks(id, row, kicks)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -332,6 +375,7 @@ public class Board {
         p.rotate180();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCW(); p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -341,6 +385,7 @@ public class Board {
             int stride = (p.type == Piece.I) ? 1 : 5;
             if (tryKicks180(id, fromRotation, kicks180, stride)) {
                 if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+                p.movementTimer = 0f;
                 p.rotateTexCW(); p.rotateTexCW();
                 p.lastMoveWasRotation = true;
                 return true;
@@ -358,7 +403,11 @@ public class Board {
         switch (t) {
             case LEFT: return moveLeft(pieceId);
             case RIGHT: return moveRight(pieceId);
-            case SOFT_DROP: return moveDown(pieceId);
+            case SOFT_DROP: {
+                boolean moved = moveDown(pieceId);
+                if (moved) activePieces.get(pieceId).movementTimer = 0f;
+                return moved;
+            }
             case ROTATE_CW: return rotateCW(pieceId);
             case ROTATE_CCW: return rotateCCW(pieceId);
             case ROTATE_180: return rotate180(pieceId);
@@ -384,6 +433,37 @@ public class Board {
     private static int[] rotateOffset(int x, int y, int r) {
         for (int i = 0; i < r; i++) { int t = x; x = y; y = -t; }
         return new int[]{x, y};
+    }
+
+    /**
+     * Scans the cells directly below each mino of piece {@code id} at its current
+     * position and returns the id of the single other player whose active piece is
+     * responsible for supporting it.  Returns -1 if no other player is found, the floor
+     * is involved, or multiple players are involved.
+     */
+    private int findRestingBlocker(int id) {
+        Piece p = activePieces.get(id);
+        int blockerId = -1;
+        for (Vector2 offset : p.tiles) {
+            int mx = (int) Math.floor(p.location.x + offset.x);
+            int my = (int) Math.floor(p.location.y + offset.y);
+            int below = my - 1;
+            if (below < 0) return -1; // resting on floor
+            for (int j = 0; j < activePieces.size(); j++) {
+                if (j == id) continue;
+                Piece other = activePieces.get(j);
+                for (Vector2 t : other.tiles) {
+                    if (mx == (int)(t.x + other.location.x) && below == (int)(t.y + other.location.y)) {
+                        if (blockerId == -1) {
+                            blockerId = j;
+                        } else if (blockerId != j) {
+                            return -1;
+                        }
+                    }
+                }
+            }
+        }
+        return blockerId;
     }
 
     /**
@@ -433,6 +513,7 @@ public class Board {
 
         if (!hasSolidSupport) {
             result.placed = false;
+            result.blockedByPlayerId = findRestingBlocker(id);
             return result;
         }
 
@@ -611,6 +692,16 @@ public class Board {
         if (p.lockedMovementCounter > 15 && hasSolidSupportNow(id))
             return lockDrop(id);
         return null;
+    }
+
+    /**
+     * Advances movement timers for all active pieces by {@code deltaMs} milliseconds.
+     * The timer counts up each tick; it is reset to 0 on manual move, rotate, or soft-drop.
+     */
+    public void updateMovementTimers(int deltaMs) {
+        for (int i = 0; i < activePieces.size(); i++) {
+            activePieces.get(i).movementTimer += deltaMs;
+        }
     }
 
     /**

@@ -32,6 +32,7 @@ public class NetworkRegister {
         kryo.register(ParticleBroadcast.class);
         kryo.register(PlacementSoundBroadcast.class);
         kryo.register(HoldSoundBroadcast.class);
+        kryo.register(BumpSoundBroadcast.class);
         kryo.register(LobbyPlayerListBroadcast.class);
         // New c2s auth (fixed IDs)
         kryo.register(LoginRequest.class, 101);
