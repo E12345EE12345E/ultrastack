@@ -2,6 +2,7 @@ package me.ethanchen.lwjgl3.menuscreens;
 
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
+import me.ethanchen.lwjgl3.util.AddressParser;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
@@ -109,21 +110,17 @@ public class LanMenu extends MenuScreen {
             String ip = NetConfig.HOST;
             int port = NetConfig.PORT;
             if (!addr.isEmpty()) {
-                String[] parts = addr.split(":");
-                if (parts.length >= 2) {
-                    try {
-                        port = Integer.parseInt(parts[parts.length - 1]);
-                        if (!app.validPort(port)) {
-                            messageText.set("Invalid port number.");
-                            return;
-                        }
-                        ip = addr.substring(0, addr.lastIndexOf(':'));
-                    } catch (NumberFormatException e) {
-                        messageText.set("Port must be a number.");
+                try {
+                    AddressParser.Result parsed = AddressParser.parse(addr, NetConfig.PORT);
+                    if (!app.validPort(parsed.port)) {
+                        messageText.set("Invalid port number.");
                         return;
                     }
-                } else {
-                    ip = parts[0];
+                    ip = parsed.host;
+                    port = parsed.port;
+                } catch (AddressParser.ParseException e) {
+                    messageText.set(e.getMessage());
+                    return;
                 }
             }
 

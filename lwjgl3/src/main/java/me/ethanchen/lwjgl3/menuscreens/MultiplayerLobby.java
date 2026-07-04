@@ -89,7 +89,6 @@ public class MultiplayerLobby extends MenuScreen {
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
         if (w.packet instanceof TextMessageBroadcast) {
-            System.out.println(w.packet);
             TextMessageBroadcast p = (TextMessageBroadcast) w.packet;
             chatLines.add("[" + p.sender + "] " + p.message + " ");
             while (chatLines.size() > MAX_CHAT_LINES) {

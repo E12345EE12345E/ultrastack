@@ -15,7 +15,9 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class NetworkRegister {
-    public static final byte PROTOCOL_VERSION = 8;
+    // Bumped: removed a duplicate float[].class registration, which shifts the Kryo
+    // auto-assigned ids of every registration after it.
+    public static final byte PROTOCOL_VERSION = 9;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -72,7 +74,6 @@ public class NetworkRegister {
         kryo.register(Piece.NetPiece[].class);
         kryo.register(PieceQueue.NetQueue[].class);
         kryo.register(PieceQueue.BagTypes.class);
-        kryo.register(float[].class);
         kryo.register(NetParticle.class);
         kryo.register(NetParticle[].class);
         kryo.register(ParticleSpawner.class);

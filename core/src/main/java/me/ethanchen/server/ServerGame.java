@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
 
+import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
@@ -21,8 +22,8 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 public class ServerGame {
     private volatile boolean inProgress; public boolean isInProgress() { return inProgress; }
     private volatile long lastUpdateMs;
-    private int deltatime;
-    private GameMode gamemode;
+    private int deltaTime;
+    private GameMode gameMode;
     private int players;
     private GameHandler game;
     private GameRoomContext room;
@@ -36,19 +37,9 @@ public class ServerGame {
 
     // Hold state
     private long lastHoldUsedMs = 0;
-    private static final long HOLD_GLOBAL_LOCK_MS = 1000;
-    private static final long HARD_DROP_SUPPRESS_MS = 250L;
 
     // Per-player hard-drop suppression after auto-lock
     private long[] hardDropBlockedUntilMs;
-
-    // Blocked-spawn cycling constants
-    private static final float CYCLE_START       = 1.0f;
-    private static final float CYCLE_MULT        = 0.8f;
-    private static final float CYCLE_MIN         = 0.25f;
-    private static final long  COYOTE_MS         = 50L;
-    private static final float EXPLODE_DURATION  = 2.0f;
-    private static final float EXPLODE_MIN_INTERVAL = 0.1f;
 
     // Per-player blocked-cycling state (re-initialized in startGame)
     private float[]  timeBetweenNextPiece;
@@ -64,7 +55,6 @@ public class ServerGame {
     // Timer state
     private long gameStartMs;
     private long gameEndTargetMs;
-    private static final long TIMER_DURATION_MS = 4L * 60 * 1000;
 
     // MULTIPLAYER_SCORE mode state
     private long totalScore;
@@ -76,20 +66,26 @@ public class ServerGame {
 
     public ServerGame(GameRoomContext room) {
         inProgress = false;
-        gamemode = GameMode.NONE;
+        gameMode = GameMode.NONE;
         this.room = room;
     }
 
-    public boolean startGame(GameMode gamemode, int players, int msToStart) {
+    /**
+     * Starts a new game. Synchronized (along with the other mutation entry points below) so
+     * that a disconnect arriving on the {@code ServerCore} thread via
+     * {@link #handleDisconnectedPlayer(int)} can never interleave with an in-flight
+     * {@link #update()}/{@link #applyMoves(int, int[], byte[])} call on the room thread.
+     */
+    public synchronized boolean startGame(GameMode gameMode, int players, int msToStart) {
         if (inProgress) return false;
         inProgress = true;
         lastUpdateMs = System.currentTimeMillis();
-        this.gamemode = gamemode;
+        this.gameMode = gameMode;
         this.players = players;
         this.game = new GameHandler(players);
-        this.game.init(gamemode, msToStart);
+        this.game.init(gameMode, msToStart);
         gameStartMs     = System.currentTimeMillis() + msToStart;
-        gameEndTargetMs = gameStartMs + TIMER_DURATION_MS;
+        gameEndTargetMs = gameStartMs + GameConstants.SCORE_MODE_DURATION_MS;
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
         this.hardDropBlockedUntilMs = new long[players];
@@ -102,7 +98,7 @@ public class ServerGame {
         lastCycleSwitchMs    = new long[players];
         previousCyclePieceId = new byte[players];
         wasBlocked           = new boolean[players];
-        Arrays.fill(timeBetweenNextPiece, CYCLE_START);
+        Arrays.fill(timeBetweenNextPiece, GameConstants.CYCLE_START);
         explodeCountdown = -1f;
         gameEnded        = false;
         // Score-mode state reset
@@ -116,8 +112,8 @@ public class ServerGame {
         return true;
     }
 
-    public void stopGame() {
-        this.gamemode = GameMode.NONE;
+    public synchronized void stopGame() {
+        this.gameMode = GameMode.NONE;
         this.game = null;
         this.players = 0;
         this.highestMoveId = null;
@@ -129,55 +125,56 @@ public class ServerGame {
         return highestMoveId[playerId];
     }
 
-    public void applyMoves(int playerId, int[] ids, byte[] types) {
+    public synchronized void applyMoves(int playerId, int[] ids, byte[] types) {
         if (!inProgress || game == null || ids == null || types == null) return;
+        if (ids.length != types.length) return; // malformed/corrupt request
         if (playerId < 0 || playerId >= players) return;
         if (game.getBoards().isEmpty()) return;
         Board board = game.getBoards().get(0);
         if (board.getActivePieces().size() <= playerId) return;
         MoveType[] moveValues = MoveType.values();
         for (int i = 0; i < ids.length; i++) {
-            if (ids[i] > highestMoveId[playerId]) {
-                highestMoveId[playerId] = ids[i];
-                if (types[i] >= 0 && types[i] < moveValues.length) {
-                    MoveType move = moveValues[types[i]];
-                    if (move == MoveType.HARD_DROP) {
-                        if (System.currentTimeMillis() < hardDropBlockedUntilMs[playerId]) {
-                            // suppressed after auto-lock
-                        } else {
-                            LineClearResult result = board.hardDrop(playerId);
-                            if (result != null && result.placed) {
-                                processPlacement(result);
-                            }
-                        }
-                    } else if (move == MoveType.HOLD) {
-                        if (!computeHoldAvailable(playerId)) {
-                            HoldSoundBroadcast hsb = new HoldSoundBroadcast();
-                            hsb.playerId = (byte) playerId;
-                            hsb.success = false;
-                            pendingHoldSounds.add(hsb);
-                        } else {
-                            Piece currentPiece = board.getActivePieces().size() > playerId
-                                    ? board.getActivePieces().get(playerId) : null;
-                            if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
-                                applyBlockedHold(playerId, board);
-                            } else if (board.useHold(playerId)) {
-                                lastHoldUsedMs = System.currentTimeMillis();
-                                HoldSoundBroadcast hsb = new HoldSoundBroadcast();
-                                hsb.playerId = (byte) playerId;
-                                hsb.success = true;
-                                pendingHoldSounds.add(hsb);
-                            }
-                        }
-                    } else {
-                        board.applyMove(playerId, move);
-                        LineClearResult lockResult = board.tryMovementLock(playerId);
-                        if (lockResult != null && lockResult.placed) {
-                            processPlacement(lockResult);
-                            if (!lockResult.manual) {
-                                hardDropBlockedUntilMs[playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
-                            }
-                        }
+            if (ids[i] <= highestMoveId[playerId]) continue;
+            // Ack the move id immediately: it's the client's own monotonic counter, so once
+            // seen it must never be replayed, even if the move below turns out to be a no-op.
+            highestMoveId[playerId] = ids[i];
+            if (types[i] < 0 || types[i] >= moveValues.length) continue;
+            MoveType move = moveValues[types[i]];
+            if (move == MoveType.HARD_DROP) {
+                if (System.currentTimeMillis() < hardDropBlockedUntilMs[playerId]) {
+                    // suppressed after auto-lock
+                } else {
+                    LineClearResult result = board.hardDrop(playerId);
+                    if (result != null && result.placed) {
+                        processPlacement(result);
+                    }
+                }
+            } else if (move == MoveType.HOLD) {
+                if (!computeHoldAvailable(playerId)) {
+                    HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+                    hsb.playerId = (byte) playerId;
+                    hsb.success = false;
+                    pendingHoldSounds.add(hsb);
+                } else {
+                    Piece currentPiece = board.getActivePieces().size() > playerId
+                            ? board.getActivePieces().get(playerId) : null;
+                    if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
+                        applyBlockedHold(playerId, board);
+                    } else if (board.useHold(playerId)) {
+                        lastHoldUsedMs = System.currentTimeMillis();
+                        HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+                        hsb.playerId = (byte) playerId;
+                        hsb.success = true;
+                        pendingHoldSounds.add(hsb);
+                    }
+                }
+            } else {
+                board.applyMove(playerId, move);
+                LineClearResult lockResult = board.tryMovementLock(playerId);
+                if (lockResult != null && lockResult.placed) {
+                    processPlacement(lockResult);
+                    if (!lockResult.manual) {
+                        hardDropBlockedUntilMs[playerId] = System.currentTimeMillis() + GameConstants.HARD_DROP_SUPPRESS_MS;
                     }
                 }
             }
@@ -191,7 +188,7 @@ public class ServerGame {
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
         int priorCombo = game.getCombo();
-        switch (gamemode) {
+        switch (gameMode) {
             case MULTIPLAYER_SCORE:
                 scoreHardDrop(result);
                 break;
@@ -294,10 +291,10 @@ public class ServerGame {
 
         // --- Apply multipliers (stacking multiplicatively) ---
         double multiplier = 1.0;
-        if (b2bBonus)    multiplier *= 1.25;
-        if (comboBonus)  multiplier *= 1.5;
-        if (glowBonus)   multiplier *= 2.0;
-        if (diffColBonus) multiplier *= 1.2;
+        if (b2bBonus)    multiplier *= GameConstants.B2B_MULTIPLIER;
+        if (comboBonus)  multiplier *= GameConstants.COMBO_MULTIPLIER;
+        if (glowBonus)   multiplier *= GameConstants.GLOW_MULTIPLIER;
+        if (diffColBonus) multiplier *= GameConstants.DIFF_COLUMN_MULTIPLIER;
         long points = Math.round(base * multiplier);
         totalScore += points;
 
@@ -345,7 +342,7 @@ public class ServerGame {
         // --- Gravity ramp: each cleared line speeds up gravity ---
         int newGravity = game.getGravity();
         for (int i = 0; i < lines; i++) {
-            newGravity = (int) Math.max(50, newGravity * 0.95);
+            newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
         }
         game.setGravity(newGravity);
     }
@@ -455,7 +452,7 @@ public class ServerGame {
             return canHoldWhileBlocked(playerId);
         }
         long now = System.currentTimeMillis();
-        boolean globalLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < HOLD_GLOBAL_LOCK_MS;
+        boolean globalLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < GameConstants.HOLD_GLOBAL_LOCK_MS;
         return !board.isPlayerHoldUsed(playerId) && !globalLock;
     }
 
@@ -532,7 +529,7 @@ public class ServerGame {
     private float effectiveInterval(int i) {
         if (explodeCountdown >= 0f) {
             float frac = Math.min(explodeCountdown, 1f);
-            return CYCLE_MIN + (EXPLODE_MIN_INTERVAL - CYCLE_MIN) * frac;
+            return GameConstants.CYCLE_MIN + (GameConstants.EXPLODE_MIN_INTERVAL - GameConstants.CYCLE_MIN) * frac;
         }
         return timeBetweenNextPiece[i];
     }
@@ -542,7 +539,7 @@ public class ServerGame {
      */
     public boolean canHoldWhileBlocked(int i) {
         if (timeBetweenNextPiece == null || i < 0 || i >= players) return false;
-        return timeBetweenNextPiece[i] <= CYCLE_MIN && explodeCountdown < 0f;
+        return timeBetweenNextPiece[i] <= GameConstants.CYCLE_MIN && explodeCountdown < 0f;
     }
 
     public boolean computeOwnPieceHoldGlow(int playerId) {
@@ -573,7 +570,7 @@ public class ServerGame {
             boolean blocked = piece.isBlockedFromSpawning;
 
             if (blocked && !wasBlocked[i]) {
-                timeBetweenNextPiece[i] = CYCLE_START;
+                timeBetweenNextPiece[i] = GameConstants.CYCLE_START;
                 cycleTimer[i] = 0f;
             }
             if (!blocked && wasBlocked[i]) {
@@ -590,7 +587,7 @@ public class ServerGame {
                 previousCyclePieceId[i] = board.getActivePieces().get(i).type;
                 lastCycleSwitchMs[i] = now;
                 board.spawnNextPiece(i);
-                timeBetweenNextPiece[i] = Math.max(CYCLE_MIN, timeBetweenNextPiece[i] * CYCLE_MULT);
+                timeBetweenNextPiece[i] = Math.max(GameConstants.CYCLE_MIN, timeBetweenNextPiece[i] * GameConstants.CYCLE_MULT);
                 interval = effectiveInterval(i);
                 Piece newPiece = board.getActivePieces().get(i);
                 if (!newPiece.isBlockedFromSpawning) {
@@ -608,7 +605,7 @@ public class ServerGame {
         for (int i = 0; i < players; i++) {
             if (i >= board.getActivePieces().size()) { allBlockedAtMin = false; break; }
             Piece p = board.getActivePieces().get(i);
-            if (!p.isBlockedFromSpawning || timeBetweenNextPiece[i] > CYCLE_MIN) {
+            if (!p.isBlockedFromSpawning || timeBetweenNextPiece[i] > GameConstants.CYCLE_MIN) {
                 allBlockedAtMin = false;
                 break;
             }
@@ -619,7 +616,7 @@ public class ServerGame {
                 explodeCountdown = 0f;
             }
             explodeCountdown += dtSec;
-            if (explodeCountdown >= EXPLODE_DURATION) {
+            if (explodeCountdown >= GameConstants.EXPLODE_DURATION) {
                 triggerEndGame(false);
             }
         } else if (!allBlockedAtMin && explodeCountdown >= 0f && !gameEnded) {
@@ -637,7 +634,7 @@ public class ServerGame {
         long now = System.currentTimeMillis();
         byte currentType = board.getActivePieces().get(playerId).type;
         byte effectiveType = (lastCycleSwitchMs[playerId] > 0
-                && (now - lastCycleSwitchMs[playerId]) <= COYOTE_MS)
+                && (now - lastCycleSwitchMs[playerId]) <= GameConstants.COYOTE_MS)
                 ? previousCyclePieceId[playerId]
                 : currentType;
 
@@ -650,7 +647,7 @@ public class ServerGame {
             board.spawnHeldPiece(playerId, oldHeld);
         }
 
-        timeBetweenNextPiece[playerId] = CYCLE_START;
+        timeBetweenNextPiece[playerId] = GameConstants.CYCLE_START;
         cycleTimer[playerId] = 0f;
         lastHoldUsedMs = System.currentTimeMillis();
         HoldSoundBroadcast hsb = new HoldSoundBroadcast();
@@ -676,7 +673,7 @@ public class ServerGame {
         if (gameEnded) return;
         gameEnded = true;
         ScoreModeEndData scoreEnd = null;
-        if (gamemode == GameMode.MULTIPLAYER_SCORE) {
+        if (gameMode == GameMode.MULTIPLAYER_SCORE) {
             scoreEnd = new ScoreModeEndData();
             scoreEnd.finalScore = totalScore;
             scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
@@ -685,19 +682,27 @@ public class ServerGame {
         stopGame();
     }
 
-    public void handleDisconnectedPlayer(int id) {
+    /**
+     * Called when a player disconnects mid-game. Synchronized so this can never interleave
+     * with an in-flight {@link #update()} call on the room thread (see class-level note on
+     * {@link #startGame(GameMode, int, int)}).
+     */
+    public synchronized void handleDisconnectedPlayer(int id) {
         triggerEndGame(false, true);
     }
 
-    public void update() {
-        deltatime = (int)(System.currentTimeMillis() - lastUpdateMs);
+    public synchronized void update() {
+        deltaTime = (int)(System.currentTimeMillis() - lastUpdateMs);
 
-        switch (gamemode) {
+        switch (gameMode) {
             case NONE:
                 break;
             case MULTIPLAYER_SCORE:
                 updateScoreMode();
                 if (game != null) sendNetUpdates();
+                break;
+            case MULTIPLAYER_PUZZLE:
+                // Not yet implemented.
                 break;
         }
 
@@ -706,17 +711,17 @@ public class ServerGame {
     }
 
     public void updateScoreMode() {
-        game.update(deltatime);
+        game.update(deltaTime);
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
             if (r.placed) {
                 processPlacement(r);
                 if (!r.manual) {
-                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
+                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + GameConstants.HARD_DROP_SUPPRESS_MS;
                 }
             }
         }
         if (game.isStarted() && !gameEnded) {
-            updateBlockedCycling(deltatime / 1000f);
+            updateBlockedCycling(deltaTime / 1000f);
             if (System.currentTimeMillis() >= gameEndTargetMs) {
                 triggerEndGame(true);
             }

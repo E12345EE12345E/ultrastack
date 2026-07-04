@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector2;
 
+import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.Tile;
@@ -66,6 +67,14 @@ public class BoardRenderer {
             instance = new BoardRenderer();
         }
         return instance;
+    }
+
+    /** Disposes the singleton instance (if created) and clears it so a fresh one is built on next use. */
+    public static void disposeInstance() {
+        if (instance != null) {
+            instance.dispose();
+            instance = null;
+        }
     }
 
     private BoardRenderer() {
@@ -467,8 +476,8 @@ public class BoardRenderer {
         font.draw(sprites, "TIME", labelX, labelY);
         sprites.end();
 
-        // MM:SS remaining (capped at 4:00), centered in the upper-middle portion
-        long remaining = Math.min(4L * 60 * 1000, Math.max(0, endTargetMs - System.currentTimeMillis()));
+        // MM:SS remaining (capped at the configured match duration), centered in the upper-middle portion
+        long remaining = Math.min(GameConstants.SCORE_MODE_DURATION_MS, Math.max(0, endTargetMs - System.currentTimeMillis()));
         long mins = remaining / 60000;
         long secs = (remaining % 60000) / 1000;
         String timeText = mins + ":" + String.format("%02d", secs);

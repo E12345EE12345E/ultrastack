@@ -33,7 +33,6 @@ public abstract class UIElement {
         Vector2 v = MenuScreen.convertToRelCoords(screenX, screenY);
         float x = v.x;
         float y = v.y;
-        System.out.println("x:" + x + "y:" + y); // debug
         if (x >= centerX-0.5*width && x <= centerX+0.5*width && y >= centerY-0.5*height && y <= centerY+0.5*height) {
             return true;
         }

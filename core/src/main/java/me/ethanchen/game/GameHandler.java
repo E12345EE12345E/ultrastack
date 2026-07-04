@@ -34,7 +34,7 @@ public class GameHandler {
             case NONE:
                 break;
             case MULTIPLAYER_SCORE:
-                gravity = 1000;
+                gravity = GameConstants.INITIAL_GRAVITY_MS;
                 if (numPlayers == 1) {
                     boards.add(new Board(Board.Presets.STANDARD_SINGLE));
                 } else if (numPlayers == 2) {
@@ -44,6 +44,9 @@ public class GameHandler {
                 } else if (numPlayers == 4) {
                     boards.add(new Board(Board.Presets.STANDARD_4P));
                 }
+                break;
+            case MULTIPLAYER_PUZZLE:
+                // Not yet implemented: no boards are created, so startGame()/update() are no-ops.
                 break;
         }
     }
@@ -68,6 +71,10 @@ public class GameHandler {
             case MULTIPLAYER_SCORE:
                 doGravity(deltaTime);
                 doLockTimers(deltaTime);
+                break;
+            case MULTIPLAYER_PUZZLE:
+                // Not yet implemented.
+                break;
         }
     }
 

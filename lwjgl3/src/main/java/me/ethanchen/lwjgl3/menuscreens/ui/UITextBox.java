@@ -128,7 +128,6 @@ public class UITextBox extends UIElement {
             }
         } else if (c == '\t' || c == '\u0009') {
             if (this.next != null && !this.tabLock) {
-                System.out.println(this.next);
                 this.next.tabLock = true;
                 this.next.focused = true;
                 focused = false;
