@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
 
+import com.badlogic.gdx.utils.Json;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
@@ -11,6 +12,7 @@ import me.ethanchen.game.board.LineClearResult;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
+import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
@@ -32,12 +34,16 @@ public class ServerGame {
     private final ArrayList<ParticleSpawner> pendingSpawners = new ArrayList<>();
     private final ArrayList<PlacementSoundBroadcast> pendingPlacementSounds = new ArrayList<>();
     private final ArrayList<HoldSoundBroadcast> pendingHoldSounds = new ArrayList<>();
+    private final ArrayList<BumpSoundBroadcast> pendingBumpSounds = new ArrayList<>();
     private int[] piecesPlaced;
 
     // Hold state
     private long lastHoldUsedMs = 0;
-    private static final long HOLD_GLOBAL_LOCK_MS = 1000;
-    private static final long HARD_DROP_SUPPRESS_MS = 250L;
+    private static final long HOLD_GLOBAL_LOCK_MS = 500;
+    private static final long HARD_DROP_SUPPRESS_MS = 250;
+
+    // Bump/blocked event threshold
+    private static final float BUMP_TIMER_THRESHOLD_MS = 400f;
 
     // Per-player hard-drop suppression after auto-lock
     private long[] hardDropBlockedUntilMs;
@@ -148,6 +154,8 @@ public class ServerGame {
                             LineClearResult result = board.hardDrop(playerId);
                             if (result != null && result.placed) {
                                 processPlacement(result);
+                            } else if (result != null && !result.placed && result.blockedByPlayerId >= 0) {
+                                checkBlocked(playerId, result.blockedByPlayerId);
                             }
                         }
                     } else if (move == MoveType.HOLD) {
@@ -170,7 +178,17 @@ public class ServerGame {
                             }
                         }
                     } else {
-                        board.applyMove(playerId, move);
+                        boolean moved = board.applyMove(playerId, move);
+                        if (!moved && (move == MoveType.LEFT || move == MoveType.RIGHT)) {
+                            Piece moverPiece = board.getActivePiece(playerId);
+                            if (!moverPiece.isBlockedFromSpawning) {
+                                int xdiff = (move == MoveType.LEFT) ? -1 : 1;
+                                int blockerId = board.getLateralBlocker(playerId, xdiff);
+                                if (blockerId >= 0) {
+                                    checkBump(playerId, blockerId);
+                                }
+                            }
+                        }
                         LineClearResult lockResult = board.tryMovementLock(playerId);
                         if (lockResult != null && lockResult.placed) {
                             processPlacement(lockResult);
@@ -238,6 +256,14 @@ public class ServerGame {
         return copy;
     }
 
+    /** Returns accumulated bump-sound events and clears the list. */
+    public ArrayList<BumpSoundBroadcast> getAndClearPendingBumpSounds() {
+        if (pendingBumpSounds.isEmpty()) return null;
+        ArrayList<BumpSoundBroadcast> copy = new ArrayList<>(pendingBumpSounds);
+        pendingBumpSounds.clear();
+        return copy;
+    }
+
     /**
      * Builds and queues a {@link PlacementSoundBroadcast} for the given placement result.
      *
@@ -264,6 +290,45 @@ public class ServerGame {
 
         psb.combo = (lines > 0) ? (byte) priorCombo : (byte) -1;
         pendingPlacementSounds.add(psb);
+    }
+
+    // -------------------------------------------------------------------------
+    // Bump / blocked events
+    // -------------------------------------------------------------------------
+
+    private void checkBump(int playerA, int playerB) {
+        Board board = game.getBoards().get(0);
+        if (board.getActivePiece(playerA).movementTimer < BUMP_TIMER_THRESHOLD_MS
+                && board.getActivePiece(playerB).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
+            bumpedEvent(playerA, playerB);
+        }
+    }
+
+    private void checkBlocked(int droppedPlayerId, int blockingPlayerId) {
+        Board board = game.getBoards().get(0);
+        if (board.getActivePiece(blockingPlayerId).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
+            blockedEvent(droppedPlayerId, blockingPlayerId);
+        }
+    }
+
+    /** Stub: fired when two players mutually block each other's lateral movement while
+     *  both moved/rotated/soft-dropped recently. More functionality to come later. */
+    private void bumpedEvent(int playerA, int playerB) {
+        BumpSoundBroadcast b = new BumpSoundBroadcast();
+        b.playerId = (byte) playerA;
+        b.otherPlayerId = (byte) playerB;
+        b.blocked = false;
+        pendingBumpSounds.add(b);
+    }
+
+    /** Stub: fired when a hard-dropped piece rests on another player's recently-moved
+     *  piece without locking. More functionality to come later. */
+    private void blockedEvent(int droppedPlayerId, int blockingPlayerId) {
+        BumpSoundBroadcast b = new BumpSoundBroadcast();
+        b.playerId = (byte) droppedPlayerId;
+        b.otherPlayerId = (byte) blockingPlayerId;
+        b.blocked = true;
+        pendingBumpSounds.add(b);
     }
 
     // -------------------------------------------------------------------------
@@ -676,13 +741,53 @@ public class ServerGame {
         if (gameEnded) return;
         gameEnded = true;
         ScoreModeEndData scoreEnd = null;
+        String extraJson = null;
         if (gamemode == GameMode.MULTIPLAYER_SCORE) {
             scoreEnd = new ScoreModeEndData();
             scoreEnd.finalScore = totalScore;
             scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
+            extraJson = new Json().toJson(scoreEnd);
         }
-        room.sendEndGame(win, scoreEnd, disconnected);
+
+        long finalScore = computeFinalScore();
+
+        GameEndInfo info = new GameEndInfo();
+        info.mode = gamemode;
+        info.win = win;
+        info.disconnected = disconnected;
+        info.scoreModeEnd = scoreEnd;
+        info.score = finalScore;
+        info.displayScore = computeFinalDisplayScore(finalScore);
+        info.extraJson = extraJson;
+
+        room.sendEndGame(info);
         stopGame();
+    }
+
+    /**
+     * Returns the hidden, sortable score for the current gamemode. Always a {@code long}
+     * regardless of what the gamemode actually displays to players.
+     */
+    private long computeFinalScore() {
+        switch (gamemode) {
+            case MULTIPLAYER_SCORE:
+                return totalScore;
+            default:
+                return 0L;
+        }
+    }
+
+    /**
+     * Returns the leaderboard-facing display string for the current gamemode. For
+     * MULTIPLAYER_SCORE this is simply the score itself; future gamemodes may format this
+     * differently than the sortable {@link #computeFinalScore()} value (e.g. a time-based
+     * mode could sort by elapsed milliseconds but display "0:12.9").
+     */
+    private String computeFinalDisplayScore(long score) {
+        switch (gamemode) {
+            default:
+                return String.valueOf(score);
+        }
     }
 
     public void handleDisconnectedPlayer(int id) {

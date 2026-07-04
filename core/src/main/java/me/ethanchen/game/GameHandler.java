@@ -45,6 +45,8 @@ public class GameHandler {
                     boards.add(new Board(Board.Presets.STANDARD_4P));
                 }
                 break;
+            case MULTIPLAYER_PUZZLE:
+                break;
         }
     }
 
@@ -68,6 +70,7 @@ public class GameHandler {
             case MULTIPLAYER_SCORE:
                 doGravity(deltaTime);
                 doLockTimers(deltaTime);
+                doMovementTimers(deltaTime);
         }
     }
 
@@ -90,6 +93,12 @@ public class GameHandler {
         if (!started) return;
         for (Board b : boards)
             pendingLockResults.addAll(b.updateLockTimers(deltaTime));
+    }
+
+    private void doMovementTimers(int deltaTime) {
+        if (!started) return;
+        for (Board b : boards)
+            b.updateMovementTimers(deltaTime);
     }
 
     /**
@@ -135,6 +144,28 @@ public class GameHandler {
                 b2b = 0;
             }
         }
+    }
+
+    /**
+     * Adds {@code amount} rows of garbage (tile type {@link me.ethanchen.game.board.Tile#GARBAGE},
+     * connection state 0) to the bottom of {@code boards.get(board)}. Each garbage row spans the
+     * full width of the board except for column {@code col}, which is left empty. Existing rows
+     * are pushed upward by {@code amount} tiles rather than replaced. Does nothing if {@code board}
+     * is out of range.
+     */
+    public void addGarbage(int board, int col, int amount) {
+        if (board < 0 || board >= boards.size()) return;
+        boards.get(board).addGarbageRows(col, amount);
+    }
+
+    /**
+     * Adds a single row of garbage to the bottom of {@code boards.get(board)} using the given
+     * per-column tile types and connection states, pushing all existing rows up by 1 tile.
+     * Does nothing if {@code board} is out of range.
+     */
+    public void addGarbage(int board, byte[] blocks, byte[] cstate) {
+        if (board < 0 || board >= boards.size()) return;
+        boards.get(board).addGarbageRow(blocks, cstate);
     }
 
     // Getters/Setters

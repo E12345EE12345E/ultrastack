@@ -39,5 +39,10 @@ Thumbs.db
 settings.json
 lwjgl3/build/libs/settings.json
 
+# Runtime server data
+results.db
+results.db-wal
+results.db-shm
+
 # Notes
 server host commands.txt

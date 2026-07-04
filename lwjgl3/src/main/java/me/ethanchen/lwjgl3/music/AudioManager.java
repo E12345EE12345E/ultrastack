@@ -19,6 +19,8 @@ public class AudioManager {
     private static final float PLACE_SELF_BASE  = 1.0f;
     private static final float PLACE_OTHER_BASE = 0.5f;
     private static final float HOLD_BASE        = 1.0f;
+    private static final float BUMP_SELF_BASE   = 1.0f;
+    private static final float BUMP_OTHER_BASE  = 0.5f;
     private static final float MUSIC_BASE       = 0.5f;
 
     // -------------------------------------------------------------------------
@@ -29,6 +31,7 @@ public class AudioManager {
     private Sound placeSound;
     private Sound[] clearSound;
     private Sound[] holdSound;
+    private Sound bumpSound;
 
     // -------------------------------------------------------------------------
     // Music registry
@@ -63,6 +66,7 @@ public class AudioManager {
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_hold.wav")),
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_holdunable.wav")),
         };
+        bumpSound   = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_bump.wav"));
     }
 
     public static AudioManager getInstance() {
@@ -145,6 +149,10 @@ public class AudioManager {
         holdSound[success ? (self ? 0 : 1) : 2].play(sfxVol(HOLD_BASE));
     }
 
+    public void playBumpSound(boolean self) {
+        bumpSound.play(sfxVol(self ? BUMP_SELF_BASE : BUMP_OTHER_BASE));
+    }
+
     // -------------------------------------------------------------------------
     // Music registry and playback
     // -------------------------------------------------------------------------
@@ -188,6 +196,7 @@ public class AudioManager {
         placeSound.dispose();
         for (Sound s : clearSound) s.dispose();
         for (Sound s : holdSound) s.dispose();
+        bumpSound.dispose();
         for (MusicContainer c : registeredMusic) {
             c.dispose();
         }
