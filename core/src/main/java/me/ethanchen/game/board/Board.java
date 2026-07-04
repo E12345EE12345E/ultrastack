@@ -91,6 +91,50 @@ public class Board {
                 activePieces = new ArrayList<Piece>();
                 assert(spawnPositions.length == 4);
                 return;
+            case SHORT_SINGLE:
+                width = 10;
+                height = 24;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(4, 20)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 1);
+                return;
+            case SHORT_DUO:
+                width = 10;
+                height = 24;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 2);
+                return;
+            case SHORT_TRIO:
+                width = 16;
+                height = 24;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20), new Vector2(13, 20)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 3);
+                return;
+            case SHORT_4P:
+                width = 22;
+                height = 24;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20), new Vector2(13, 20), new Vector2(19, 20)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 4);
+                return;
             case TEST:
                 width = 20;
                 height = 24;
@@ -806,6 +850,66 @@ public class Board {
     }
 
     /**
+     * Adds {@code amount} rows of garbage (tile type {@link Tile#GARBAGE}, connection state
+     * {@link Tile#SINGLE_TILE}) to the bottom of the board. Each new row spans the full width
+     * of the board except for column {@code col}, which is left empty. All existing rows are
+     * shifted upward by {@code amount} tiles (not cleared/replaced, just moved); rows pushed
+     * past the top of the board are discarded. Does nothing if {@code amount <= 0}.
+     */
+    public void addGarbageRows(int col, int amount) {
+        if (amount <= 0) return;
+        shiftRowsUp(amount);
+        for (int y = 0; y < amount && y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (!allowedTiles[y][x]) continue;
+                if (x == col) {
+                    board[y][x].set(Tile.EMPTY, Tile.SINGLE_TILE);
+                } else {
+                    board[y][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+                }
+            }
+        }
+    }
+
+    /**
+     * Adds a single row of garbage to the bottom of the board using the given per-column
+     * tile types and connection states, shifting all existing rows upward by 1 tile.
+     * Columns beyond the end of {@code blocks}/{@code cstate} fall back to
+     * {@link Tile#GARBAGE}/{@link Tile#SINGLE_TILE}.
+     */
+    public void addGarbageRow(byte[] blocks, byte[] cstate) {
+        shiftRowsUp(1);
+        for (int x = 0; x < width; x++) {
+            if (!allowedTiles[0][x]) continue;
+            byte type = (blocks != null && x < blocks.length) ? blocks[x] : Tile.GARBAGE;
+            byte conn = (cstate != null && x < cstate.length) ? cstate[x] : Tile.SINGLE_TILE;
+            board[0][x].set(type, conn);
+        }
+    }
+
+    /**
+     * Shifts every row of {@code board} upward by {@code amount} rows (row {@code y} takes
+     * the contents previously at row {@code y - amount}); rows shifted past the top of the
+     * board are discarded. The bottom {@code amount} rows end up empty, ready for the caller
+     * to fill in with garbage. {@code allowedTiles=false} cells are permanent board features
+     * and are never written.
+     */
+    private void shiftRowsUp(int amount) {
+        if (amount <= 0) return;
+        for (int y = height - 1; y >= 0; y--) {
+            int srcY = y - amount;
+            for (int x = 0; x < width; x++) {
+                if (!allowedTiles[y][x]) continue;
+                if (srcY >= 0 && allowedTiles[srcY][x]) {
+                    board[y][x].set(board[srcY][x].get(), board[srcY][x].tex());
+                } else {
+                    board[y][x].set(Tile.EMPTY, Tile.SINGLE_TILE);
+                }
+            }
+        }
+    }
+
+    /**
      * Spawns the next piece from {@code pieceQueues[id]} into {@code activePieces[id]}.
      * If the queue or spawn position for {@code id} doesn't exist the call is silently ignored.
      */
@@ -996,6 +1100,10 @@ public class Board {
         STANDARD_DUO,
         STANDARD_TRIO,
         STANDARD_4P,
+        SHORT_SINGLE,
+        SHORT_DUO,
+        SHORT_TRIO,
+        SHORT_4P,
         TEST
     }
 
