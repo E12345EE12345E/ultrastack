@@ -13,6 +13,7 @@ import com.badlogic.gdx.controllers.Controllers;
 
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
+import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.lwjgl3.ClientApp;
@@ -33,6 +34,7 @@ import me.ethanchen.network.packets.s2c.ParticleSpawner;
 import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.game.board.Piece;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 public class GameScreen extends MenuScreen {
@@ -78,6 +80,9 @@ public class GameScreen extends MenuScreen {
     // Latest score-mode data received from the server (null until first packet arrives)
     private ScoreModeData latestScoreMode;
 
+    // Latest puzzle-mode data received from the server (null until first packet arrives)
+    private PuzzleModeData latestPuzzleMode;
+
     // Absolute wall-clock ms when the 4-minute countdown expires
     private long gameEndTargetMs;
 
@@ -106,6 +111,7 @@ public class GameScreen extends MenuScreen {
         }
         switch (b.mode) {
             case MULTIPLAYER_SCORE:
+            case MULTIPLAYER_PUZZLE:
                 drawMode = GameDrawMode.SINGLE_BOARD;
                 break;
             default:
@@ -257,10 +263,17 @@ public class GameScreen extends MenuScreen {
                 float timerBoxSize = tileSize * 5f;
                 float timerBoxX = originX - timerBoxSize - tileSize * 0.5f;
                 float timerBoxY = originY;
-                long currentScore = latestScoreMode != null ? latestScoreMode.totalScore : 0;
-                BoardRenderer.getInstance().drawTimerBox(
-                        gameEndTargetMs, currentScore, timerBoxX, timerBoxY, timerBoxSize, tileSize,
-                        shapes, sprites, font);
+                if (game.getMode() == GameMode.MULTIPLAYER_PUZZLE) {
+                    long elapsedMs = latestPuzzleMode != null ? latestPuzzleMode.elapsedMs : 0;
+                    BoardRenderer.getInstance().drawCountUpTimerBox(
+                            elapsedMs, timerBoxX, timerBoxY, timerBoxSize, tileSize,
+                            shapes, sprites, font);
+                } else {
+                    long currentScore = latestScoreMode != null ? latestScoreMode.totalScore : 0;
+                    BoardRenderer.getInstance().drawTimerBox(
+                            gameEndTargetMs, currentScore, timerBoxX, timerBoxY, timerBoxSize, tileSize,
+                            shapes, sprites, font);
+                }
 
                 // Pre-start countdown ("3", "2", "1") and post-start "Start" flash
                 {
@@ -573,6 +586,11 @@ public class GameScreen extends MenuScreen {
             // Cache score-mode data
             if (p.scoreMode != null) {
                 latestScoreMode = p.scoreMode;
+            }
+
+            // Cache puzzle-mode data
+            if (p.puzzleMode != null) {
+                latestPuzzleMode = p.puzzleMode;
             }
 
             // Re-anchor gravity to the server's state to prevent prediction drift/jitter

@@ -26,6 +26,7 @@ import me.ethanchen.lwjgl3.music.MusicContainer;
 import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.render.PieceTints;
 import me.ethanchen.lwjgl3.settings.GameSettings;
+import me.ethanchen.lwjgl3.settings.LobbySettings;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
 import me.ethanchen.network.ClientNetworkListener;
@@ -81,6 +82,7 @@ public class ClientApp extends ApplicationAdapter {
     private MenuScreen menuScreen;
     private volatile MenuScreen switchToMenu;
     private GameSettings settings;
+    private final LobbySettings lobbySettings = new LobbySettings();
 
     @Override
     public void create() {
@@ -195,6 +197,11 @@ public class ClientApp extends ApplicationAdapter {
 
     public void switchMenu(MenuScreen newMenu) {
         this.switchToMenu = newMenu; // switches to menu on next render() tick
+        // Each MenuScreen sets itself as the input processor in its constructor, but that
+        // only fires once. Re-assert it here so reusing an already-constructed screen (e.g.
+        // navigating back to a retained lobby chat instance from LobbySettingsScreen) still
+        // correctly regains input focus.
+        Gdx.input.setInputProcessor(newMenu);
     }
 
     // -------------------------------------------------------------------------
@@ -431,6 +438,10 @@ public class ClientApp extends ApplicationAdapter {
 
     public GameSettings getSettings() {
         return settings;
+    }
+
+    public LobbySettings getLobbySettings() {
+        return lobbySettings;
     }
 
     public SpriteBatch getSprites() {

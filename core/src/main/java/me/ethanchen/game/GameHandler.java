@@ -46,7 +46,19 @@ public class GameHandler {
                 }
                 break;
             case MULTIPLAYER_PUZZLE:
-                // Not yet implemented: no boards are created, so startGame()/update() are no-ops.
+                gravity = GameConstants.INITIAL_GRAVITY_PUZZLE_MS;
+                Board puzzleBoard;
+                if (numPlayers == 1) {
+                    puzzleBoard = new Board(Board.Presets.SHORT_SINGLE);
+                } else if (numPlayers == 2) {
+                    puzzleBoard = new Board(Board.Presets.SHORT_DUO);
+                } else if (numPlayers == 3) {
+                    puzzleBoard = new Board(Board.Presets.SHORT_TRIO);
+                } else {
+                    puzzleBoard = new Board(Board.Presets.SHORT_4P);
+                }
+                puzzleBoard.spawnGarbageLines(GameConstants.PUZZLE_GARBAGE_LINES);
+                boards.add(puzzleBoard);
                 break;
         }
     }
@@ -73,7 +85,8 @@ public class GameHandler {
                 doLockTimers(deltaTime);
                 break;
             case MULTIPLAYER_PUZZLE:
-                // Not yet implemented.
+                doGravity(deltaTime);
+                doLockTimers(deltaTime);
                 break;
         }
     }

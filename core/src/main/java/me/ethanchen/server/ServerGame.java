@@ -16,6 +16,8 @@ import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
 import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
@@ -51,6 +53,15 @@ public class ServerGame {
     // Explode / end-game state
     private float   explodeCountdown = -1f;
     private boolean gameEnded        = false;
+
+    // Game-end grace period: set once by beginGameEnd(), consumed by finalizeGameEnd() once
+    // gameEndGraceUntilMs elapses (see GameConstants.PUZZLE_GAME_END_GRACE_MS).
+    private boolean pendingWin;
+    private boolean pendingDisconnected;
+    private long gameEndGraceUntilMs;
+    private ScoreModeEndData frozenScoreEnd;
+    private PuzzleModeEndData frozenPuzzleEnd;
+    private long frozenPuzzleElapsedMs;
 
     // Timer state
     private long gameStartMs;
@@ -101,6 +112,12 @@ public class ServerGame {
         Arrays.fill(timeBetweenNextPiece, GameConstants.CYCLE_START);
         explodeCountdown = -1f;
         gameEnded        = false;
+        pendingWin = false;
+        pendingDisconnected = false;
+        gameEndGraceUntilMs = 0;
+        frozenScoreEnd = null;
+        frozenPuzzleEnd = null;
+        frozenPuzzleElapsedMs = 0;
         // Score-mode state reset
         totalScore = 0;
         glowPlayerId = -1;
@@ -126,7 +143,7 @@ public class ServerGame {
     }
 
     public synchronized void applyMoves(int playerId, int[] ids, byte[] types) {
-        if (!inProgress || game == null || ids == null || types == null) return;
+        if (!inProgress || gameEnded || game == null || ids == null || types == null) return;
         if (ids.length != types.length) return; // malformed/corrupt request
         if (playerId < 0 || playerId >= players) return;
         if (game.getBoards().isEmpty()) return;
@@ -182,17 +199,23 @@ public class ServerGame {
     }
 
     /**
-     * Shared post-placement logic: increments the placement counter, scores the result,
-     * and queues particles. Used by hard drops, movement-overflow locks, and timer locks.
+     * Shared post-placement logic: increments the placement counter, updates the universal
+     * B2B/combo counters, applies mode-specific scoring, and queues sounds/particles. Used by
+     * hard drops, movement-overflow locks, and timer locks.
      */
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
         int priorCombo = game.getCombo();
         switch (gameMode) {
             case MULTIPLAYER_SCORE:
+                // Scores the drop (glow/diff-column bonuses, totalScore, gravity ramp — all
+                // MULTIPLAYER_SCORE-specific) and updates the B2B/combo counters internally.
                 scoreHardDrop(result);
                 break;
             default:
+                // B2B and combo are universal mechanics (drive combo sounds, etc.) even in
+                // modes with no score-specific bonuses to compute.
+                game.applyClearToCounters(result);
                 break;
         }
         queuePlacementSound(result, priorCombo);
@@ -617,7 +640,7 @@ public class ServerGame {
             }
             explodeCountdown += dtSec;
             if (explodeCountdown >= GameConstants.EXPLODE_DURATION) {
-                triggerEndGame(false);
+                beginGameEnd(false);
             }
         } else if (!allBlockedAtMin && explodeCountdown >= 0f && !gameEnded) {
             explodeCountdown = -1f;
@@ -663,23 +686,51 @@ public class ServerGame {
         explodeCountdown = -1f;
     }
 
-    /** Fires the end-game sequence: broadcasts EndGameBroadcast and stops the game. */
-    private void triggerEndGame(boolean win) {
-        triggerEndGame(win, false);
+    /**
+     * Detects win/loss: freezes the end-of-game payload (using the current elapsed time) and
+     * schedules {@link #finalizeGameEnd()} to run once the mode-specific grace period elapses
+     * (see {@link GameConstants#PUZZLE_GAME_END_GRACE_MS}). Does not touch {@code game}, so the
+     * current tick's {@link #sendNetUpdates()} still runs and flushes the final board/particles/
+     * sounds queued earlier in this same tick.
+     */
+    private void beginGameEnd(boolean win) {
+        beginGameEnd(win, false);
     }
 
-    /** Fires the end-game sequence with an optional disconnect flag. */
-    private void triggerEndGame(boolean win, boolean disconnected) {
+    private void beginGameEnd(boolean win, boolean disconnected) {
         if (gameEnded) return;
         gameEnded = true;
-        ScoreModeEndData scoreEnd = null;
+        pendingWin = win;
+        pendingDisconnected = disconnected;
+        long graceMs = (gameMode == GameMode.MULTIPLAYER_PUZZLE) ? GameConstants.PUZZLE_GAME_END_GRACE_MS : 0L;
+        gameEndGraceUntilMs = System.currentTimeMillis() + graceMs;
+
+        frozenScoreEnd = null;
+        frozenPuzzleEnd = null;
         if (gameMode == GameMode.MULTIPLAYER_SCORE) {
-            scoreEnd = new ScoreModeEndData();
-            scoreEnd.finalScore = totalScore;
-            scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
+            frozenScoreEnd = new ScoreModeEndData();
+            frozenScoreEnd.finalScore = totalScore;
+            frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
+        } else if (gameMode == GameMode.MULTIPLAYER_PUZZLE) {
+            frozenPuzzleElapsedMs = System.currentTimeMillis() - gameStartMs;
+            frozenPuzzleEnd = new PuzzleModeEndData();
+            frozenPuzzleEnd.timeMs = frozenPuzzleElapsedMs;
+            frozenPuzzleEnd.score = (int) (Integer.MAX_VALUE - Math.min(frozenPuzzleElapsedMs, Integer.MAX_VALUE));
         }
-        room.sendEndGame(win, scoreEnd, disconnected);
+    }
+
+    /** Actually tears down the game: broadcasts EndGameBroadcast and stops the game. */
+    private void finalizeGameEnd() {
+        room.sendEndGame(pendingWin, frozenScoreEnd, frozenPuzzleEnd, pendingDisconnected);
         stopGame();
+    }
+
+    /** Called once per tick from {@link #update()}; finalizes the ended game once its grace period elapses. */
+    private void checkGameEndGrace() {
+        if (!gameEnded || game == null) return;
+        if (System.currentTimeMillis() >= gameEndGraceUntilMs) {
+            finalizeGameEnd();
+        }
     }
 
     /**
@@ -688,7 +739,7 @@ public class ServerGame {
      * {@link #startGame(GameMode, int, int)}).
      */
     public synchronized void handleDisconnectedPlayer(int id) {
-        triggerEndGame(false, true);
+        beginGameEnd(false, true);
     }
 
     public synchronized void update() {
@@ -702,15 +753,18 @@ public class ServerGame {
                 if (game != null) sendNetUpdates();
                 break;
             case MULTIPLAYER_PUZZLE:
-                // Not yet implemented.
+                updatePuzzleMode();
+                if (game != null) sendNetUpdates();
                 break;
         }
+        checkGameEndGrace();
 
         lastUpdateMs = System.currentTimeMillis();
         t++;
     }
 
     public void updateScoreMode() {
+        if (gameEnded) return; // frozen during the grace window; sendNetUpdates() above keeps re-sending the last state
         game.update(deltaTime);
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
             if (r.placed) {
@@ -723,9 +777,40 @@ public class ServerGame {
         if (game.isStarted() && !gameEnded) {
             updateBlockedCycling(deltaTime / 1000f);
             if (System.currentTimeMillis() >= gameEndTargetMs) {
-                triggerEndGame(true);
+                beginGameEnd(true);
             }
         }
+    }
+
+    public void updatePuzzleMode() {
+        if (gameEnded) return; // frozen during the grace window; sendNetUpdates() above keeps re-sending the last state
+        game.update(deltaTime);
+        for (LineClearResult r : game.getAndClearPendingLockResults()) {
+            if (r.placed) {
+                processPlacement(r);
+                if (!r.manual) {
+                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + GameConstants.HARD_DROP_SUPPRESS_MS;
+                }
+            }
+        }
+        if (game.isStarted() && !gameEnded) {
+            updateBlockedCycling(deltaTime / 1000f);
+            if (!game.getBoards().isEmpty() && !game.getBoards().get(0).hasGarbage()) {
+                beginGameEnd(true);
+            }
+        }
+    }
+
+    /** Live puzzle-mode data broadcast every tick: the count-up timer value, frozen once ended. */
+    public PuzzleModeData getPuzzleModeData() {
+        PuzzleModeData d = new PuzzleModeData();
+        d.elapsedMs = gameEnded ? frozenPuzzleElapsedMs
+                : (game != null && game.isStarted() ? Math.max(0, System.currentTimeMillis() - gameStartMs) : 0);
+        return d;
+    }
+
+    public boolean isGameEnded() {
+        return gameEnded;
     }
 
     public void sendNetUpdates() {

@@ -2,7 +2,6 @@ package me.ethanchen.lwjgl3.menuscreens;
 
 import java.util.ArrayDeque;
 
-import me.ethanchen.game.GameMode;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.network.ClientPacketWrapper;
@@ -51,9 +50,12 @@ public class MultiplayerLobby extends MenuScreen {
         chatInput.sanitize = 1;
         elements.add(chatInput);
         if (isHost) {
+            elements.add(new UIButton(0.18, 0.125, 0.28, 0.1, "Settings",
+                    () -> app.switchMenu(new LobbySettingsScreen(app, this))));
+
             elements.add(new UIButton(0.5, 0.125, 0.3, 0.1, "Start Game", () -> {
                 StartGameRequest p = new StartGameRequest();
-                p.gamemode = GameMode.MULTIPLAYER_SCORE;
+                p.gamemode = app.getLobbySettings().gamemode;
                 app.sendTCP(p);
             }));
         }

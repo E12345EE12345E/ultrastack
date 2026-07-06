@@ -10,6 +10,7 @@ import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.*;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 import me.ethanchen.util.TextSanitizer;
 
@@ -332,9 +333,13 @@ public class GameRoom implements Runnable, GameRoomContext {
             b.ownPieceHoldGlow = serverGame.computeOwnPieceHoldGlow(i);
             b.gravity = serverGame.getGame().getGravity();
             b.gravityTickCounter = serverGame.getGame().getGravityTickCounter();
+            b.gameEnded = serverGame.isGameEnded();
             switch (serverGame.getGame().getMode()) {
                 case MULTIPLAYER_SCORE:
                     b.scoreMode = serverGame.getScoreModeData();
+                    break;
+                case MULTIPLAYER_PUZZLE:
+                    b.puzzleMode = serverGame.getPuzzleModeData();
                     break;
                 default:
                     break;
@@ -347,11 +352,12 @@ public class GameRoom implements Runnable, GameRoomContext {
     }
 
     @Override
-    public synchronized void sendEndGame(boolean win, ScoreModeEndData scoreEnd, boolean disconnected) {
+    public synchronized void sendEndGame(boolean win, ScoreModeEndData scoreEnd, PuzzleModeEndData puzzleEnd, boolean disconnected) {
         EndGameBroadcast b = new EndGameBroadcast();
         b.win = win;
         b.disconnected = disconnected;
         b.scoreModeEnd = scoreEnd;
+        b.puzzleModeEnd = puzzleEnd;
         if (serverGame != null && serverGame.getGame() != null) {
             b.mode = serverGame.getGame().getMode();
         } else {

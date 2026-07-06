@@ -34,6 +34,16 @@ public class EndGameScreen extends MenuScreen {
             elements.add(new UIText(0.5, scoreY - stepY, timeText, 2.5));
         }
 
+        // Puzzle-mode final time (the timer value at win/loss is the displayed result)
+        if (pkt.mode == GameMode.MULTIPLAYER_PUZZLE && pkt.puzzleModeEnd != null) {
+            double scoreY = startY - (pkt.playerNames != null ? pkt.playerNames.length : 0) * stepY - 0.04;
+            long ms = pkt.puzzleModeEnd.timeMs;
+            long mins = ms / 60000;
+            long secs = (ms % 60000) / 1000;
+            String timeText = "Time: " + mins + ":" + String.format("%02d", secs);
+            elements.add(new UIText(0.5, scoreY, timeText, 2.5));
+        }
+
         elements.add(new UIButton(0.5, 0.15, 0.4, 0.1, "Back to Menu", () -> {
             if (app.isLanMode()) {
                 app.switchMenu(new LanMenu(app));

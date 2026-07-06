@@ -2,6 +2,7 @@ package me.ethanchen.network.packets.s2c;
 
 import me.ethanchen.game.board.Board;
 import me.ethanchen.network.packets.NetworkPacket;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 public class LightGameStateBroadcast extends NetworkPacket {
@@ -24,4 +25,10 @@ public class LightGameStateBroadcast extends NetworkPacket {
 
     // Mode-specific (null in all modes except the corresponding one)
     public ScoreModeData scoreMode;
+    public PuzzleModeData puzzleMode;
+
+    /** True once the server has detected win/loss; the rest of this packet's payload is frozen
+     *  and may be re-sent unchanged until EndGameBroadcast follows (see
+     *  GameConstants.PUZZLE_GAME_END_GRACE_MS). */
+    public boolean gameEnded;
 }

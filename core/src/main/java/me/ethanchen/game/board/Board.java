@@ -93,6 +93,50 @@ public class Board {
                 activePieces = new ArrayList<Piece>();
                 assert(spawnPositions.length == 4);
                 return;
+            case SHORT_SINGLE:
+                width = 10;
+                height = 16;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(4, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 1);
+                return;
+            case SHORT_DUO:
+                width = 10;
+                height = 16;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 2);
+                return;
+            case SHORT_TRIO:
+                width = 16;
+                height = 16;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12), new Vector2(13, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 3);
+                return;
+            case SHORT_4P:
+                width = 22;
+                height = 16;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12), new Vector2(13, 12), new Vector2(19, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 4);
+                return;
         }
     }
 
@@ -116,6 +160,31 @@ public class Board {
         }
         activePieces = new ArrayList<Piece>();
         updateFromNetBoardLight(lightNetBoardFrom(nb));
+    }
+
+    /** Returns true if any tile on the board is currently a garbage tile. */
+    public boolean hasGarbage() {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (board[y][x].get() == Tile.GARBAGE) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Fills the bottom {@code numLines} rows with garbage tiles, each row leaving exactly
+     * one random gap column so it can be cleared by filling that column in.
+     */
+    public void spawnGarbageLines(int numLines) {
+        Random r = new Random();
+        for (int y = 0; y < numLines && y < height; y++) {
+            int gapCol = r.nextInt(width);
+            for (int x = 0; x < width; x++) {
+                if (!allowedTiles[y][x]) continue;
+                board[y][x].set(x == gapCol ? Tile.EMPTY : Tile.GARBAGE, Tile.SINGLE_TILE);
+            }
+        }
     }
 
     public void spawnInitialPieces() {
@@ -835,7 +904,11 @@ public class Board {
         STANDARD_SINGLE, // normal board in most tetris games, 10 wide
         STANDARD_DUO,
         STANDARD_TRIO,
-        STANDARD_4P
+        STANDARD_4P,
+        SHORT_SINGLE,
+        SHORT_DUO,
+        SHORT_TRIO,
+        SHORT_4P
     }
 
     public static class NetBoardLight { // smaller class to be sent over UDP constantly (20-30 times/sec)
