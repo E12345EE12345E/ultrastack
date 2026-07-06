@@ -54,8 +54,8 @@ public final class GameConstants {
     /** Number of grounded moves allowed before a piece is force-locked. */
     public static final int MOVEMENT_LOCK_COUNTER_LIMIT = 15;
 
-    /** Lock delay (ms) before a grounded piece is auto-locked. */
-    public static final float LOCK_DELAY_MS = 500f;
+    /** Lock delay (ms) before a grounded piece is auto-locked. Guideline: 500ms, we are doubling it for playability */
+    public static final float LOCK_DELAY_MS = 1000f;
 
     /** Server/room tick rate in milliseconds (~60 Hz). */
     public static final long TICK_MS = 16;

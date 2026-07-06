@@ -27,6 +27,7 @@ public class ServerCore implements PacketSender, Runnable {
     private final ConcurrentHashMap<String, GameRoom> rooms = new ConcurrentHashMap<>();
 
     private final AuthProvider authProvider; // null = LAN mode
+    private final ResultRecorder resultRecorder; // null = results not persisted (e.g. LAN mode)
     private final long lanJoinCode;          // only relevant in LAN mode
     private final int roomIdDigits;
     private final Random rng = new Random();
@@ -38,16 +39,18 @@ public class ServerCore implements PacketSender, Runnable {
     private static final int ROOM_LIST_BROADCAST_INTERVAL = 300; // ~5s at 60Hz
 
     /** Account-mode constructor. */
-    public ServerCore(AuthProvider authProvider, int roomIdDigits) {
+    public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, int roomIdDigits) {
         this.authProvider = authProvider;
+        this.resultRecorder = resultRecorder;
         this.lanJoinCode = 0;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
     }
 
-    /** LAN-mode constructor (no auth, single implicit "LAN" room). */
+    /** LAN-mode constructor (no auth, single implicit "LAN" room; results stay unpersisted). */
     public ServerCore(long lanJoinCode, int roomIdDigits) {
         this.authProvider = null;
+        this.resultRecorder = null;
         this.lanJoinCode = lanJoinCode;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
@@ -219,7 +222,7 @@ public class ServerCore implements PacketSender, Runnable {
         GameRoom lanRoom = rooms.computeIfAbsent("LAN", id ->
                 new GameRoom("LAN", this, w.connectionID, req.playerName));
 
-        int slotId = lanRoom.tryAddMember(w.connectionID, req.playerName, GameConstants.MAX_PLAYERS);
+        int slotId = lanRoom.tryAddMember(w.connectionID, req.playerName, session.accountUuid, GameConstants.MAX_PLAYERS);
         if (slotId < 0) {
             res.accepted = false;
             res.playerId = -1;
@@ -295,7 +298,7 @@ public class ServerCore implements PacketSender, Runnable {
         if (session.currentRoomId != null) return; // already in a room
 
         String roomId = generateRoomId();
-        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username);
+        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid, resultRecorder);
         rooms.put(roomId, room);
         session.currentRoomId = roomId;
         room.start();
@@ -326,7 +329,7 @@ public class ServerCore implements PacketSender, Runnable {
             sendTCP(w.connectionID, res);
             return;
         }
-        int slotId = room.tryAddMember(w.connectionID, session.username, GameConstants.MAX_PLAYERS);
+        int slotId = room.tryAddMember(w.connectionID, session.username, session.accountUuid, GameConstants.MAX_PLAYERS);
         if (slotId < 0) {
             RoomJoinResponse res = new RoomJoinResponse();
             res.success = false;

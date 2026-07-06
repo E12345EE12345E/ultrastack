@@ -10,8 +10,6 @@ import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.*;
-import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
-import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 import me.ethanchen.util.TextSanitizer;
 
 import java.util.ArrayList;
@@ -31,7 +29,9 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final List<Integer> slotToConn = new ArrayList<>();
     private final Map<Integer, Integer> connToSlot = new HashMap<>();
     private final Map<Integer, String> connToName = new HashMap<>();
+    private final Map<Integer, String> connToUuid = new HashMap<>();
     private final int hostConnId;
+    private final ResultRecorder resultRecorder;
 
     private volatile ServerGame serverGame;
     private volatile boolean running;
@@ -39,11 +39,18 @@ public class GameRoom implements Runnable, GameRoomContext {
     private Thread thread;
     private int t;
 
+    /** Used for LAN rooms, which never persist results. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
+        this(roomId, sender, hostConnId, hostName, hostName, null);
+    }
+
+    public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
+                     ResultRecorder resultRecorder) {
         this.roomId = roomId;
         this.sender = sender;
         this.hostConnId = hostConnId;
-        addMemberUnconditional(hostConnId, hostName);
+        this.resultRecorder = resultRecorder;
+        addMemberUnconditional(hostConnId, hostName, hostUuid);
     }
 
     // -------------------------------------------------------------------------
@@ -59,12 +66,12 @@ public class GameRoom implements Runnable, GameRoomContext {
      *         connection is already a member), or {@code -1} if the join was rejected because
      *         a game is already in progress or the room is at {@code maxPlayers} capacity
      */
-    public synchronized int tryAddMember(int connId, String name, int maxPlayers) {
+    public synchronized int tryAddMember(int connId, String name, String uuid, int maxPlayers) {
         Integer existing = connToSlot.get(connId);
         if (existing != null) return existing;
         if (serverGame != null && serverGame.isInProgress()) return -1;
         if (slotToConn.size() >= maxPlayers) return -1;
-        return addMemberUnconditional(connId, name);
+        return addMemberUnconditional(connId, name, uuid);
     }
 
     /**
@@ -72,11 +79,12 @@ public class GameRoom implements Runnable, GameRoomContext {
      * either before the room is published to other threads (the constructor), or from within a
      * method already synchronized on {@code this} (see {@link #tryAddMember}).
      */
-    private int addMemberUnconditional(int connId, String name) {
+    private int addMemberUnconditional(int connId, String name, String uuid) {
         int slot = slotToConn.size();
         slotToConn.add(connId);
         connToSlot.put(connId, slot);
         connToName.put(connId, name);
+        connToUuid.put(connId, uuid);
         broadcastPlayerList();
         return slot;
     }
@@ -111,6 +119,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             slotToConn.clear();
             connToSlot.clear();
             connToName.clear();
+            connToUuid.clear();
             roomEmpty = true;
             return evicted;
         }
@@ -123,6 +132,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             connToSlot.put(slotToConn.get(i), i);
         }
         connToName.remove(connId);
+        connToUuid.remove(connId);
 
         if (serverGame != null && serverGame.isInProgress()) {
             serverGame.handleDisconnectedPlayer(slot);
@@ -352,17 +362,13 @@ public class GameRoom implements Runnable, GameRoomContext {
     }
 
     @Override
-    public synchronized void sendEndGame(boolean win, ScoreModeEndData scoreEnd, PuzzleModeEndData puzzleEnd, boolean disconnected) {
+    public synchronized void sendEndGame(GameEndInfo info) {
         EndGameBroadcast b = new EndGameBroadcast();
-        b.win = win;
-        b.disconnected = disconnected;
-        b.scoreModeEnd = scoreEnd;
-        b.puzzleModeEnd = puzzleEnd;
-        if (serverGame != null && serverGame.getGame() != null) {
-            b.mode = serverGame.getGame().getMode();
-        } else {
-            b.mode = GameMode.NONE;
-        }
+        b.win = info.win;
+        b.disconnected = info.disconnected;
+        b.scoreModeEnd = info.scoreModeEnd;
+        b.puzzleModeEnd = info.puzzleModeEnd;
+        b.mode = info.mode != null ? info.mode : GameMode.NONE;
         int playerCount = slotToConn.size();
         b.playerNames = new String[playerCount];
         for (int i = 0; i < playerCount; i++) {
@@ -370,6 +376,25 @@ public class GameRoom implements Runnable, GameRoomContext {
             b.playerNames[i] = connId != null ? connToName.getOrDefault(connId, "") : "";
         }
         broadcastMembersTCP(b);
+
+        if (resultRecorder != null && info.mode != null && info.mode != GameMode.NONE) {
+            GameResultData data = new GameResultData();
+            data.gamemode = info.mode.name();
+            data.win = info.win;
+            data.disconnected = info.disconnected;
+            data.score = info.score;
+            data.displayScore = info.displayScore;
+            data.extraJson = info.extraJson;
+            data.timestampMs = System.currentTimeMillis();
+            data.players = new PlayerResultInfo[playerCount];
+            for (int i = 0; i < playerCount; i++) {
+                Integer connId = slotToConn.get(i);
+                String name = connId != null ? connToName.getOrDefault(connId, "") : "";
+                String uuid = connId != null ? connToUuid.getOrDefault(connId, "") : "";
+                data.players[i] = new PlayerResultInfo(name, uuid);
+            }
+            resultRecorder.recordGameResult(data);
+        }
     }
 
     // -------------------------------------------------------------------------

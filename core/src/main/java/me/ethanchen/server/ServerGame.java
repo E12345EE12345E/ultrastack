@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
 
+import com.badlogic.gdx.utils.Json;
+
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
@@ -721,8 +723,60 @@ public class ServerGame {
 
     /** Actually tears down the game: broadcasts EndGameBroadcast and stops the game. */
     private void finalizeGameEnd() {
-        room.sendEndGame(pendingWin, frozenScoreEnd, frozenPuzzleEnd, pendingDisconnected);
+        long score = computeFinalScore();
+
+        GameEndInfo info = new GameEndInfo();
+        info.mode = gameMode;
+        info.win = pendingWin;
+        info.disconnected = pendingDisconnected;
+        info.scoreModeEnd = frozenScoreEnd;
+        info.puzzleModeEnd = frozenPuzzleEnd;
+        info.score = score;
+        info.displayScore = computeFinalDisplayScore(score);
+        if (frozenScoreEnd != null) {
+            info.extraJson = new Json().toJson(frozenScoreEnd);
+        } else if (frozenPuzzleEnd != null) {
+            info.extraJson = new Json().toJson(frozenPuzzleEnd);
+        }
+
+        room.sendEndGame(info);
         stopGame();
+    }
+
+    /**
+     * Returns the hidden, sortable score for the current gamemode. Always a {@code long}
+     * regardless of what the gamemode actually displays to players.
+     */
+    private long computeFinalScore() {
+        switch (gameMode) {
+            case MULTIPLAYER_SCORE:
+                return totalScore;
+            case MULTIPLAYER_PUZZLE:
+                return frozenPuzzleEnd != null ? frozenPuzzleEnd.score : 0L;
+            default:
+                return 0L;
+        }
+    }
+
+    /**
+     * Returns the leaderboard-facing display string for the current gamemode. For
+     * MULTIPLAYER_SCORE this is simply the score itself; MULTIPLAYER_PUZZLE instead formats
+     * the frozen elapsed time as {@code "m:ss"} (matching the client's EndGameScreen), since a
+     * faster time is the meaningful result rather than the sortable score value.
+     */
+    private String computeFinalDisplayScore(long score) {
+        switch (gameMode) {
+            case MULTIPLAYER_PUZZLE:
+                return frozenPuzzleEnd != null ? formatMinutesSeconds(frozenPuzzleEnd.timeMs) : "0:00";
+            default:
+                return String.valueOf(score);
+        }
+    }
+
+    private static String formatMinutesSeconds(long ms) {
+        long mins = ms / 60000;
+        long secs = (ms % 60000) / 1000;
+        return mins + ":" + String.format("%02d", secs);
     }
 
     /** Called once per tick from {@link #update()}; finalizes the ended game once its grace period elapses. */
