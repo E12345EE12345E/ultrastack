@@ -77,14 +77,7 @@ public class UISlider extends UIElement {
         Gdx.gl.glDisable(GL20.GL_BLEND);
 
         // Labels
-        float originalScaleX = font.getScaleX();
-        float originalScaleY = font.getScaleY();
-
-        font.getData().setScale(1f);
-        float unscaledLineHeight = font.getData().lineHeight;
-        float scaleAdjustment = 15f / unscaledLineHeight;
-        float fontScale = 0.6f * scaleAdjustment * (Gdx.graphics.getHeight() / 640f);
-        font.getData().setScale(fontScale);
+        float[] savedScale = UIFont.saveAndSetScale(font, 0.6f);
 
         sprites.begin();
         font.setColor(Color.LIGHT_GRAY);
@@ -98,7 +91,7 @@ public class UISlider extends UIElement {
 
         sprites.end();
 
-        font.getData().setScale(originalScaleX, originalScaleY);
+        UIFont.restoreScale(font, savedScale);
     }
 
     @Override

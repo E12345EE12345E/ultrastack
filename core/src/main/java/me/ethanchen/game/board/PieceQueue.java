@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Random;
 
+import me.ethanchen.network.dto.NetQueue;
+
 public class PieceQueue {
     protected final ArrayList<Integer> pieceIDs;
     protected final int seed;
@@ -69,8 +71,7 @@ public class PieceQueue {
     }
 
     public static enum BagTypes {
-        BAG_7(new byte[]{Piece.I, Piece.J, Piece.L, Piece.O, Piece.S, Piece.T, Piece.Z}),
-        BAG_3MINO(new byte[]{Piece.I3, Piece.L3});
+        BAG_7(new byte[]{Piece.I, Piece.J, Piece.L, Piece.O, Piece.S, Piece.T, Piece.Z});
 
         private byte[] pieces;
         private BagTypes(byte[] pieces) {
@@ -79,12 +80,5 @@ public class PieceQueue {
         public byte[] get() {
             return pieces;
         }
-    }
-
-    public static class NetQueue { // Only sent on init and desyncs
-        public int seed;
-        public BagTypes bag;
-        public byte[] piecesAlreadyInBag;
-        public int alreadyGeneratedNumber;
     }
 }

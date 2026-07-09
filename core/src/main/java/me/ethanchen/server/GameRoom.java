@@ -2,8 +2,10 @@ package me.ethanchen.server;
 
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameMode;
-import me.ethanchen.game.board.Board;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.ServerPacketWrapper;
+import me.ethanchen.network.dto.NetBoardFull;
+import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
@@ -38,6 +40,7 @@ public class GameRoom implements Runnable, GameRoomContext {
     private volatile boolean roomEmpty;
     private Thread thread;
     private int t;
+    private final PacketDispatcher<ServerPacketWrapper> dispatcher = buildDispatcher();
 
     /** Used for LAN rooms, which never persist results. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
@@ -51,6 +54,13 @@ public class GameRoom implements Runnable, GameRoomContext {
         this.hostConnId = hostConnId;
         this.resultRecorder = resultRecorder;
         addMemberUnconditional(hostConnId, hostName, hostUuid);
+    }
+
+    private PacketDispatcher<ServerPacketWrapper> buildDispatcher() {
+        return new PacketDispatcher<ServerPacketWrapper>()
+                .on(TextMessageRequest.class, this::handleTextMessage)
+                .on(StartGameRequest.class, this::handleStartGameRequest)
+                .on(MoveListRequest.class, this::handleMoveListRequest);
     }
 
     // -------------------------------------------------------------------------
@@ -183,7 +193,7 @@ public class GameRoom implements Runnable, GameRoomContext {
                 if (serverGame != null && serverGame.isInProgress()) {
                     serverGame.update();
                 }
-                if (t % 10 == 0) {
+                if (t % GameConstants.LOBBY_UDP_REFRESH_INTERVAL_TICKS == 0) {
                     broadcastPlayerListUDP();
                 }
             } catch (Exception e) {
@@ -212,32 +222,32 @@ public class GameRoom implements Runnable, GameRoomContext {
      * {@code ServerCore} thread while this runs on the room thread.
      */
     private synchronized void handleInboundPacket(ServerPacketWrapper w) {
-        if (w.packet instanceof TextMessageRequest) {
-            TextMessageRequest req = (TextMessageRequest) w.packet;
-            String name = connToName.get(w.connectionID);
-            if (name == null) return;
-            TextMessageBroadcast b = new TextMessageBroadcast();
-            b.sender = name;
-            b.message = TextSanitizer.sanitizeChat(req.message);
-            broadcastMembersTCP(b);
-            return;
-        }
+        dispatcher.dispatch(w);
+    }
 
-        if (w.packet instanceof StartGameRequest) {
-            if (w.connectionID != hostConnId) return; // only host can start
-            if (serverGame != null && serverGame.isInProgress()) return;
-            StartGameRequest req = (StartGameRequest) w.packet;
-            startGame(req.gamemode);
-            return;
-        }
+    private void handleTextMessage(ServerPacketWrapper w) {
+        TextMessageRequest req = (TextMessageRequest) w.packet;
+        String name = connToName.get(w.connectionID);
+        if (name == null) return;
+        TextMessageBroadcast b = new TextMessageBroadcast();
+        b.sender = name;
+        b.message = TextSanitizer.sanitizeChat(req.message);
+        broadcastMembersTCP(b);
+    }
 
-        if (w.packet instanceof MoveListRequest) {
-            MoveListRequest req = (MoveListRequest) w.packet;
-            Integer slot = connToSlot.get(w.connectionID);
-            if (slot == null) return;
-            if (serverGame != null && serverGame.isInProgress()) {
-                serverGame.applyMoves(slot, req.ids, req.types);
-            }
+    private void handleStartGameRequest(ServerPacketWrapper w) {
+        if (w.connectionID != hostConnId) return; // only host can start
+        if (serverGame != null && serverGame.isInProgress()) return;
+        StartGameRequest req = (StartGameRequest) w.packet;
+        startGame(req.gamemode);
+    }
+
+    private void handleMoveListRequest(ServerPacketWrapper w) {
+        MoveListRequest req = (MoveListRequest) w.packet;
+        Integer slot = connToSlot.get(w.connectionID);
+        if (slot == null) return;
+        if (serverGame != null && serverGame.isInProgress()) {
+            serverGame.applyMoves(slot, req.ids, req.types);
         }
     }
 
@@ -250,9 +260,9 @@ public class GameRoom implements Runnable, GameRoomContext {
         if (playerCount == 0) return;
 
         serverGame = new ServerGame(this);
-        serverGame.startGame(gameMode, playerCount, 5000);
+        serverGame.startGame(gameMode, playerCount, GameConstants.GAME_START_DELAY_MS);
 
-        long startTimeMs = System.currentTimeMillis() + 5000;
+        long startTimeMs = System.currentTimeMillis() + GameConstants.GAME_START_DELAY_MS;
 
         // Build per-player name array (slot order)
         String[] playerNames = new String[playerCount];
@@ -268,12 +278,12 @@ public class GameRoom implements Runnable, GameRoomContext {
 
             StartGameBroadcast b = new StartGameBroadcast();
             b.mode = gameMode;
-            b.boards = new Board.NetBoardFull[serverGame.getGame().getBoards().size()];
+            b.boards = new NetBoardFull[serverGame.getGame().getBoards().size()];
             for (int a = 0; a < b.boards.length; a++) {
                 b.boards[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardFull();
             }
             b.totalPlayers = (byte) playerCount;
-            b.playerID = (byte) i;
+            b.playerId = (byte) i;
             b.startTimeMS = startTimeMs;
             b.playerNames = playerNames;
             sender.sendTCP(connId, b);
@@ -329,8 +339,8 @@ public class GameRoom implements Runnable, GameRoomContext {
         }
 
         // Pre-build board snapshots
-        Board.NetBoardLight[] boardSnapshots =
-                new Board.NetBoardLight[serverGame.getGame().getBoards().size()];
+        NetBoardLight[] boardSnapshots =
+                new NetBoardLight[serverGame.getGame().getBoards().size()];
         for (int a = 0; a < boardSnapshots.length; a++) {
             boardSnapshots[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardLight();
         }
@@ -350,16 +360,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             b.gravity = serverGame.getGame().getGravity();
             b.gravityTickCounter = serverGame.getGame().getGravityTickCounter();
             b.gameEnded = serverGame.isGameEnded();
-            switch (serverGame.getGame().getMode()) {
-                case MULTIPLAYER_SCORE:
-                    b.scoreMode = serverGame.getScoreModeData();
-                    break;
-                case MULTIPLAYER_PUZZLE:
-                    b.puzzleMode = serverGame.getPuzzleModeData();
-                    break;
-                default:
-                    break;
-            }
+            serverGame.populateModeData(b);
             sender.sendUDP(connId, b);
             if (pb != null) {
                 sender.sendUDP(connId, pb);
@@ -384,22 +385,14 @@ public class GameRoom implements Runnable, GameRoomContext {
         broadcastMembersTCP(b);
 
         if (resultRecorder != null && info.mode != null && info.mode != GameMode.NONE) {
-            GameResultData data = new GameResultData();
-            data.gamemode = info.mode.name();
-            data.win = info.win;
-            data.disconnected = info.disconnected;
-            data.score = info.score;
-            data.displayScore = info.displayScore;
-            data.extraJson = info.extraJson;
-            data.timestampMs = System.currentTimeMillis();
-            data.players = new PlayerResultInfo[playerCount];
+            PlayerResultInfo[] players = new PlayerResultInfo[playerCount];
             for (int i = 0; i < playerCount; i++) {
                 Integer connId = slotToConn.get(i);
                 String name = connId != null ? connToName.getOrDefault(connId, "") : "";
                 String uuid = connId != null ? connToUuid.getOrDefault(connId, "") : "";
-                data.players[i] = new PlayerResultInfo(name, uuid);
+                players[i] = new PlayerResultInfo(name, uuid);
             }
-            resultRecorder.recordGameResult(data);
+            resultRecorder.recordGameResult(GameResultData.from(info, players));
         }
     }
 

@@ -5,6 +5,7 @@ import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.lwjgl3.util.AddressParser;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.s2c.JoinResponse;
 
@@ -13,6 +14,10 @@ public class LanMenu extends MenuScreen {
     private String pendingUsername;
     private long pendingJoinCode;
     private TextInput messageText;
+
+    private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
+            .on(ConnectionEstablishedPacket.class, w -> app.sendJoinRequest(pendingUsername, pendingJoinCode))
+            .on(JoinResponse.class, w -> handleJoinResponse((JoinResponse) w.packet));
 
     public LanMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -149,27 +154,21 @@ public class LanMenu extends MenuScreen {
     public void update() {
     }
 
-    @Override
-    public void render() {
-        elements.forEach(element -> element.render(shapes, sprites, font));
-    }
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
-        if (w.packet instanceof ConnectionEstablishedPacket) {
-            app.sendJoinRequest(pendingUsername, pendingJoinCode);
-        }
-        if (w.packet instanceof JoinResponse) {
-            JoinResponse res = (JoinResponse) w.packet;
-            if (res.accepted) {
-                app.switchMenu(new MultiplayerLobby(app, isHosting));
-            } else {
-                String reason = (res.reason != null && !res.reason.isEmpty()) ? res.reason : "Join denied.";
-                messageText.set(reason);
-                if (isHosting) {
-                    app.stopLanServer();
-                    isHosting = false;
-                }
+        dispatcher.dispatch(w);
+    }
+
+    private void handleJoinResponse(JoinResponse res) {
+        if (res.accepted) {
+            app.switchMenu(new MultiplayerLobby(app, isHosting));
+        } else {
+            String reason = (res.reason != null && !res.reason.isEmpty()) ? res.reason : "Join denied.";
+            messageText.set(reason);
+            if (isHosting) {
+                app.stopLanServer();
+                isHosting = false;
             }
         }
     }

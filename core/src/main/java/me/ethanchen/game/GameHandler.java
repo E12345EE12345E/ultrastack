@@ -30,37 +30,12 @@ public class GameHandler {
     public void init(GameMode m, long startGameTimer) {
         mode = m;
         startDelay = startGameTimer;
-        switch (mode) {
-            case NONE:
-                break;
-            case MULTIPLAYER_SCORE:
-                gravity = GameConstants.INITIAL_GRAVITY_MS;
-                if (numPlayers == 1) {
-                    boards.add(new Board(Board.Presets.STANDARD_SINGLE));
-                } else if (numPlayers == 2) {
-                    boards.add(new Board(Board.Presets.STANDARD_DUO));
-                } else if (numPlayers == 3) {
-                    boards.add(new Board(Board.Presets.STANDARD_TRIO));
-                } else if (numPlayers == 4) {
-                    boards.add(new Board(Board.Presets.STANDARD_4P));
-                }
-                break;
-            case MULTIPLAYER_PUZZLE:
-                gravity = GameConstants.INITIAL_GRAVITY_PUZZLE_MS;
-                Board puzzleBoard;
-                if (numPlayers == 1) {
-                    puzzleBoard = new Board(Board.Presets.SHORT_SINGLE);
-                } else if (numPlayers == 2) {
-                    puzzleBoard = new Board(Board.Presets.SHORT_DUO);
-                } else if (numPlayers == 3) {
-                    puzzleBoard = new Board(Board.Presets.SHORT_TRIO);
-                } else {
-                    puzzleBoard = new Board(Board.Presets.SHORT_4P);
-                }
-                puzzleBoard.spawnGarbageLines(GameConstants.PUZZLE_GARBAGE_LINES);
-                boards.add(puzzleBoard);
-                break;
-        }
+        if (mode == GameMode.NONE) return;
+        GameModeRules rules = mode.rules();
+        gravity = rules.initialGravityMs();
+        Board board = new Board(rules.boardPreset(numPlayers));
+        rules.prepareBoard(board);
+        boards.add(board);
     }
 
     public void startGame() {
@@ -77,17 +52,9 @@ public class GameHandler {
             startGame();
         }
         if (!started) return;
-        switch (mode) {
-            case NONE:
-                break;
-            case MULTIPLAYER_SCORE:
-                doGravity(deltaTime);
-                doLockTimers(deltaTime);
-                break;
-            case MULTIPLAYER_PUZZLE:
-                doGravity(deltaTime);
-                doLockTimers(deltaTime);
-                break;
+        if (mode != GameMode.NONE) {
+            doGravity(deltaTime);
+            doLockTimers(deltaTime);
         }
     }
 
@@ -110,12 +77,6 @@ public class GameHandler {
         if (!started) return;
         for (Board b : boards)
             pendingLockResults.addAll(b.updateLockTimers(deltaTime));
-    }
-
-    private void doMovementTimers(int deltaTime) {
-        if (!started) return;
-        for (Board b : boards)
-            b.updateMovementTimers(deltaTime);
     }
 
     /**

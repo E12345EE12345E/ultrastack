@@ -5,6 +5,7 @@ import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.lwjgl3.util.AddressParser;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.other.ConnectFailedPacket;
 
@@ -12,6 +13,10 @@ public class ServerConnectMenu extends MenuScreen {
     private TextInput messageText;
     private TextBoxOutput serverAddress;
     private boolean connectingToDefault;
+
+    private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
+            .on(ConnectionEstablishedPacket.class, w -> { connectingToDefault = false; app.switchMenu(new AuthMenu(app)); })
+            .on(ConnectFailedPacket.class, w -> showDefaultServerUnreachable(((ConnectFailedPacket) w.packet).reason));
 
     public ServerConnectMenu(ClientApp app) {
         this(app, false);
@@ -85,20 +90,9 @@ public class ServerConnectMenu extends MenuScreen {
     public void update() {
     }
 
-    @Override
-    public void render() {
-        elements.forEach(element -> element.render(shapes, sprites, font));
-    }
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
-        if (w.packet instanceof ConnectionEstablishedPacket) {
-            connectingToDefault = false;
-            app.switchMenu(new AuthMenu(app));
-        }
-        if (w.packet instanceof ConnectFailedPacket) {
-            ConnectFailedPacket p = (ConnectFailedPacket) w.packet;
-            showDefaultServerUnreachable(p.reason);
-        }
+        dispatcher.dispatch(w);
     }
 }

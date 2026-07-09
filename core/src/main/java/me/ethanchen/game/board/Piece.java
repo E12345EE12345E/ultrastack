@@ -2,6 +2,8 @@ package me.ethanchen.game.board;
 
 import com.badlogic.gdx.math.Vector2;
 
+import me.ethanchen.network.dto.NetPiece;
+
 public class Piece {
     // Types (tetrominoes)
     public static final byte I = 1; public static Piece I() { return defaultPiece(I); }
@@ -63,7 +65,6 @@ public class Piece {
     public boolean isBlockedFromSpawning = false;
     public float lockTime = 0f;
     public int lockedMovementCounter = 0;
-    public float movementTimer = 0f;
     public Piece(byte type) {
         this.type = type;
         this.rotation = 0;
@@ -274,13 +275,5 @@ public class Piece {
         }
 
         return piece;
-    }
-
-    public static class NetPiece { // smaller class to be sent over network
-        public byte type;
-        public byte doubledlocationx; // I and O pieces have centers on 0.5, so location is doubled to become integer and halved on packet arrival
-        public byte doubledlocationy;
-        public byte rotation;
-        public boolean blocked;
     }
 }

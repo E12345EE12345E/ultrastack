@@ -17,4 +17,21 @@ public class GameResultData {
     public long timestampMs;
     /** Optional gamemode-specific extra data, serialized as a JSON string. May be null. */
     public String extraJson;
+
+    /**
+     * Builds a persistable {@link GameResultData} from a {@link GameEndInfo}, stamping the
+     * current time and attaching the given per-player identities.
+     */
+    public static GameResultData from(GameEndInfo info, PlayerResultInfo[] players) {
+        GameResultData data = new GameResultData();
+        data.gamemode = info.mode != null ? info.mode.name() : null;
+        data.win = info.win;
+        data.disconnected = info.disconnected;
+        data.score = info.score;
+        data.displayScore = info.displayScore;
+        data.extraJson = info.extraJson;
+        data.timestampMs = System.currentTimeMillis();
+        data.players = players;
+        return data;
+    }
 }

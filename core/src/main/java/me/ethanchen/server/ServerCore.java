@@ -4,8 +4,10 @@ import com.esotericsoftware.kryonet.Server;
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.network.NetEndpoints;
 import me.ethanchen.network.NetworkRegister;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.ServerNetworkListener;
 import me.ethanchen.network.ServerPacketWrapper;
+import me.ethanchen.network.dto.RoomInfo;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.*;
 import me.ethanchen.network.packets.s2c.*;
@@ -16,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
+import java.util.function.Consumer;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -35,8 +38,7 @@ public class ServerCore implements PacketSender, Runnable {
     private volatile boolean running;
     private Thread loopThread;
     private int tickCount;
-
-    private static final int ROOM_LIST_BROADCAST_INTERVAL = 300; // ~5s at 60Hz
+    private final PacketDispatcher<ServerPacketWrapper> dispatcher;
 
     /** Account-mode constructor. */
     public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, int roomIdDigits) {
@@ -45,6 +47,7 @@ public class ServerCore implements PacketSender, Runnable {
         this.lanJoinCode = 0;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
+        this.dispatcher = buildDispatcher();
     }
 
     /** LAN-mode constructor (no auth, single implicit "LAN" room; results stay unpersisted). */
@@ -54,6 +57,41 @@ public class ServerCore implements PacketSender, Runnable {
         this.lanJoinCode = lanJoinCode;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
+        this.dispatcher = buildDispatcher();
+    }
+
+    /**
+     * Builds the packet-class -> handler registry used by {@link #dispatch}. Built once at
+     * construction time since which packet types are even valid depends on {@code authProvider}
+     * (LAN mode vs. account mode) and never changes afterward.
+     */
+    private PacketDispatcher<ServerPacketWrapper> buildDispatcher() {
+        PacketDispatcher<ServerPacketWrapper> d = new PacketDispatcher<>();
+        d.on(DisconnectPacket.class, w -> handleDisconnect(w.connectionID));
+
+        if (authProvider == null) {
+            // ---- LAN mode: JoinRequest ----
+            d.on(JoinRequest.class, w -> handleLanJoin(w, sessionFor(w)));
+        } else {
+            // ---- Account mode: auth + room packets ----
+            d.on(LoginRequest.class, w -> handleLogin(w, sessionFor(w)));
+            d.on(RegisterRequest.class, w -> handleRegister(w, sessionFor(w)));
+            d.on(RoomListRequest.class, w -> handleRoomListRequest(w, sessionFor(w)));
+            d.on(CreateRoomRequest.class, w -> handleCreateRoom(w, sessionFor(w)));
+            d.on(JoinRoomRequest.class, w -> handleJoinRoom(w, sessionFor(w)));
+            d.on(LeaveRoomRequest.class, w -> handleLeaveRoom(sessionFor(w)));
+        }
+
+        // ---- In-room packets (both modes) ----
+        Consumer<ServerPacketWrapper> forward = w -> forwardToRoom(w, sessionFor(w));
+        d.on(TextMessageRequest.class, forward);
+        d.on(StartGameRequest.class, forward);
+        d.on(MoveListRequest.class, forward);
+        return d;
+    }
+
+    private Session sessionFor(ServerPacketWrapper w) {
+        return sessions.get(w.connectionID);
     }
 
     // -------------------------------------------------------------------------
@@ -97,7 +135,7 @@ public class ServerCore implements PacketSender, Runnable {
             long start = System.currentTimeMillis();
             try {
                 drainInbound();
-                if (tickCount % ROOM_LIST_BROADCAST_INTERVAL == 0) {
+                if (tickCount % GameConstants.ROOM_LIST_BROADCAST_INTERVAL_TICKS == 0) {
                     broadcastRoomList();
                 }
             } catch (Exception e) {
@@ -125,57 +163,8 @@ public class ServerCore implements PacketSender, Runnable {
     // -------------------------------------------------------------------------
 
     private void dispatch(ServerPacketWrapper w) {
-        Session session = sessions.get(w.connectionID);
-        if (session == null) return; // shouldn't happen, but guard
-
-        // ---- Disconnect ----
-        if (w.packet instanceof DisconnectPacket) {
-            handleDisconnect(w.connectionID);
-            return;
-        }
-
-        // ---- LAN mode: JoinRequest ----
-        if (authProvider == null) {
-            if (w.packet instanceof JoinRequest) {
-                handleLanJoin(w, session);
-                return;
-            }
-        }
-
-        // ---- Account mode: auth packets ----
-        if (authProvider != null) {
-            if (w.packet instanceof LoginRequest) {
-                handleLogin(w, session);
-                return;
-            }
-            if (w.packet instanceof RegisterRequest) {
-                handleRegister(w, session);
-                return;
-            }
-            if (w.packet instanceof RoomListRequest) {
-                handleRoomListRequest(w, session);
-                return;
-            }
-            if (w.packet instanceof CreateRoomRequest) {
-                handleCreateRoom(w, session);
-                return;
-            }
-            if (w.packet instanceof JoinRoomRequest) {
-                handleJoinRoom(w, session);
-                return;
-            }
-            if (w.packet instanceof LeaveRoomRequest) {
-                handleLeaveRoom(session);
-                return;
-            }
-        }
-
-        // ---- In-room packets (both modes) ----
-        if (w.packet instanceof TextMessageRequest
-                || w.packet instanceof StartGameRequest
-                || w.packet instanceof MoveListRequest) {
-            forwardToRoom(w, session);
-        }
+        if (sessionFor(w) == null) return; // shouldn't happen, but guard
+        dispatcher.dispatch(w);
     }
 
     // -------------------------------------------------------------------------
@@ -188,16 +177,11 @@ public class ServerCore implements PacketSender, Runnable {
 
         JoinResponse res = new JoinResponse();
 
-        if (req.protocolVersion < NetworkRegister.PROTOCOL_VERSION) {
+        String versionError = protocolVersionMismatchReason(req.protocolVersion);
+        if (versionError != null) {
             res.accepted = false;
             res.playerId = -1;
-            res.reason = "outdated client";
-            sendTCP(w.connectionID, res);
-            return;
-        } else if (req.protocolVersion > NetworkRegister.PROTOCOL_VERSION) {
-            res.accepted = false;
-            res.playerId = -1;
-            res.reason = "outdated server";
+            res.reason = versionError;
             sendTCP(w.connectionID, res);
             return;
         }
@@ -247,9 +231,30 @@ public class ServerCore implements PacketSender, Runnable {
     // Account mode handlers
     // -------------------------------------------------------------------------
 
+    /**
+     * Checks a client-supplied protocol version against {@link NetworkRegister#PROTOCOL_VERSION}.
+     *
+     * @return {@code null} if the versions match, otherwise a human-readable rejection reason
+     *         suitable for a response packet's {@code reason} field.
+     */
+    private static String protocolVersionMismatchReason(byte clientVersion) {
+        if (clientVersion < NetworkRegister.PROTOCOL_VERSION) return "outdated client";
+        if (clientVersion > NetworkRegister.PROTOCOL_VERSION) return "outdated server";
+        return null;
+    }
+
     private void handleLogin(ServerPacketWrapper w, Session session) {
         LoginRequest req = (LoginRequest) w.packet;
         AuthResponse res = new AuthResponse();
+
+        String versionError = protocolVersionMismatchReason(req.protocolVersion);
+        if (versionError != null) {
+            res.success = false;
+            res.reason = versionError;
+            sendTCP(w.connectionID, res);
+            return;
+        }
+
         String error = authProvider.login(req.username, req.passcode, session);
         if (error == null) {
             res.success = true;
@@ -267,6 +272,15 @@ public class ServerCore implements PacketSender, Runnable {
     private void handleRegister(ServerPacketWrapper w, Session session) {
         RegisterRequest req = (RegisterRequest) w.packet;
         AuthResponse res = new AuthResponse();
+
+        String versionError = protocolVersionMismatchReason(req.protocolVersion);
+        if (versionError != null) {
+            res.success = false;
+            res.reason = versionError;
+            sendTCP(w.connectionID, res);
+            return;
+        }
+
         String error = authProvider.register(req.username, req.passcode);
         if (error == null) {
             // Registration succeeded — also authenticate the session so the player
@@ -349,19 +363,7 @@ public class ServerCore implements PacketSender, Runnable {
 
     private void handleLeaveRoom(Session session) {
         if (session.currentRoomId == null) return;
-        String roomId = session.currentRoomId;
-        GameRoom room = rooms.get(roomId);
-        if (room != null) {
-            List<Integer> evicted = room.handleDisconnect(session.connectionId);
-            for (int evictedConnId : evicted) {
-                Session evictedSession = sessions.get(evictedConnId);
-                if (evictedSession != null) evictedSession.currentRoomId = null;
-            }
-            if (room.isEmpty()) {
-                rooms.remove(roomId);
-                room.stop();
-            }
-        }
+        evictFromRoom(session.connectionId, session.currentRoomId);
         session.currentRoomId = null;
     }
 
@@ -375,19 +377,27 @@ public class ServerCore implements PacketSender, Runnable {
         System.out.println("[ServerCore] Disconnected: connId=" + connectionId
                 + " user=" + session.username);
         if (session.currentRoomId != null) {
-            String roomId = session.currentRoomId;
-            GameRoom room = rooms.get(roomId);
-            if (room != null) {
-                List<Integer> evicted = room.handleDisconnect(connectionId);
-                for (int evictedConnId : evicted) {
-                    Session evictedSession = sessions.get(evictedConnId);
-                    if (evictedSession != null) evictedSession.currentRoomId = null;
-                }
-                if (room.isEmpty()) {
-                    rooms.remove(roomId);
-                    room.stop();
-                }
-            }
+            evictFromRoom(connectionId, session.currentRoomId);
+        }
+    }
+
+    /**
+     * Removes {@code connectionId} from {@code roomId}, clears {@code currentRoomId} on any
+     * sessions the room evicted as a side-effect (e.g. the host leaving a lobby), and tears
+     * down the room if it's now empty. Shared by {@link #handleLeaveRoom} and
+     * {@link #handleDisconnect}.
+     */
+    private void evictFromRoom(int connectionId, String roomId) {
+        GameRoom room = rooms.get(roomId);
+        if (room == null) return;
+        List<Integer> evicted = room.handleDisconnect(connectionId);
+        for (int evictedConnId : evicted) {
+            Session evictedSession = sessions.get(evictedConnId);
+            if (evictedSession != null) evictedSession.currentRoomId = null;
+        }
+        if (room.isEmpty()) {
+            rooms.remove(roomId);
+            room.stop();
         }
     }
 
@@ -415,16 +425,15 @@ public class ServerCore implements PacketSender, Runnable {
     private RoomListBroadcast buildRoomListBroadcast() {
         List<GameRoom> roomList = new ArrayList<>(rooms.values());
         RoomListBroadcast b = new RoomListBroadcast();
-        b.roomIds = new String[roomList.size()];
-        b.hostNames = new String[roomList.size()];
-        b.playerCounts = new int[roomList.size()];
-        b.inProgress = new boolean[roomList.size()];
+        b.rooms = new RoomInfo[roomList.size()];
         for (int i = 0; i < roomList.size(); i++) {
             GameRoom r = roomList.get(i);
-            b.roomIds[i] = r.roomId;
-            b.hostNames[i] = r.getHostName();
-            b.playerCounts[i] = r.getPlayerCount();
-            b.inProgress[i] = r.isInProgress();
+            RoomInfo info = new RoomInfo();
+            info.roomId = r.roomId;
+            info.hostName = r.getHostName();
+            info.playerCount = r.getPlayerCount();
+            info.inProgress = r.isInProgress();
+            b.rooms[i] = info;
         }
         return b;
     }

@@ -79,16 +79,7 @@ public class UIText extends UIElement {
         float pxX = MenuScreen.convertFromRelCoordsX((float) centerX);
         float pxY = Gdx.graphics.getHeight() - MenuScreen.convertFromRelCoordsY((float) centerY);
 
-        // Store original scale
-        float originalScaleX = font.getScaleX();
-        float originalScaleY = font.getScaleY();
-        
-        font.getData().setScale(1f);
-        float unscaledLineHeight = font.getData().lineHeight;
-        float scaleAdjustment = 15f / unscaledLineHeight;
-        
-        float fontScale = size * scaleAdjustment * (Gdx.graphics.getHeight() / 640f);
-        font.getData().setScale(fontScale);
+        float[] savedScale = UIFont.saveAndSetScale(font, size);
 
         sprites.begin();
         String text = textin.get();
@@ -141,8 +132,7 @@ public class UIText extends UIElement {
         font.draw(sprites, (text != null) ? text : "", x, y);
         sprites.end();
 
-        // Restore original scale
-        font.getData().setScale(originalScaleX, originalScaleY);
+        UIFont.restoreScale(font, savedScale);
     }
 
     @Override

@@ -4,10 +4,14 @@ import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
 import me.ethanchen.network.ClientPacketWrapper;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.s2c.AuthResponse;
 
 public class AuthMenu extends MenuScreen {
     private TextInput messageText;
+
+    private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
+            .on(AuthResponse.class, w -> handleAuthResponse((AuthResponse) w.packet));
 
     public AuthMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -72,20 +76,17 @@ public class AuthMenu extends MenuScreen {
     public void update() {
     }
 
-    @Override
-    public void render() {
-        elements.forEach(element -> element.render(shapes, sprites, font));
-    }
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
-        if (w.packet instanceof AuthResponse) {
-            AuthResponse res = (AuthResponse) w.packet;
-            if (res.success) {
-                app.switchMenu(new RoomBrowserMenu(app));
-            } else {
-                messageText.set(res.reason != null && !res.reason.isEmpty() ? res.reason : "Authentication failed.");
-            }
+        dispatcher.dispatch(w);
+    }
+
+    private void handleAuthResponse(AuthResponse res) {
+        if (res.success) {
+            app.switchMenu(new RoomBrowserMenu(app));
+        } else {
+            messageText.set(res.reason != null && !res.reason.isEmpty() ? res.reason : "Authentication failed.");
         }
     }
 }

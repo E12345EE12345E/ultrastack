@@ -15,7 +15,7 @@ package me.ethanchen.network.packets.s2c;
  *       a TILE_BREAK particle for each column that is not {@code -1}.</li>
  * </ul>
  *
- * <p>Coordinates follow the same conventions as {@link me.ethanchen.game.board.Piece.NetPiece}:
+ * <p>Coordinates follow the same conventions as {@link me.ethanchen.network.dto.NetPiece}:
  * {@code doubledX} / {@code doubledY} are the anchor coordinates multiplied by 2 so that the
  * half-cell offsets used by I and O pieces survive integer truncation.
  */
@@ -45,7 +45,7 @@ public class ParticleSpawner {
 
     /**
      * Piece anchor x-coordinate multiplied by 2 (matches
-     * {@link me.ethanchen.game.board.Piece.NetPiece#doubledlocationx}).
+     * {@link me.ethanchen.network.dto.NetPiece#doubledlocationx}).
      * Divide by 2 on the client to recover the floating-point anchor.
      */
     public byte doubledX;

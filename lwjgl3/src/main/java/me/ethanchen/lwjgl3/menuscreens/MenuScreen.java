@@ -35,7 +35,10 @@ public abstract class MenuScreen extends InputAdapter {
 
     public abstract void update();
 
-    public abstract void render();
+    /** Default render: iterates all elements. Override to add custom drawing before or after. */
+    public void render() {
+        elements.forEach(element -> element.render(shapes, sprites, font));
+    }
 
     public void passClientPacket(ClientPacketWrapper w) {
         // empty method to be overwritten

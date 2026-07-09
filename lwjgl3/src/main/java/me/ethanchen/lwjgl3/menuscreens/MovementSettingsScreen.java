@@ -1,5 +1,10 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.controllers.Controller;
 import com.badlogic.gdx.controllers.ControllerAdapter;
@@ -23,12 +28,40 @@ public class MovementSettingsScreen extends MenuScreen {
     private static final double BTN_W    = 0.165;
     private static final double ROW_H    = 0.08;
 
-    // Row Y positions (8 actions)
+    // Row Y positions and labels for the 8 actions
     private static final double[] ROW_Y = { 0.83, 0.75, 0.67, 0.59, 0.51, 0.43, 0.35, 0.27 };
     private static final String[] ROW_LABELS = {
         "Move Left", "Move Right", "Soft Drop", "Hard Drop",
         "Rotate CW", "Rotate CCW", "Rotate 180", "Hold"
     };
+
+    // Metadata: how to read the initial value from MovementKeys for each action row
+    private static final List<Function<GameSettings.MovementKeys, Integer>> KEY1_GETTERS = Arrays.asList(
+        m -> m.left,  m -> m.right,  m -> m.softDrop,  m -> m.hardDrop,
+        m -> m.rotateCw, m -> m.rotateCcw, m -> m.rotate180, m -> m.hold);
+    private static final List<Function<GameSettings.MovementKeys, Integer>> KEY2_GETTERS = Arrays.asList(
+        m -> m.left2, m -> m.right2, m -> m.softDrop2, m -> m.hardDrop2,
+        m -> m.rotateCw2, m -> m.rotateCcw2, m -> m.rotate180_2, m -> m.hold2);
+    private static final List<Function<GameSettings.MovementKeys, Integer>> CTRL1_GETTERS = Arrays.asList(
+        m -> m.ctrlLeft,  m -> m.ctrlRight,  m -> m.ctrlSoftDrop,  m -> m.ctrlHardDrop,
+        m -> m.ctrlRotateCw, m -> m.ctrlRotateCcw, m -> m.ctrlRotate180, m -> m.ctrlHold);
+    private static final List<Function<GameSettings.MovementKeys, Integer>> CTRL2_GETTERS = Arrays.asList(
+        m -> m.ctrlLeft2, m -> m.ctrlRight2, m -> m.ctrlSoftDrop2, m -> m.ctrlHardDrop2,
+        m -> m.ctrlRotateCw2, m -> m.ctrlRotateCcw2, m -> m.ctrlRotate180_2, m -> m.ctrlHold2);
+
+    // Metadata: how to write back to MovementKeys for each action row
+    private static final List<BiConsumer<GameSettings.MovementKeys, Integer>> KEY1_SETTERS = Arrays.asList(
+        (m, v) -> m.left = v,  (m, v) -> m.right = v,  (m, v) -> m.softDrop = v,  (m, v) -> m.hardDrop = v,
+        (m, v) -> m.rotateCw = v, (m, v) -> m.rotateCcw = v, (m, v) -> m.rotate180 = v, (m, v) -> m.hold = v);
+    private static final List<BiConsumer<GameSettings.MovementKeys, Integer>> KEY2_SETTERS = Arrays.asList(
+        (m, v) -> m.left2 = v, (m, v) -> m.right2 = v, (m, v) -> m.softDrop2 = v, (m, v) -> m.hardDrop2 = v,
+        (m, v) -> m.rotateCw2 = v, (m, v) -> m.rotateCcw2 = v, (m, v) -> m.rotate180_2 = v, (m, v) -> m.hold2 = v);
+    private static final List<BiConsumer<GameSettings.MovementKeys, Integer>> CTRL1_SETTERS = Arrays.asList(
+        (m, v) -> m.ctrlLeft = v,  (m, v) -> m.ctrlRight = v,  (m, v) -> m.ctrlSoftDrop = v,  (m, v) -> m.ctrlHardDrop = v,
+        (m, v) -> m.ctrlRotateCw = v, (m, v) -> m.ctrlRotateCcw = v, (m, v) -> m.ctrlRotate180 = v, (m, v) -> m.ctrlHold = v);
+    private static final List<BiConsumer<GameSettings.MovementKeys, Integer>> CTRL2_SETTERS = Arrays.asList(
+        (m, v) -> m.ctrlLeft2 = v, (m, v) -> m.ctrlRight2 = v, (m, v) -> m.ctrlSoftDrop2 = v, (m, v) -> m.ctrlHardDrop2 = v,
+        (m, v) -> m.ctrlRotateCw2 = v, (m, v) -> m.ctrlRotateCcw2 = v, (m, v) -> m.ctrlRotate180_2 = v, (m, v) -> m.ctrlHold2 = v);
 
     // Keyboard bind buttons (primary and secondary)
     private final UIKeybindButton[] key1Btns = new UIKeybindButton[8];
@@ -57,40 +90,19 @@ public class MovementSettingsScreen extends MenuScreen {
         elements.add(new UIText(0.5, 0.94, "Movement Settings", 3));
 
         // Column headers
-        elements.add(new UIText(KEY1_X,              0.89, "Key 1",      0.85));
-        elements.add(new UIText(KEY2_X,              0.89, "Key 2",      0.85));
+        elements.add(new UIText(KEY1_X,                   0.89, "Key 1",      0.85));
+        elements.add(new UIText(KEY2_X,                   0.89, "Key 2",      0.85));
         elements.add(new UIText((CTRL1_X + CTRL2_X) / 2, 0.92, "Controller", 0.85));
-        elements.add(new UIText(CTRL1_X,             0.89, "Btn 1",      0.85));
-        elements.add(new UIText(CTRL2_X,             0.89, "Btn 2",      0.85));
-
-        // Per-action primary keyboard defaults
-        int[] key1Defaults = {
-            keys.left, keys.right, keys.softDrop, keys.hardDrop,
-            keys.rotateCw, keys.rotateCcw, keys.rotate180, keys.hold
-        };
-        // Per-action secondary keyboard defaults
-        int[] key2Defaults = {
-            keys.left2, keys.right2, keys.softDrop2, keys.hardDrop2,
-            keys.rotateCw2, keys.rotateCcw2, keys.rotate180_2, keys.hold2
-        };
-        // Controller slot 1 defaults
-        int[] ctrl1Defaults = {
-            keys.ctrlLeft, keys.ctrlRight, keys.ctrlSoftDrop, keys.ctrlHardDrop,
-            keys.ctrlRotateCw, keys.ctrlRotateCcw, keys.ctrlRotate180, keys.ctrlHold
-        };
-        // Controller slot 2 defaults
-        int[] ctrl2Defaults = {
-            keys.ctrlLeft2, keys.ctrlRight2, keys.ctrlSoftDrop2, keys.ctrlHardDrop2,
-            keys.ctrlRotateCw2, keys.ctrlRotateCcw2, keys.ctrlRotate180_2, keys.ctrlHold2
-        };
+        elements.add(new UIText(CTRL1_X,                  0.89, "Btn 1",      0.85));
+        elements.add(new UIText(CTRL2_X,                  0.89, "Btn 2",      0.85));
 
         for (int i = 0; i < 8; i++) {
             elements.add(new UIText(LABEL_X, ROW_Y[i], ROW_LABELS[i], 0.85));
 
-            key1Btns[i]  = new UIKeybindButton(KEY1_X,  ROW_Y[i], BTN_W, ROW_H, key1Defaults[i]);
-            key2Btns[i]  = new UIKeybindButton(KEY2_X,  ROW_Y[i], BTN_W, ROW_H, key2Defaults[i]);
-            ctrl1Btns[i] = new UIControllerBindButton(CTRL1_X, ROW_Y[i], BTN_W, ROW_H, ctrl1Defaults[i]);
-            ctrl2Btns[i] = new UIControllerBindButton(CTRL2_X, ROW_Y[i], BTN_W, ROW_H, ctrl2Defaults[i]);
+            key1Btns[i]  = new UIKeybindButton(KEY1_X,  ROW_Y[i], BTN_W, ROW_H, KEY1_GETTERS.get(i).apply(keys));
+            key2Btns[i]  = new UIKeybindButton(KEY2_X,  ROW_Y[i], BTN_W, ROW_H, KEY2_GETTERS.get(i).apply(keys));
+            ctrl1Btns[i] = new UIControllerBindButton(CTRL1_X, ROW_Y[i], BTN_W, ROW_H, CTRL1_GETTERS.get(i).apply(keys));
+            ctrl2Btns[i] = new UIControllerBindButton(CTRL2_X, ROW_Y[i], BTN_W, ROW_H, CTRL2_GETTERS.get(i).apply(keys));
 
             elements.add(key1Btns[i]);
             elements.add(key2Btns[i]);
@@ -151,11 +163,6 @@ public class MovementSettingsScreen extends MenuScreen {
     @Override
     public void update() {}
 
-    @Override
-    public void render() {
-        elements.forEach(element -> element.render(shapes, sprites, font));
-    }
-
     private UIKeybindButton getListeningKeyButton() {
         for (int i = 0; i < 8; i++) {
             if (key1Btns[i].isListening()) return key1Btns[i];
@@ -195,43 +202,12 @@ public class MovementSettingsScreen extends MenuScreen {
         Controllers.removeListener(controllerListener);
         GameSettings settings = app.getSettings();
         GameSettings.MovementKeys m = settings.movement;
-
-        m.left       = key1Btns[0].getBoundKey();
-        m.right      = key1Btns[1].getBoundKey();
-        m.softDrop   = key1Btns[2].getBoundKey();
-        m.hardDrop   = key1Btns[3].getBoundKey();
-        m.rotateCw   = key1Btns[4].getBoundKey();
-        m.rotateCcw  = key1Btns[5].getBoundKey();
-        m.rotate180  = key1Btns[6].getBoundKey();
-        m.hold       = key1Btns[7].getBoundKey();
-
-        m.left2       = key2Btns[0].getBoundKey();
-        m.right2      = key2Btns[1].getBoundKey();
-        m.softDrop2   = key2Btns[2].getBoundKey();
-        m.hardDrop2   = key2Btns[3].getBoundKey();
-        m.rotateCw2   = key2Btns[4].getBoundKey();
-        m.rotateCcw2  = key2Btns[5].getBoundKey();
-        m.rotate180_2 = key2Btns[6].getBoundKey();
-        m.hold2       = key2Btns[7].getBoundKey();
-
-        m.ctrlLeft      = ctrl1Btns[0].getBoundButton();
-        m.ctrlRight     = ctrl1Btns[1].getBoundButton();
-        m.ctrlSoftDrop  = ctrl1Btns[2].getBoundButton();
-        m.ctrlHardDrop  = ctrl1Btns[3].getBoundButton();
-        m.ctrlRotateCw  = ctrl1Btns[4].getBoundButton();
-        m.ctrlRotateCcw = ctrl1Btns[5].getBoundButton();
-        m.ctrlRotate180 = ctrl1Btns[6].getBoundButton();
-        m.ctrlHold      = ctrl1Btns[7].getBoundButton();
-
-        m.ctrlLeft2      = ctrl2Btns[0].getBoundButton();
-        m.ctrlRight2     = ctrl2Btns[1].getBoundButton();
-        m.ctrlSoftDrop2  = ctrl2Btns[2].getBoundButton();
-        m.ctrlHardDrop2  = ctrl2Btns[3].getBoundButton();
-        m.ctrlRotateCw2  = ctrl2Btns[4].getBoundButton();
-        m.ctrlRotateCcw2 = ctrl2Btns[5].getBoundButton();
-        m.ctrlRotate180_2 = ctrl2Btns[6].getBoundButton();
-        m.ctrlHold2      = ctrl2Btns[7].getBoundButton();
-
+        for (int i = 0; i < 8; i++) {
+            KEY1_SETTERS.get(i).accept(m, key1Btns[i].getBoundKey());
+            KEY2_SETTERS.get(i).accept(m, key2Btns[i].getBoundKey());
+            CTRL1_SETTERS.get(i).accept(m, ctrl1Btns[i].getBoundButton());
+            CTRL2_SETTERS.get(i).accept(m, ctrl2Btns[i].getBoundButton());
+        }
         SettingsManager.save(settings);
         app.switchMenu(new MainSettingsScreen(app));
     }

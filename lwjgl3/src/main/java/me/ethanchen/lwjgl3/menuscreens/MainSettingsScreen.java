@@ -28,8 +28,4 @@ public class MainSettingsScreen extends MenuScreen {
     @Override
     public void update() {}
 
-    @Override
-    public void render() {
-        elements.forEach(el -> el.render(shapes, sprites, font));
-    }
 }
