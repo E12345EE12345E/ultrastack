@@ -122,7 +122,6 @@ public abstract class MenuScreen extends InputAdapter {
     }
 
     public static void linkTextBoxTabChain(ArrayList<UIElement> elements) {
-        System.out.println(elements);
         ArrayList<UITextBox> textBoxes = new ArrayList<UITextBox>();
         elements.forEach(element -> { if (element instanceof UITextBox) textBoxes.add((UITextBox) element); });
         if (textBoxes.size() > 1) {
@@ -131,7 +130,5 @@ public abstract class MenuScreen extends InputAdapter {
             }
             textBoxes.get(textBoxes.size()-1).setNext(textBoxes.get(0));
         }
-        System.out.println(elements);
-        System.out.println(textBoxes);
     }
 }

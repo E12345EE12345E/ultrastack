@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector2;
 
+import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.Tile;
@@ -66,6 +67,14 @@ public class BoardRenderer {
             instance = new BoardRenderer();
         }
         return instance;
+    }
+
+    /** Disposes the singleton instance (if created) and clears it so a fresh one is built on next use. */
+    public static void disposeInstance() {
+        if (instance != null) {
+            instance.dispose();
+            instance = null;
+        }
     }
 
     private BoardRenderer() {
@@ -467,8 +476,8 @@ public class BoardRenderer {
         font.draw(sprites, "TIME", labelX, labelY);
         sprites.end();
 
-        // MM:SS remaining (capped at 4:00), centered in the upper-middle portion
-        long remaining = Math.min(4L * 60 * 1000, Math.max(0, endTargetMs - System.currentTimeMillis()));
+        // MM:SS remaining (capped at the configured match duration), centered in the upper-middle portion
+        long remaining = Math.min(GameConstants.SCORE_MODE_DURATION_MS, Math.max(0, endTargetMs - System.currentTimeMillis()));
         long mins = remaining / 60000;
         long secs = (remaining % 60000) / 1000;
         String timeText = mins + ":" + String.format("%02d", secs);
@@ -492,6 +501,52 @@ public class BoardRenderer {
         sprites.begin();
         font.setColor(Color.WHITE);
         font.draw(sprites, scoreText, scoreX, scoreY);
+        sprites.end();
+
+        font.getData().setScale(savedX, savedY);
+    }
+
+    /**
+     * Draws a count-up timer box (no cap, no score line) for MULTIPLAYER_PUZZLE, styled the
+     * same as {@link #drawTimerBox}: a "TIME" label at the top and MM:SS centered below it.
+     */
+    public void drawCountUpTimerBox(long elapsedMs, float x, float y, float boxSize, float tileSize,
+                             ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
+        // White outline box
+        shapes.begin(ShapeRenderer.ShapeType.Line);
+        shapes.setColor(Color.WHITE);
+        shapes.rect(x, y, boxSize, boxSize);
+        shapes.end();
+
+        GlyphLayout layout = new GlyphLayout();
+        float savedX = font.getScaleX(), savedY = font.getScaleY();
+        font.getData().setScale(1f);
+        float lh = font.getData().lineHeight;
+
+        // "TIME" label near the top of the box
+        float labelFs = 0.6f * (tileSize / lh);
+        font.getData().setScale(labelFs);
+        layout.setText(font, "TIME");
+        float labelX = x + (boxSize - layout.width) * 0.5f;
+        float labelY = y + boxSize - layout.height * 0.15f;
+        sprites.begin();
+        font.setColor(Color.WHITE);
+        font.draw(sprites, "TIME", labelX, labelY);
+        sprites.end();
+
+        // MM:SS elapsed, uncapped, centered in the box
+        long elapsed = Math.max(0, elapsedMs);
+        long mins = elapsed / 60000;
+        long secs = (elapsed % 60000) / 1000;
+        String timeText = mins + ":" + String.format("%02d", secs);
+        float timeFs = 0.8f * (tileSize / lh);
+        font.getData().setScale(timeFs);
+        layout.setText(font, timeText);
+        float timeX = x + (boxSize - layout.width) * 0.5f;
+        float timeY = y + boxSize * 0.5f + layout.height * 0.5f;
+        sprites.begin();
+        font.setColor(Color.WHITE);
+        font.draw(sprites, timeText, timeX, timeY);
         sprites.end();
 
         font.getData().setScale(savedX, savedY);

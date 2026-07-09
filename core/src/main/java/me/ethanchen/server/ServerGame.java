@@ -4,6 +4,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
 
+import com.badlogic.gdx.utils.Json;
+
+import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
@@ -16,14 +19,16 @@ import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
 import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class ServerGame {
     private volatile boolean inProgress; public boolean isInProgress() { return inProgress; }
     private volatile long lastUpdateMs;
-    private int deltatime;
-    private GameMode gamemode;
+    private int deltaTime;
+    private GameMode gameMode;
     private int players;
     private GameHandler game;
     private GameRoomContext room;
@@ -38,22 +43,12 @@ public class ServerGame {
 
     // Hold state
     private long lastHoldUsedMs = 0;
-    private static final long HOLD_GLOBAL_LOCK_MS = 1000;
-    private static final long HARD_DROP_SUPPRESS_MS = 250L;
 
     // Bump/blocked event threshold
     private static final float BUMP_TIMER_THRESHOLD_MS = 400f;
 
     // Per-player hard-drop suppression after auto-lock
     private long[] hardDropBlockedUntilMs;
-
-    // Blocked-spawn cycling constants
-    private static final float CYCLE_START       = 1.0f;
-    private static final float CYCLE_MULT        = 0.8f;
-    private static final float CYCLE_MIN         = 0.25f;
-    private static final long  COYOTE_MS         = 50L;
-    private static final float EXPLODE_DURATION  = 2.0f;
-    private static final float EXPLODE_MIN_INTERVAL = 0.1f;
 
     // Per-player blocked-cycling state (re-initialized in startGame)
     private float[]  timeBetweenNextPiece;
@@ -66,10 +61,18 @@ public class ServerGame {
     private float   explodeCountdown = -1f;
     private boolean gameEnded        = false;
 
+    // Game-end grace period: set once by beginGameEnd(), consumed by finalizeGameEnd() once
+    // gameEndGraceUntilMs elapses (see GameConstants.PUZZLE_GAME_END_GRACE_MS).
+    private boolean pendingWin;
+    private boolean pendingDisconnected;
+    private long gameEndGraceUntilMs;
+    private ScoreModeEndData frozenScoreEnd;
+    private PuzzleModeEndData frozenPuzzleEnd;
+    private long frozenPuzzleElapsedMs;
+
     // Timer state
     private long gameStartMs;
     private long gameEndTargetMs;
-    private static final long TIMER_DURATION_MS = 4L * 60 * 1000;
 
     // MULTIPLAYER_SCORE mode state
     private long totalScore;
@@ -81,20 +84,26 @@ public class ServerGame {
 
     public ServerGame(GameRoomContext room) {
         inProgress = false;
-        gamemode = GameMode.NONE;
+        gameMode = GameMode.NONE;
         this.room = room;
     }
 
-    public boolean startGame(GameMode gamemode, int players, int msToStart) {
+    /**
+     * Starts a new game. Synchronized (along with the other mutation entry points below) so
+     * that a disconnect arriving on the {@code ServerCore} thread via
+     * {@link #handleDisconnectedPlayer(int)} can never interleave with an in-flight
+     * {@link #update()}/{@link #applyMoves(int, int[], byte[])} call on the room thread.
+     */
+    public synchronized boolean startGame(GameMode gameMode, int players, int msToStart) {
         if (inProgress) return false;
         inProgress = true;
         lastUpdateMs = System.currentTimeMillis();
-        this.gamemode = gamemode;
+        this.gameMode = gameMode;
         this.players = players;
         this.game = new GameHandler(players);
-        this.game.init(gamemode, msToStart);
+        this.game.init(gameMode, msToStart);
         gameStartMs     = System.currentTimeMillis() + msToStart;
-        gameEndTargetMs = gameStartMs + TIMER_DURATION_MS;
+        gameEndTargetMs = gameStartMs + GameConstants.SCORE_MODE_DURATION_MS;
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
         this.hardDropBlockedUntilMs = new long[players];
@@ -107,9 +116,15 @@ public class ServerGame {
         lastCycleSwitchMs    = new long[players];
         previousCyclePieceId = new byte[players];
         wasBlocked           = new boolean[players];
-        Arrays.fill(timeBetweenNextPiece, CYCLE_START);
+        Arrays.fill(timeBetweenNextPiece, GameConstants.CYCLE_START);
         explodeCountdown = -1f;
         gameEnded        = false;
+        pendingWin = false;
+        pendingDisconnected = false;
+        gameEndGraceUntilMs = 0;
+        frozenScoreEnd = null;
+        frozenPuzzleEnd = null;
+        frozenPuzzleElapsedMs = 0;
         // Score-mode state reset
         totalScore = 0;
         glowPlayerId = -1;
@@ -121,8 +136,8 @@ public class ServerGame {
         return true;
     }
 
-    public void stopGame() {
-        this.gamemode = GameMode.NONE;
+    public synchronized void stopGame() {
+        this.gameMode = GameMode.NONE;
         this.game = null;
         this.players = 0;
         this.highestMoveId = null;
@@ -134,67 +149,56 @@ public class ServerGame {
         return highestMoveId[playerId];
     }
 
-    public void applyMoves(int playerId, int[] ids, byte[] types) {
-        if (!inProgress || game == null || ids == null || types == null) return;
+    public synchronized void applyMoves(int playerId, int[] ids, byte[] types) {
+        if (!inProgress || gameEnded || game == null || ids == null || types == null) return;
+        if (ids.length != types.length) return; // malformed/corrupt request
         if (playerId < 0 || playerId >= players) return;
         if (game.getBoards().isEmpty()) return;
         Board board = game.getBoards().get(0);
         if (board.getActivePieces().size() <= playerId) return;
         MoveType[] moveValues = MoveType.values();
         for (int i = 0; i < ids.length; i++) {
-            if (ids[i] > highestMoveId[playerId]) {
-                highestMoveId[playerId] = ids[i];
-                if (types[i] >= 0 && types[i] < moveValues.length) {
-                    MoveType move = moveValues[types[i]];
-                    if (move == MoveType.HARD_DROP) {
-                        if (System.currentTimeMillis() < hardDropBlockedUntilMs[playerId]) {
-                            // suppressed after auto-lock
-                        } else {
-                            LineClearResult result = board.hardDrop(playerId);
-                            if (result != null && result.placed) {
-                                processPlacement(result);
-                            } else if (result != null && !result.placed && result.blockedByPlayerId >= 0) {
-                                checkBlocked(playerId, result.blockedByPlayerId);
-                            }
-                        }
-                    } else if (move == MoveType.HOLD) {
-                        if (!computeHoldAvailable(playerId)) {
-                            HoldSoundBroadcast hsb = new HoldSoundBroadcast();
-                            hsb.playerId = (byte) playerId;
-                            hsb.success = false;
-                            pendingHoldSounds.add(hsb);
-                        } else {
-                            Piece currentPiece = board.getActivePieces().size() > playerId
-                                    ? board.getActivePieces().get(playerId) : null;
-                            if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
-                                applyBlockedHold(playerId, board);
-                            } else if (board.useHold(playerId)) {
-                                lastHoldUsedMs = System.currentTimeMillis();
-                                HoldSoundBroadcast hsb = new HoldSoundBroadcast();
-                                hsb.playerId = (byte) playerId;
-                                hsb.success = true;
-                                pendingHoldSounds.add(hsb);
-                            }
-                        }
-                    } else {
-                        boolean moved = board.applyMove(playerId, move);
-                        if (!moved && (move == MoveType.LEFT || move == MoveType.RIGHT)) {
-                            Piece moverPiece = board.getActivePiece(playerId);
-                            if (!moverPiece.isBlockedFromSpawning) {
-                                int xdiff = (move == MoveType.LEFT) ? -1 : 1;
-                                int blockerId = board.getLateralBlocker(playerId, xdiff);
-                                if (blockerId >= 0) {
-                                    checkBump(playerId, blockerId);
-                                }
-                            }
-                        }
-                        LineClearResult lockResult = board.tryMovementLock(playerId);
-                        if (lockResult != null && lockResult.placed) {
-                            processPlacement(lockResult);
-                            if (!lockResult.manual) {
-                                hardDropBlockedUntilMs[playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
-                            }
-                        }
+            if (ids[i] <= highestMoveId[playerId]) continue;
+            // Ack the move id immediately: it's the client's own monotonic counter, so once
+            // seen it must never be replayed, even if the move below turns out to be a no-op.
+            highestMoveId[playerId] = ids[i];
+            if (types[i] < 0 || types[i] >= moveValues.length) continue;
+            MoveType move = moveValues[types[i]];
+            if (move == MoveType.HARD_DROP) {
+                if (System.currentTimeMillis() < hardDropBlockedUntilMs[playerId]) {
+                    // suppressed after auto-lock
+                } else {
+                    LineClearResult result = board.hardDrop(playerId);
+                    if (result != null && result.placed) {
+                        processPlacement(result);
+                    }
+                }
+            } else if (move == MoveType.HOLD) {
+                if (!computeHoldAvailable(playerId)) {
+                    HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+                    hsb.playerId = (byte) playerId;
+                    hsb.success = false;
+                    pendingHoldSounds.add(hsb);
+                } else {
+                    Piece currentPiece = board.getActivePieces().size() > playerId
+                            ? board.getActivePieces().get(playerId) : null;
+                    if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
+                        applyBlockedHold(playerId, board);
+                    } else if (board.useHold(playerId)) {
+                        lastHoldUsedMs = System.currentTimeMillis();
+                        HoldSoundBroadcast hsb = new HoldSoundBroadcast();
+                        hsb.playerId = (byte) playerId;
+                        hsb.success = true;
+                        pendingHoldSounds.add(hsb);
+                    }
+                }
+            } else {
+                board.applyMove(playerId, move);
+                LineClearResult lockResult = board.tryMovementLock(playerId);
+                if (lockResult != null && lockResult.placed) {
+                    processPlacement(lockResult);
+                    if (!lockResult.manual) {
+                        hardDropBlockedUntilMs[playerId] = System.currentTimeMillis() + GameConstants.HARD_DROP_SUPPRESS_MS;
                     }
                 }
             }
@@ -202,17 +206,23 @@ public class ServerGame {
     }
 
     /**
-     * Shared post-placement logic: increments the placement counter, scores the result,
-     * and queues particles. Used by hard drops, movement-overflow locks, and timer locks.
+     * Shared post-placement logic: increments the placement counter, updates the universal
+     * B2B/combo counters, applies mode-specific scoring, and queues sounds/particles. Used by
+     * hard drops, movement-overflow locks, and timer locks.
      */
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
         int priorCombo = game.getCombo();
-        switch (gamemode) {
+        switch (gameMode) {
             case MULTIPLAYER_SCORE:
+                // Scores the drop (glow/diff-column bonuses, totalScore, gravity ramp — all
+                // MULTIPLAYER_SCORE-specific) and updates the B2B/combo counters internally.
                 scoreHardDrop(result);
                 break;
             default:
+                // B2B and combo are universal mechanics (drive combo sounds, etc.) even in
+                // modes with no score-specific bonuses to compute.
+                game.applyClearToCounters(result);
                 break;
         }
         queuePlacementSound(result, priorCombo);
@@ -358,10 +368,10 @@ public class ServerGame {
 
         // --- Apply multipliers (stacking multiplicatively) ---
         double multiplier = 1.0;
-        if (b2bBonus)    multiplier *= 1.25;
-        if (comboBonus)  multiplier *= 1.5;
-        if (glowBonus)   multiplier *= 2.0;
-        if (diffColBonus) multiplier *= 1.2;
+        if (b2bBonus)    multiplier *= GameConstants.B2B_MULTIPLIER;
+        if (comboBonus)  multiplier *= GameConstants.COMBO_MULTIPLIER;
+        if (glowBonus)   multiplier *= GameConstants.GLOW_MULTIPLIER;
+        if (diffColBonus) multiplier *= GameConstants.DIFF_COLUMN_MULTIPLIER;
         long points = Math.round(base * multiplier);
         totalScore += points;
 
@@ -409,7 +419,7 @@ public class ServerGame {
         // --- Gravity ramp: each cleared line speeds up gravity ---
         int newGravity = game.getGravity();
         for (int i = 0; i < lines; i++) {
-            newGravity = (int) Math.max(50, newGravity * 0.95);
+            newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
         }
         game.setGravity(newGravity);
     }
@@ -519,7 +529,7 @@ public class ServerGame {
             return canHoldWhileBlocked(playerId);
         }
         long now = System.currentTimeMillis();
-        boolean globalLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < HOLD_GLOBAL_LOCK_MS;
+        boolean globalLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < GameConstants.HOLD_GLOBAL_LOCK_MS;
         return !board.isPlayerHoldUsed(playerId) && !globalLock;
     }
 
@@ -596,7 +606,7 @@ public class ServerGame {
     private float effectiveInterval(int i) {
         if (explodeCountdown >= 0f) {
             float frac = Math.min(explodeCountdown, 1f);
-            return CYCLE_MIN + (EXPLODE_MIN_INTERVAL - CYCLE_MIN) * frac;
+            return GameConstants.CYCLE_MIN + (GameConstants.EXPLODE_MIN_INTERVAL - GameConstants.CYCLE_MIN) * frac;
         }
         return timeBetweenNextPiece[i];
     }
@@ -606,7 +616,7 @@ public class ServerGame {
      */
     public boolean canHoldWhileBlocked(int i) {
         if (timeBetweenNextPiece == null || i < 0 || i >= players) return false;
-        return timeBetweenNextPiece[i] <= CYCLE_MIN && explodeCountdown < 0f;
+        return timeBetweenNextPiece[i] <= GameConstants.CYCLE_MIN && explodeCountdown < 0f;
     }
 
     public boolean computeOwnPieceHoldGlow(int playerId) {
@@ -637,7 +647,7 @@ public class ServerGame {
             boolean blocked = piece.isBlockedFromSpawning;
 
             if (blocked && !wasBlocked[i]) {
-                timeBetweenNextPiece[i] = CYCLE_START;
+                timeBetweenNextPiece[i] = GameConstants.CYCLE_START;
                 cycleTimer[i] = 0f;
             }
             if (!blocked && wasBlocked[i]) {
@@ -654,7 +664,7 @@ public class ServerGame {
                 previousCyclePieceId[i] = board.getActivePieces().get(i).type;
                 lastCycleSwitchMs[i] = now;
                 board.spawnNextPiece(i);
-                timeBetweenNextPiece[i] = Math.max(CYCLE_MIN, timeBetweenNextPiece[i] * CYCLE_MULT);
+                timeBetweenNextPiece[i] = Math.max(GameConstants.CYCLE_MIN, timeBetweenNextPiece[i] * GameConstants.CYCLE_MULT);
                 interval = effectiveInterval(i);
                 Piece newPiece = board.getActivePieces().get(i);
                 if (!newPiece.isBlockedFromSpawning) {
@@ -672,7 +682,7 @@ public class ServerGame {
         for (int i = 0; i < players; i++) {
             if (i >= board.getActivePieces().size()) { allBlockedAtMin = false; break; }
             Piece p = board.getActivePieces().get(i);
-            if (!p.isBlockedFromSpawning || timeBetweenNextPiece[i] > CYCLE_MIN) {
+            if (!p.isBlockedFromSpawning || timeBetweenNextPiece[i] > GameConstants.CYCLE_MIN) {
                 allBlockedAtMin = false;
                 break;
             }
@@ -683,8 +693,8 @@ public class ServerGame {
                 explodeCountdown = 0f;
             }
             explodeCountdown += dtSec;
-            if (explodeCountdown >= EXPLODE_DURATION) {
-                triggerEndGame(false);
+            if (explodeCountdown >= GameConstants.EXPLODE_DURATION) {
+                beginGameEnd(false);
             }
         } else if (!allBlockedAtMin && explodeCountdown >= 0f && !gameEnded) {
             explodeCountdown = -1f;
@@ -701,7 +711,7 @@ public class ServerGame {
         long now = System.currentTimeMillis();
         byte currentType = board.getActivePieces().get(playerId).type;
         byte effectiveType = (lastCycleSwitchMs[playerId] > 0
-                && (now - lastCycleSwitchMs[playerId]) <= COYOTE_MS)
+                && (now - lastCycleSwitchMs[playerId]) <= GameConstants.COYOTE_MS)
                 ? previousCyclePieceId[playerId]
                 : currentType;
 
@@ -714,7 +724,7 @@ public class ServerGame {
             board.spawnHeldPiece(playerId, oldHeld);
         }
 
-        timeBetweenNextPiece[playerId] = CYCLE_START;
+        timeBetweenNextPiece[playerId] = GameConstants.CYCLE_START;
         cycleTimer[playerId] = 0f;
         lastHoldUsedMs = System.currentTimeMillis();
         HoldSoundBroadcast hsb = new HoldSoundBroadcast();
@@ -730,61 +740,183 @@ public class ServerGame {
         explodeCountdown = -1f;
     }
 
-    /** Fires the end-game sequence: broadcasts EndGameBroadcast and stops the game. */
-    private void triggerEndGame(boolean win) {
-        triggerEndGame(win, false);
+    /**
+     * Detects win/loss: freezes the end-of-game payload (using the current elapsed time) and
+     * schedules {@link #finalizeGameEnd()} to run once the mode-specific grace period elapses
+     * (see {@link GameConstants#PUZZLE_GAME_END_GRACE_MS}). Does not touch {@code game}, so the
+     * current tick's {@link #sendNetUpdates()} still runs and flushes the final board/particles/
+     * sounds queued earlier in this same tick.
+     */
+    private void beginGameEnd(boolean win) {
+        beginGameEnd(win, false);
     }
 
-    /** Fires the end-game sequence with an optional disconnect flag. */
-    private void triggerEndGame(boolean win, boolean disconnected) {
+    private void beginGameEnd(boolean win, boolean disconnected) {
         if (gameEnded) return;
         gameEnded = true;
-        ScoreModeEndData scoreEnd = null;
-        if (gamemode == GameMode.MULTIPLAYER_SCORE) {
-            scoreEnd = new ScoreModeEndData();
-            scoreEnd.finalScore = totalScore;
-            scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
+        pendingWin = win;
+        pendingDisconnected = disconnected;
+        long graceMs = (gameMode == GameMode.MULTIPLAYER_PUZZLE) ? GameConstants.PUZZLE_GAME_END_GRACE_MS : 0L;
+        gameEndGraceUntilMs = System.currentTimeMillis() + graceMs;
+
+        frozenScoreEnd = null;
+        frozenPuzzleEnd = null;
+        if (gameMode == GameMode.MULTIPLAYER_SCORE) {
+            frozenScoreEnd = new ScoreModeEndData();
+            frozenScoreEnd.finalScore = totalScore;
+            frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
+        } else if (gameMode == GameMode.MULTIPLAYER_PUZZLE) {
+            frozenPuzzleElapsedMs = System.currentTimeMillis() - gameStartMs;
+            frozenPuzzleEnd = new PuzzleModeEndData();
+            frozenPuzzleEnd.timeMs = frozenPuzzleElapsedMs;
+            frozenPuzzleEnd.score = (int) (Integer.MAX_VALUE - Math.min(frozenPuzzleElapsedMs, Integer.MAX_VALUE));
         }
-        room.sendEndGame(win, scoreEnd, disconnected);
+    }
+
+    /** Actually tears down the game: broadcasts EndGameBroadcast and stops the game. */
+    private void finalizeGameEnd() {
+        long score = computeFinalScore();
+
+        GameEndInfo info = new GameEndInfo();
+        info.mode = gameMode;
+        info.win = pendingWin;
+        info.disconnected = pendingDisconnected;
+        info.scoreModeEnd = frozenScoreEnd;
+        info.puzzleModeEnd = frozenPuzzleEnd;
+        info.score = score;
+        info.displayScore = computeFinalDisplayScore(score);
+        if (frozenScoreEnd != null) {
+            info.extraJson = new Json().toJson(frozenScoreEnd);
+        } else if (frozenPuzzleEnd != null) {
+            info.extraJson = new Json().toJson(frozenPuzzleEnd);
+        }
+
+        room.sendEndGame(info);
         stopGame();
     }
 
-    public void handleDisconnectedPlayer(int id) {
-        triggerEndGame(false, true);
+    /**
+     * Returns the hidden, sortable score for the current gamemode. Always a {@code long}
+     * regardless of what the gamemode actually displays to players.
+     */
+    private long computeFinalScore() {
+        switch (gameMode) {
+            case MULTIPLAYER_SCORE:
+                return totalScore;
+            case MULTIPLAYER_PUZZLE:
+                return frozenPuzzleEnd != null ? frozenPuzzleEnd.score : 0L;
+            default:
+                return 0L;
+        }
     }
 
-    public void update() {
-        deltatime = (int)(System.currentTimeMillis() - lastUpdateMs);
+    /**
+     * Returns the leaderboard-facing display string for the current gamemode. For
+     * MULTIPLAYER_SCORE this is simply the score itself; MULTIPLAYER_PUZZLE instead formats
+     * the frozen elapsed time as {@code "m:ss"} (matching the client's EndGameScreen), since a
+     * faster time is the meaningful result rather than the sortable score value.
+     */
+    private String computeFinalDisplayScore(long score) {
+        switch (gameMode) {
+            case MULTIPLAYER_PUZZLE:
+                return frozenPuzzleEnd != null ? formatMinutesSeconds(frozenPuzzleEnd.timeMs) : "0:00";
+            default:
+                return String.valueOf(score);
+        }
+    }
 
-        switch (gamemode) {
+    private static String formatMinutesSeconds(long ms) {
+        long mins = ms / 60000;
+        long secs = (ms % 60000) / 1000;
+        return mins + ":" + String.format("%02d", secs);
+    }
+
+    /** Called once per tick from {@link #update()}; finalizes the ended game once its grace period elapses. */
+    private void checkGameEndGrace() {
+        if (!gameEnded || game == null) return;
+        if (System.currentTimeMillis() >= gameEndGraceUntilMs) {
+            finalizeGameEnd();
+        }
+    }
+
+    /**
+     * Called when a player disconnects mid-game. Synchronized so this can never interleave
+     * with an in-flight {@link #update()} call on the room thread (see class-level note on
+     * {@link #startGame(GameMode, int, int)}).
+     */
+    public synchronized void handleDisconnectedPlayer(int id) {
+        beginGameEnd(false, true);
+    }
+
+    public synchronized void update() {
+        deltaTime = (int)(System.currentTimeMillis() - lastUpdateMs);
+
+        switch (gameMode) {
             case NONE:
                 break;
             case MULTIPLAYER_SCORE:
                 updateScoreMode();
                 if (game != null) sendNetUpdates();
                 break;
+            case MULTIPLAYER_PUZZLE:
+                updatePuzzleMode();
+                if (game != null) sendNetUpdates();
+                break;
         }
+        checkGameEndGrace();
 
         lastUpdateMs = System.currentTimeMillis();
         t++;
     }
 
     public void updateScoreMode() {
-        game.update(deltatime);
+        if (gameEnded) return; // frozen during the grace window; sendNetUpdates() above keeps re-sending the last state
+        game.update(deltaTime);
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
             if (r.placed) {
                 processPlacement(r);
                 if (!r.manual) {
-                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + HARD_DROP_SUPPRESS_MS;
+                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + GameConstants.HARD_DROP_SUPPRESS_MS;
                 }
             }
         }
         if (game.isStarted() && !gameEnded) {
-            updateBlockedCycling(deltatime / 1000f);
+            updateBlockedCycling(deltaTime / 1000f);
             if (System.currentTimeMillis() >= gameEndTargetMs) {
-                triggerEndGame(true);
+                beginGameEnd(true);
             }
         }
+    }
+
+    public void updatePuzzleMode() {
+        if (gameEnded) return; // frozen during the grace window; sendNetUpdates() above keeps re-sending the last state
+        game.update(deltaTime);
+        for (LineClearResult r : game.getAndClearPendingLockResults()) {
+            if (r.placed) {
+                processPlacement(r);
+                if (!r.manual) {
+                    hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + GameConstants.HARD_DROP_SUPPRESS_MS;
+                }
+            }
+        }
+        if (game.isStarted() && !gameEnded) {
+            updateBlockedCycling(deltaTime / 1000f);
+            if (!game.getBoards().isEmpty() && !game.getBoards().get(0).hasGarbage()) {
+                beginGameEnd(true);
+            }
+        }
+    }
+
+    /** Live puzzle-mode data broadcast every tick: the count-up timer value, frozen once ended. */
+    public PuzzleModeData getPuzzleModeData() {
+        PuzzleModeData d = new PuzzleModeData();
+        d.elapsedMs = gameEnded ? frozenPuzzleElapsedMs
+                : (game != null && game.isStarted() ? Math.max(0, System.currentTimeMillis() - gameStartMs) : 0);
+        return d;
+    }
+
+    public boolean isGameEnded() {
+        return gameEnded;
     }
 
     public void sendNetUpdates() {

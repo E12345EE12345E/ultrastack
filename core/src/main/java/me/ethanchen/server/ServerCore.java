@@ -1,6 +1,7 @@
 package me.ethanchen.server;
 
 import com.esotericsoftware.kryonet.Server;
+import me.ethanchen.game.GameConstants;
 import me.ethanchen.network.NetEndpoints;
 import me.ethanchen.network.NetworkRegister;
 import me.ethanchen.network.ServerNetworkListener;
@@ -26,6 +27,7 @@ public class ServerCore implements PacketSender, Runnable {
     private final ConcurrentHashMap<String, GameRoom> rooms = new ConcurrentHashMap<>();
 
     private final AuthProvider authProvider; // null = LAN mode
+    private final ResultRecorder resultRecorder; // null = results not persisted (e.g. LAN mode)
     private final long lanJoinCode;          // only relevant in LAN mode
     private final int roomIdDigits;
     private final Random rng = new Random();
@@ -37,16 +39,18 @@ public class ServerCore implements PacketSender, Runnable {
     private static final int ROOM_LIST_BROADCAST_INTERVAL = 300; // ~5s at 60Hz
 
     /** Account-mode constructor. */
-    public ServerCore(AuthProvider authProvider, int roomIdDigits) {
+    public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, int roomIdDigits) {
         this.authProvider = authProvider;
+        this.resultRecorder = resultRecorder;
         this.lanJoinCode = 0;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
     }
 
-    /** LAN-mode constructor (no auth, single implicit "LAN" room). */
+    /** LAN-mode constructor (no auth, single implicit "LAN" room; results stay unpersisted). */
     public ServerCore(long lanJoinCode, int roomIdDigits) {
         this.authProvider = null;
+        this.resultRecorder = null;
         this.lanJoinCode = lanJoinCode;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
@@ -102,7 +106,7 @@ public class ServerCore implements PacketSender, Runnable {
             }
             tickCount++;
             long elapsed = System.currentTimeMillis() - start;
-            long sleep = 16 - elapsed;
+            long sleep = GameConstants.TICK_MS - elapsed;
             if (sleep > 0) {
                 try { Thread.sleep(sleep); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             }
@@ -211,22 +215,26 @@ public class ServerCore implements PacketSender, Runnable {
         session.accountUuid = req.playerName; // LAN: uuid = name
         session.authenticated = true;
 
-        // Get-or-create the single LAN room
+        // Get-or-create the single LAN room. The host (first joiner to create the room) is
+        // added inside the GameRoom constructor; tryAddMember below is a no-op for them that
+        // simply returns their existing slot (always 0), so both host and later joiners get
+        // their slot assigned/read through the same atomic path.
         GameRoom lanRoom = rooms.computeIfAbsent("LAN", id ->
                 new GameRoom("LAN", this, w.connectionID, req.playerName));
 
-        // Assign a slot id (the room's current member count before adding)
-        int slotId = lanRoom.getPlayerCount();
+        int slotId = lanRoom.tryAddMember(w.connectionID, req.playerName, session.accountUuid, GameConstants.MAX_PLAYERS);
+        if (slotId < 0) {
+            res.accepted = false;
+            res.playerId = -1;
+            res.reason = lanRoom.isInProgress() ? "game already in progress" : "room full";
+            sendTCP(w.connectionID, res);
+            return;
+        }
 
         res.accepted = true;
         res.playerId = slotId;
         res.reason = "";
         sendTCP(w.connectionID, res);
-
-        // If this is not the host (host was added in computeIfAbsent), add them now
-        if (slotId > 0) {
-            lanRoom.addMember(w.connectionID, req.playerName);
-        }
         session.currentRoomId = "LAN";
 
         // Ensure room thread is running
@@ -290,7 +298,7 @@ public class ServerCore implements PacketSender, Runnable {
         if (session.currentRoomId != null) return; // already in a room
 
         String roomId = generateRoomId();
-        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username);
+        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid, resultRecorder);
         rooms.put(roomId, room);
         session.currentRoomId = roomId;
         room.start();
@@ -321,14 +329,14 @@ public class ServerCore implements PacketSender, Runnable {
             sendTCP(w.connectionID, res);
             return;
         }
-        if (room.isInProgress()) {
+        int slotId = room.tryAddMember(w.connectionID, session.username, session.accountUuid, GameConstants.MAX_PLAYERS);
+        if (slotId < 0) {
             RoomJoinResponse res = new RoomJoinResponse();
             res.success = false;
-            res.reason = "game already in progress";
+            res.reason = room.isInProgress() ? "game already in progress" : "room full";
             sendTCP(w.connectionID, res);
             return;
         }
-        room.addMember(w.connectionID, session.username);
         session.currentRoomId = req.roomId;
 
         RoomJoinResponse res = new RoomJoinResponse();

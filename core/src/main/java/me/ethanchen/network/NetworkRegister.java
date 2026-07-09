@@ -11,11 +11,14 @@ import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.*;
 import me.ethanchen.network.packets.other.*;
 import me.ethanchen.network.packets.s2c.*;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class NetworkRegister {
-    public static final byte PROTOCOL_VERSION = 8;
+    // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
+    public static final byte PROTOCOL_VERSION = 10;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -54,6 +57,8 @@ public class NetworkRegister {
         // Gamemode
         kryo.register(ScoreModeData.class);
         kryo.register(ScoreModeEndData.class);
+        kryo.register(PuzzleModeData.class);
+        kryo.register(PuzzleModeEndData.class);
         // End game
         kryo.register(EndGameBroadcast.class);
         // Other Objects
@@ -73,7 +78,6 @@ public class NetworkRegister {
         kryo.register(Piece.NetPiece[].class);
         kryo.register(PieceQueue.NetQueue[].class);
         kryo.register(PieceQueue.BagTypes.class);
-        kryo.register(float[].class);
         kryo.register(NetParticle.class);
         kryo.register(NetParticle[].class);
         kryo.register(ParticleSpawner.class);

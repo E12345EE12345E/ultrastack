@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -25,7 +26,9 @@ import me.ethanchen.lwjgl3.music.MusicContainer;
 import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.render.PieceTints;
 import me.ethanchen.lwjgl3.settings.GameSettings;
+import me.ethanchen.lwjgl3.settings.LobbySettings;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
+import me.ethanchen.lwjgl3.render.BoardRenderer;
 import me.ethanchen.network.ClientNetworkListener;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
@@ -39,6 +42,7 @@ import me.ethanchen.network.packets.c2s.LoginRequest;
 import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.RoomListRequest;
 import me.ethanchen.network.packets.other.ConnectFailedPacket;
+import me.ethanchen.network.packets.other.DisconnectPacket;
 import me.ethanchen.server.ServerCore;
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
@@ -50,7 +54,15 @@ public class ClientApp extends ApplicationAdapter {
     private Client netClient;
     private ClientNetworkListener clientNetworkListener;
     private volatile boolean shuttingDown;
+    private volatile boolean intentionalDisconnect;
     private final AtomicBoolean connectInProgress = new AtomicBoolean(false);
+    // Guards netClient.connect()/close()/sendTCP()/sendUDP() against each other. connect() and
+    // close() run on their own background threads (see runConnectAttempt/disconnect/dispose)
+    // while sendTCP/sendUDP are called from the render thread every frame, so without this lock
+    // a close() could race a concurrent send. Note KryoNet's connect() already calls close()
+    // internally and the Client's update thread (started once via start() in create()) survives
+    // close(), so no separate start()/recreate step is needed to reconnect.
+    private final ReentrantLock netLock = new ReentrantLock();
     private int reconnectAttempts;
     private Queue<ClientPacketWrapper> rpackets;
     private volatile String connectIP;
@@ -70,6 +82,7 @@ public class ClientApp extends ApplicationAdapter {
     private MenuScreen menuScreen;
     private volatile MenuScreen switchToMenu;
     private GameSettings settings;
+    private final LobbySettings lobbySettings = new LobbySettings();
 
     @Override
     public void create() {
@@ -117,7 +130,18 @@ public class ClientApp extends ApplicationAdapter {
         if (menuScreen != null) menuScreen.update();
         while (rpackets.notEmpty()) {
             ClientPacketWrapper wrapper = rpackets.removeFirst();
-            
+
+            // Unexpected disconnects (server crash/kick, network drop) bounce back to the main
+            // menu so the player gets feedback instead of a stuck/stale screen. Disconnects we
+            // initiated ourselves (see disconnect()) are expected: the current screen already
+            // knows what to do next, so we don't override its navigation.
+            if (wrapper.packet instanceof DisconnectPacket) {
+                if (!intentionalDisconnect && !(menuScreen instanceof MainMenu)) {
+                    switchMenu(new MainMenu(this));
+                }
+                intentionalDisconnect = false;
+            }
+
             menuScreen.passClientPacket(wrapper);
         }
     }
@@ -154,10 +178,16 @@ public class ClientApp extends ApplicationAdapter {
     public void dispose() {
         shuttingDown = true;
         stopLanServer();
-        netClient.close();
+        netLock.lock();
+        try {
+            netClient.close();
+        } finally {
+            netLock.unlock();
+        }
         batch.dispose();
         font.dispose();
         shapes.dispose();
+        BoardRenderer.disposeInstance();
         AudioManager.getInstance().dispose();
     }
 
@@ -167,6 +197,11 @@ public class ClientApp extends ApplicationAdapter {
 
     public void switchMenu(MenuScreen newMenu) {
         this.switchToMenu = newMenu; // switches to menu on next render() tick
+        // Each MenuScreen sets itself as the input processor in its constructor, but that
+        // only fires once. Re-assert it here so reusing an already-constructed screen (e.g.
+        // navigating back to a retained lobby chat instance from LobbySettingsScreen) still
+        // correctly regains input focus.
+        Gdx.input.setInputProcessor(newMenu);
     }
 
     // -------------------------------------------------------------------------
@@ -174,8 +209,16 @@ public class ClientApp extends ApplicationAdapter {
     // -------------------------------------------------------------------------
 
     public void disconnect() {
-        if (netClient == null) return;
-        Thread t = new Thread(() -> netClient.close(), "net-disconnect");
+        if (netClient == null || !netClient.isConnected()) return;
+        intentionalDisconnect = true;
+        Thread t = new Thread(() -> {
+            netLock.lock();
+            try {
+                netClient.close();
+            } finally {
+                netLock.unlock();
+            }
+        }, "net-disconnect");
         t.setDaemon(true);
         t.start();
     }
@@ -183,10 +226,6 @@ public class ClientApp extends ApplicationAdapter {
     public void setConnectDestination(String newIP, int newPort) {
         this.connectIP = newIP;
         this.connectPort = newPort;
-    }
-
-    public boolean validIP(String test) {
-        return true;
     }
 
     public boolean validPort(int test) {
@@ -239,13 +278,27 @@ public class ClientApp extends ApplicationAdapter {
     // -------------------------------------------------------------------------
 
     public boolean sendTCP(NetworkPacket packet) {
-        if (shuttingDown || packet == null || !netClient.isConnected()) return false;
-        return netClient.sendTCP(packet) != -1;
+        if (shuttingDown || packet == null) return false;
+        // Never block the caller (typically the render thread): if a connect/close/dispose is
+        // in flight, just drop this send rather than waiting for it to finish.
+        if (!netLock.tryLock()) return false;
+        try {
+            if (!netClient.isConnected()) return false;
+            return netClient.sendTCP(packet) != -1;
+        } finally {
+            netLock.unlock();
+        }
     }
 
     public boolean sendUDP(NetworkPacket packet) {
-        if (shuttingDown || packet == null || !netClient.isConnected()) return false;
-        return netClient.sendUDP(packet) != -1;
+        if (shuttingDown || packet == null) return false;
+        if (!netLock.tryLock()) return false;
+        try {
+            if (!netClient.isConnected()) return false;
+            return netClient.sendUDP(packet) != -1;
+        } finally {
+            netLock.unlock();
+        }
     }
 
     public boolean sendJoinRequest(String username, long credential) {
@@ -273,9 +326,9 @@ public class ClientApp extends ApplicationAdapter {
         return sendTCP(new RoomListRequest());
     }
 
-    public boolean sendCreateRoomRequest(GameMode gamemode) {
+    public boolean sendCreateRoomRequest(GameMode gameMode) {
         CreateRoomRequest req = new CreateRoomRequest();
-        req.gamemode = gamemode;
+        req.gamemode = gameMode;
         return sendTCP(req);
     }
 
@@ -328,7 +381,6 @@ public class ClientApp extends ApplicationAdapter {
             if (delayBeforeConnectMs > 0) Thread.sleep(delayBeforeConnectMs);
             if (shuttingDown) return;
             if (netClient.isConnected()) {
-                System.out.println("duplicate connect attempt");
                 return;
             }
             String resolvedHost;
@@ -347,7 +399,12 @@ public class ClientApp extends ApplicationAdapter {
             int timeout = wasAutoConnect
                     ? NetConfig.AUTO_CONNECT_TIMEOUT_MS
                     : NetConfig.CONNECT_TIMEOUT_MS;
-            netClient.connect(timeout, resolvedHost, connectPort, connectPort);
+            netLock.lock();
+            try {
+                netClient.connect(timeout, resolvedHost, connectPort, connectPort);
+            } finally {
+                netLock.unlock();
+            }
         } catch (IOException e) {
             System.err.println("Connect failed: " + e.getMessage());
             if (wasAutoConnect) {
@@ -381,6 +438,10 @@ public class ClientApp extends ApplicationAdapter {
 
     public GameSettings getSettings() {
         return settings;
+    }
+
+    public LobbySettings getLobbySettings() {
+        return lobbySettings;
     }
 
     public SpriteBatch getSprites() {

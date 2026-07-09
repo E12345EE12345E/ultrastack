@@ -34,7 +34,7 @@ public class GameHandler {
             case NONE:
                 break;
             case MULTIPLAYER_SCORE:
-                gravity = 1000;
+                gravity = GameConstants.INITIAL_GRAVITY_MS;
                 if (numPlayers == 1) {
                     boards.add(new Board(Board.Presets.STANDARD_SINGLE));
                 } else if (numPlayers == 2) {
@@ -44,6 +44,21 @@ public class GameHandler {
                 } else if (numPlayers == 4) {
                     boards.add(new Board(Board.Presets.STANDARD_4P));
                 }
+                break;
+            case MULTIPLAYER_PUZZLE:
+                gravity = GameConstants.INITIAL_GRAVITY_PUZZLE_MS;
+                Board puzzleBoard;
+                if (numPlayers == 1) {
+                    puzzleBoard = new Board(Board.Presets.SHORT_SINGLE);
+                } else if (numPlayers == 2) {
+                    puzzleBoard = new Board(Board.Presets.SHORT_DUO);
+                } else if (numPlayers == 3) {
+                    puzzleBoard = new Board(Board.Presets.SHORT_TRIO);
+                } else {
+                    puzzleBoard = new Board(Board.Presets.SHORT_4P);
+                }
+                puzzleBoard.spawnGarbageLines(GameConstants.PUZZLE_GARBAGE_LINES);
+                boards.add(puzzleBoard);
                 break;
         }
     }
@@ -68,7 +83,11 @@ public class GameHandler {
             case MULTIPLAYER_SCORE:
                 doGravity(deltaTime);
                 doLockTimers(deltaTime);
-                doMovementTimers(deltaTime);
+                break;
+            case MULTIPLAYER_PUZZLE:
+                doGravity(deltaTime);
+                doLockTimers(deltaTime);
+                break;
         }
     }
 

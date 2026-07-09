@@ -24,7 +24,6 @@ public class ServerNetworkListener implements Listener {
     public void received(Connection connection, Object object) {
         if (object instanceof NetworkPacket) {
             ServerPacketWrapper wrapper = new ServerPacketWrapper((NetworkPacket) object, connection.getID(), connection);
-            System.out.println(wrapper);
             onPacket.accept(wrapper);
         }
     }

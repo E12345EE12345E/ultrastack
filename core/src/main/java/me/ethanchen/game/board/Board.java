@@ -6,6 +6,8 @@ import java.util.Random;
 
 import com.badlogic.gdx.math.Vector2;
 
+import me.ethanchen.game.GameConstants;
+
 public class Board {
     protected final boolean[][] allowedTiles;
     protected final Tile[][] board;
@@ -91,20 +93,49 @@ public class Board {
                 activePieces = new ArrayList<Piece>();
                 assert(spawnPositions.length == 4);
                 return;
-            case TEST:
-                width = 20;
-                height = 24;
+            case SHORT_SINGLE:
+                width = 10;
+                height = 16;
                 allowedTiles = new boolean[height][width];
                 for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                allowedTiles[23][10] = false;
-                allowedTiles[23][11] = false;
-                allowedTiles[22][10] = false;
-                allowedTiles[22][11] = false;
                 board = emptyBoard();
-                board[21][10].set((byte)1);
-                spawnPositions = new Vector2[]{};
-                pieceQueues = new PieceQueue[]{};
+                spawnPositions = new Vector2[]{new Vector2(4, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
                 activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 1);
+                return;
+            case SHORT_DUO:
+                width = 10;
+                height = 16;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 2);
+                return;
+            case SHORT_TRIO:
+                width = 16;
+                height = 16;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12), new Vector2(13, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 3);
+                return;
+            case SHORT_4P:
+                width = 22;
+                height = 16;
+                allowedTiles = new boolean[height][width];
+                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
+                board = emptyBoard();
+                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12), new Vector2(13, 12), new Vector2(19, 12)};
+                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
+                activePieces = new ArrayList<Piece>();
+                assert(spawnPositions.length == 4);
                 return;
         }
     }
@@ -129,6 +160,31 @@ public class Board {
         }
         activePieces = new ArrayList<Piece>();
         updateFromNetBoardLight(lightNetBoardFrom(nb));
+    }
+
+    /** Returns true if any tile on the board is currently a garbage tile. */
+    public boolean hasGarbage() {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (board[y][x].get() == Tile.GARBAGE) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Fills the bottom {@code numLines} rows with garbage tiles, each row leaving exactly
+     * one random gap column so it can be cleared by filling that column in.
+     */
+    public void spawnGarbageLines(int numLines) {
+        Random r = new Random();
+        for (int y = 0; y < numLines && y < height; y++) {
+            int gapCol = r.nextInt(width);
+            for (int x = 0; x < width; x++) {
+                if (!allowedTiles[y][x]) continue;
+                board[y][x].set(x == gapCol ? Tile.EMPTY : Tile.GARBAGE, Tile.SINGLE_TILE);
+            }
+        }
     }
 
     public void spawnInitialPieces() {
@@ -157,7 +213,7 @@ public class Board {
     // Piece
 
     public boolean canMovePiece(int id, int xdiff, int ydiff) {
-        if (id > activePieces.size()) return false;
+        if (id < 0 || id >= activePieces.size()) return false;
         Piece p = activePieces.get(id);
         ArrayList<Vector2> checkLocs = new ArrayList<Vector2>();
         for (int i=0; i<p.tiles.length; i++) {
@@ -487,6 +543,52 @@ public class Board {
             dropDistance++;
         }
 
+        return lockPieceInPlace(id, dropDistance, true);
+    }
+
+    /**
+     * Returns true if piece {@code id} currently has solid support directly below at
+     * least one of its minoes (floor, {@code allowedTiles=false} barrier, or non-empty
+     * board tile).  Other active pieces are NOT counted as solid support — this mirrors
+     * the {@code hasSolidSupport} check inside {@link #lockPieceInPlace}.
+     */
+    private boolean hasSolidSupportNow(int id) {
+        Piece p = activePieces.get(id);
+        for (Vector2 offset : p.tiles) {
+            int mx = (int) Math.floor(p.location.x + offset.x);
+            int my = (int) Math.floor(p.location.y + offset.y);
+            int below = my - 1;
+            if (below < 0) return true;
+            if (mx >= 0 && mx < width && below >= 0 && below < height) {
+                if (!allowedTiles[below][mx]) return true;
+                if (board[below][mx].get() != Tile.EMPTY) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Locks piece {@code id} in-place (no drop) — identical to {@link #hardDrop(int)}
+     * but skips the slide-down step.  Sets {@code result.manual = false}.
+     * Returns {@code null} if the id is out of range or the piece is spawn-blocked.
+     */
+    public LineClearResult lockDrop(int id) {
+        if (id < 0 || id >= activePieces.size()) return null;
+        if (activePieces.get(id).isBlockedFromSpawning) return null;
+
+        return lockPieceInPlace(id, 0, false);
+    }
+
+    /**
+     * Shared placement logic used by {@link #hardDrop(int)} and {@link #lockDrop(int)}: builds
+     * the {@link LineClearResult}, checks for solid support, locks the piece's minoes onto the
+     * board if supported, detects spins, spawns the next piece, and clears/settles full rows.
+     *
+     * @param dropDistance number of cells the piece slid down before locking (always 0 for
+     *                      {@link #lockDrop(int)}); used only for spin-detection eligibility
+     * @param manual        true for a player-issued hard drop, false for an automatic lock
+     */
+    private LineClearResult lockPieceInPlace(int id, int dropDistance, boolean manual) {
         Piece p = activePieces.get(id);
         LineClearResult result = new LineClearResult();
         result.playerId = id;
@@ -496,7 +598,7 @@ public class Board {
         result.restingCenterX = p.location.x;
         result.restingCenterY = p.location.y;
         result.pieceRotation = p.rotation;
-        result.manual = true;
+        result.manual = manual;
 
         // Check for solid support (floor, board tile, or disallowed cell below each mino)
         boolean hasSolidSupport = false;
@@ -574,122 +676,15 @@ public class Board {
     }
 
     /**
-     * Returns true if piece {@code id} currently has solid support directly below at
-     * least one of its minoes (floor, {@code allowedTiles=false} barrier, or non-empty
-     * board tile).  Other active pieces are NOT counted as solid support — this mirrors
-     * the {@code hasSolidSupport} check inside {@link #hardDrop(int)}.
-     */
-    private boolean hasSolidSupportNow(int id) {
-        Piece p = activePieces.get(id);
-        for (Vector2 offset : p.tiles) {
-            int mx = (int) Math.floor(p.location.x + offset.x);
-            int my = (int) Math.floor(p.location.y + offset.y);
-            int below = my - 1;
-            if (below < 0) return true;
-            if (mx >= 0 && mx < width && below >= 0 && below < height) {
-                if (!allowedTiles[below][mx]) return true;
-                if (board[below][mx].get() != Tile.EMPTY) return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Locks piece {@code id} in-place (no drop) — identical to {@link #hardDrop(int)}
-     * but skips the slide-down step.  Sets {@code result.manual = false}.
-     * Returns {@code null} if the id is out of range or the piece is spawn-blocked.
-     */
-    public LineClearResult lockDrop(int id) {
-        if (id < 0 || id >= activePieces.size()) return null;
-        Piece p = activePieces.get(id);
-        if (p.isBlockedFromSpawning) return null;
-
-        LineClearResult result = new LineClearResult();
-        result.playerId = id;
-        result.pieceType = p.type;
-        result.restingX = (int) Math.floor(p.location.x);
-        result.restingY = (int) Math.floor(p.location.y);
-        result.restingCenterX = p.location.x;
-        result.restingCenterY = p.location.y;
-        result.pieceRotation = p.rotation;
-        result.manual = false;
-
-        // Solid-support check (same rules as hardDrop)
-        boolean hasSolidSupport = false;
-        for (Vector2 offset : p.tiles) {
-            int mx = (int) Math.floor(p.location.x + offset.x);
-            int my = (int) Math.floor(p.location.y + offset.y);
-            int below = my - 1;
-            if (below < 0) { hasSolidSupport = true; break; }
-            if (mx >= 0 && mx < width && below >= 0 && below < height) {
-                if (!allowedTiles[below][mx]) { hasSolidSupport = true; break; }
-                if (board[below][mx].get() != Tile.EMPTY) { hasSolidSupport = true; break; }
-            }
-        }
-
-        if (!hasSolidSupport) {
-            result.placed = false;
-            return result;
-        }
-
-        result.placed = true;
-        if (playerHoldUsed != null && id < playerHoldUsed.length) playerHoldUsed[id] = false;
-
-        // Spin detection: dropDistance is 0 by definition for an in-place lock
-        SpinType spinType = SpinType.NONE;
-        if (p.lastMoveWasRotation) {
-            int px = (int) Math.floor(p.location.x);
-            int py = (int) Math.floor(p.location.y);
-            if (p.type == Piece.T) {
-                int[] b1 = rotateOffset(-1, -1, p.rotation), b2 = rotateOffset(1, -1, p.rotation);
-                int[] f1 = rotateOffset(-1,  1, p.rotation), f2 = rotateOffset(1,  1, p.rotation);
-                int back  = (isSolid(px + b1[0], py + b1[1]) ? 1 : 0) + (isSolid(px + b2[0], py + b2[1]) ? 1 : 0);
-                int front = (isSolid(px + f1[0], py + f1[1]) ? 1 : 0) + (isSolid(px + f2[0], py + f2[1]) ? 1 : 0);
-                if (front == 2 && back >= 1) {
-                    spinType = SpinType.T_SPIN;
-                } else if (back == 2 && front == 1) {
-                    spinType = SpinType.T_SPIN_MINI;
-                } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
-                        && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
-                    spinType = SpinType.T_SPIN_MINI;
-                }
-            } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
-                    && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
-                spinType = (p.type == Piece.I3 || p.type == Piece.L3)
-                        ? SpinType.SMALL_SPIN : SpinType.ALL_SPIN;
-            }
-        }
-        result.spinType = spinType;
-
-        for (int i = 0; i < p.tiles.length; i++) {
-            int mx = (int) Math.floor(p.location.x + p.tiles[i].x);
-            int my = (int) Math.floor(p.location.y + p.tiles[i].y);
-            if (mx < 0 || mx >= width || my < 0 || my >= height) continue;
-            if (!allowedTiles[my][mx]) {
-                result.brokenCells.add(new int[]{mx, my, p.type});
-            } else {
-                byte conn = (p.tileconnectionstates != null && i < p.tileconnectionstates.length)
-                    ? p.tileconnectionstates[i] : Tile.SINGLE_TILE;
-                board[my][mx].set(p.type, conn);
-                result.placedCells.add(new int[]{mx, my});
-            }
-        }
-
-        spawnNextPiece(id);
-        clearAndSettle(result);
-
-        return result;
-    }
-
-    /**
-     * If piece {@code id} has moved more than 15 times while grounded ({@code lockedMovementCounter > 15})
-     * AND currently has solid support, locks it immediately via {@link #lockDrop(int)}.
-     * Returns the {@link LineClearResult} if a lock occurred, or {@code null} otherwise.
+     * If piece {@code id} has moved more than {@link GameConstants#MOVEMENT_LOCK_COUNTER_LIMIT}
+     * times while grounded AND currently has solid support, locks it immediately via
+     * {@link #lockDrop(int)}. Returns the {@link LineClearResult} if a lock occurred, or
+     * {@code null} otherwise.
      */
     public LineClearResult tryMovementLock(int id) {
         if (id < 0 || id >= activePieces.size()) return null;
         Piece p = activePieces.get(id);
-        if (p.lockedMovementCounter > 15 && hasSolidSupportNow(id))
+        if (p.lockedMovementCounter > GameConstants.MOVEMENT_LOCK_COUNTER_LIMIT && hasSolidSupportNow(id))
             return lockDrop(id);
         return null;
     }
@@ -707,7 +702,8 @@ public class Board {
     /**
      * Advances lock timers for all active pieces by {@code deltaMs} milliseconds.
      * Pieces with solid support accumulate time; pieces without solid support are reset.
-     * Any piece whose timer reaches 500 ms is locked in-place via {@link #lockDrop(int)}.
+     * Any piece whose timer reaches {@link GameConstants#LOCK_DELAY_MS} is locked in-place
+     * via {@link #lockDrop(int)}.
      *
      * @return list of {@link LineClearResult} for any pieces that were auto-locked this tick
      */
@@ -718,7 +714,7 @@ public class Board {
             if (p.isBlockedFromSpawning) continue;
             if (hasSolidSupportNow(i)) {
                 p.lockTime += deltaMs;
-                if (p.lockTime >= 500f) {
+                if (p.lockTime >= GameConstants.LOCK_DELAY_MS) {
                     LineClearResult r = lockDrop(i);
                     if (r != null) results.add(r);
                 }
@@ -983,6 +979,10 @@ public class Board {
                 activePieces.set(i, Piece.createFromNetPiece(in.pieces[i]));
             }
         }
+        // Remove any stale entries left over from a previous, longer snapshot.
+        while (activePieces.size() > in.pieces.length) {
+            activePieces.remove(activePieces.size() - 1);
+        }
         heldPieceType = in.heldPieceType;
         if (in.playerHoldUsed != null) {
             playerHoldUsed = Arrays.copyOf(in.playerHoldUsed, in.playerHoldUsed.length);
@@ -991,12 +991,15 @@ public class Board {
 
     // Static
 
-    public static enum Presets {
+    public enum Presets {
         STANDARD_SINGLE, // normal board in most tetris games, 10 wide
         STANDARD_DUO,
         STANDARD_TRIO,
         STANDARD_4P,
-        TEST
+        SHORT_SINGLE,
+        SHORT_DUO,
+        SHORT_TRIO,
+        SHORT_4P
     }
 
     public static class NetBoardLight { // smaller class to be sent over UDP constantly (20-30 times/sec)

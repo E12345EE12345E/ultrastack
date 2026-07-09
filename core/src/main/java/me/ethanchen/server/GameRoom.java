@@ -1,5 +1,6 @@
 package me.ethanchen.server;
 
+import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.network.ServerPacketWrapper;
@@ -9,11 +10,9 @@ import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.*;
-import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 import me.ethanchen.util.TextSanitizer;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -30,19 +29,28 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final List<Integer> slotToConn = new ArrayList<>();
     private final Map<Integer, Integer> connToSlot = new HashMap<>();
     private final Map<Integer, String> connToName = new HashMap<>();
+    private final Map<Integer, String> connToUuid = new HashMap<>();
     private final int hostConnId;
+    private final ResultRecorder resultRecorder;
 
-    private ServerGame serverGame;
+    private volatile ServerGame serverGame;
     private volatile boolean running;
     private volatile boolean roomEmpty;
     private Thread thread;
     private int t;
 
+    /** Used for LAN rooms, which never persist results. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
+        this(roomId, sender, hostConnId, hostName, hostName, null);
+    }
+
+    public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
+                     ResultRecorder resultRecorder) {
         this.roomId = roomId;
         this.sender = sender;
         this.hostConnId = hostConnId;
-        addMember(hostConnId, hostName);
+        this.resultRecorder = resultRecorder;
+        addMemberUnconditional(hostConnId, hostName, hostUuid);
     }
 
     // -------------------------------------------------------------------------
@@ -50,16 +58,35 @@ public class GameRoom implements Runnable, GameRoomContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Adds a member to this room and broadcasts the updated player list to all members.
-     * Must only be called before a game starts.
+     * Attempts to add {@code connId} to this room. Slot assignment, the in-progress check,
+     * and the capacity check all happen atomically under this room's monitor, so concurrent
+     * joins can never race each other into the same slot or overfill the room.
+     *
+     * @return the connection's slot index (a newly assigned slot, or the existing one if this
+     *         connection is already a member), or {@code -1} if the join was rejected because
+     *         a game is already in progress or the room is at {@code maxPlayers} capacity
      */
-    public synchronized void addMember(int connId, String name) {
-        if (connToSlot.containsKey(connId)) return;
+    public synchronized int tryAddMember(int connId, String name, String uuid, int maxPlayers) {
+        Integer existing = connToSlot.get(connId);
+        if (existing != null) return existing;
+        if (serverGame != null && serverGame.isInProgress()) return -1;
+        if (slotToConn.size() >= maxPlayers) return -1;
+        return addMemberUnconditional(connId, name, uuid);
+    }
+
+    /**
+     * Unconditionally adds a member and broadcasts the updated player list. Only safe to call
+     * either before the room is published to other threads (the constructor), or from within a
+     * method already synchronized on {@code this} (see {@link #tryAddMember}).
+     */
+    private int addMemberUnconditional(int connId, String name, String uuid) {
         int slot = slotToConn.size();
         slotToConn.add(connId);
         connToSlot.put(connId, slot);
         connToName.put(connId, name);
+        connToUuid.put(connId, uuid);
         broadcastPlayerList();
+        return slot;
     }
 
     /** Enqueue an inbound packet for processing on the room thread. */
@@ -92,6 +119,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             slotToConn.clear();
             connToSlot.clear();
             connToName.clear();
+            connToUuid.clear();
             roomEmpty = true;
             return evicted;
         }
@@ -104,6 +132,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             connToSlot.put(slotToConn.get(i), i);
         }
         connToName.remove(connId);
+        connToUuid.remove(connId);
 
         if (serverGame != null && serverGame.isInProgress()) {
             serverGame.handleDisconnectedPlayer(slot);
@@ -163,7 +192,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             }
             t++;
             long elapsed = System.currentTimeMillis() - start;
-            long sleep = 16 - elapsed;
+            long sleep = GameConstants.TICK_MS - elapsed;
             if (sleep > 0) {
                 try { Thread.sleep(sleep); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             }
@@ -177,7 +206,12 @@ public class GameRoom implements Runnable, GameRoomContext {
         }
     }
 
-    private void handleInboundPacket(ServerPacketWrapper w) {
+    /**
+     * Synchronized because it reads {@code connToName}/{@code connToSlot}, which are mutated
+     * (under the same monitor) by {@link #tryAddMember} and {@link #handleDisconnect} on the
+     * {@code ServerCore} thread while this runs on the room thread.
+     */
+    private synchronized void handleInboundPacket(ServerPacketWrapper w) {
         if (w.packet instanceof TextMessageRequest) {
             TextMessageRequest req = (TextMessageRequest) w.packet;
             String name = connToName.get(w.connectionID);
@@ -211,12 +245,12 @@ public class GameRoom implements Runnable, GameRoomContext {
     // Game start
     // -------------------------------------------------------------------------
 
-    private synchronized void startGame(GameMode gamemode) {
+    private synchronized void startGame(GameMode gameMode) {
         int playerCount = slotToConn.size();
         if (playerCount == 0) return;
 
         serverGame = new ServerGame(this);
-        serverGame.startGame(gamemode, playerCount, 5000);
+        serverGame.startGame(gameMode, playerCount, 5000);
 
         long startTimeMs = System.currentTimeMillis() + 5000;
 
@@ -233,7 +267,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             if (connId == null) continue;
 
             StartGameBroadcast b = new StartGameBroadcast();
-            b.mode = gamemode;
+            b.mode = gameMode;
             b.boards = new Board.NetBoardFull[serverGame.getGame().getBoards().size()];
             for (int a = 0; a < b.boards.length; a++) {
                 b.boards[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardFull();
@@ -245,7 +279,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             sender.sendTCP(connId, b);
         }
 
-        System.out.println("[GameRoom " + roomId + "] Game started: mode=" + gamemode
+        System.out.println("[GameRoom " + roomId + "] Game started: mode=" + gameMode
                 + " players=" + playerCount);
     }
 
@@ -253,8 +287,13 @@ public class GameRoom implements Runnable, GameRoomContext {
     // GameRoomContext implementation (called by ServerGame)
     // -------------------------------------------------------------------------
 
+    /**
+     * Synchronized because it reads {@code slotToConn}/{@code connToName}, which are mutated
+     * (under the same monitor) by {@link #tryAddMember} and {@link #handleDisconnect} on the
+     * {@code ServerCore} thread while this runs on the room thread.
+     */
     @Override
-    public void sendNetUpdates() {
+    public synchronized void sendNetUpdates() {
         if (serverGame == null || serverGame.getGame() == null) return;
 
         // Collect particles and spawners
@@ -310,9 +349,13 @@ public class GameRoom implements Runnable, GameRoomContext {
             b.ownPieceHoldGlow = serverGame.computeOwnPieceHoldGlow(i);
             b.gravity = serverGame.getGame().getGravity();
             b.gravityTickCounter = serverGame.getGame().getGravityTickCounter();
+            b.gameEnded = serverGame.isGameEnded();
             switch (serverGame.getGame().getMode()) {
                 case MULTIPLAYER_SCORE:
                     b.scoreMode = serverGame.getScoreModeData();
+                    break;
+                case MULTIPLAYER_PUZZLE:
+                    b.puzzleMode = serverGame.getPuzzleModeData();
                     break;
                 default:
                     break;
@@ -325,16 +368,13 @@ public class GameRoom implements Runnable, GameRoomContext {
     }
 
     @Override
-    public void sendEndGame(boolean win, ScoreModeEndData scoreEnd, boolean disconnected) {
+    public synchronized void sendEndGame(GameEndInfo info) {
         EndGameBroadcast b = new EndGameBroadcast();
-        b.win = win;
-        b.disconnected = disconnected;
-        b.scoreModeEnd = scoreEnd;
-        if (serverGame != null && serverGame.getGame() != null) {
-            b.mode = serverGame.getGame().getMode();
-        } else {
-            b.mode = GameMode.NONE;
-        }
+        b.win = info.win;
+        b.disconnected = info.disconnected;
+        b.scoreModeEnd = info.scoreModeEnd;
+        b.puzzleModeEnd = info.puzzleModeEnd;
+        b.mode = info.mode != null ? info.mode : GameMode.NONE;
         int playerCount = slotToConn.size();
         b.playerNames = new String[playerCount];
         for (int i = 0; i < playerCount; i++) {
@@ -342,18 +382,37 @@ public class GameRoom implements Runnable, GameRoomContext {
             b.playerNames[i] = connId != null ? connToName.getOrDefault(connId, "") : "";
         }
         broadcastMembersTCP(b);
+
+        if (resultRecorder != null && info.mode != null && info.mode != GameMode.NONE) {
+            GameResultData data = new GameResultData();
+            data.gamemode = info.mode.name();
+            data.win = info.win;
+            data.disconnected = info.disconnected;
+            data.score = info.score;
+            data.displayScore = info.displayScore;
+            data.extraJson = info.extraJson;
+            data.timestampMs = System.currentTimeMillis();
+            data.players = new PlayerResultInfo[playerCount];
+            for (int i = 0; i < playerCount; i++) {
+                Integer connId = slotToConn.get(i);
+                String name = connId != null ? connToName.getOrDefault(connId, "") : "";
+                String uuid = connId != null ? connToUuid.getOrDefault(connId, "") : "";
+                data.players[i] = new PlayerResultInfo(name, uuid);
+            }
+            resultRecorder.recordGameResult(data);
+        }
     }
 
     // -------------------------------------------------------------------------
     // Player list broadcasts
     // -------------------------------------------------------------------------
 
-    private void broadcastPlayerList() {
+    private synchronized void broadcastPlayerList() {
         LobbyPlayerListBroadcast b = buildPlayerListBroadcast();
         broadcastMembersTCP(b);
     }
 
-    private void broadcastPlayerListUDP() {
+    private synchronized void broadcastPlayerListUDP() {
         LobbyPlayerListBroadcast b = buildPlayerListBroadcast();
         broadcastMembersUDP(b);
     }
@@ -384,7 +443,7 @@ public class GameRoom implements Runnable, GameRoomContext {
         }
     }
 
-    private List<Integer> getMemberConnIds() {
+    private synchronized List<Integer> getMemberConnIds() {
         return Collections.unmodifiableList(new ArrayList<>(slotToConn));
     }
 
@@ -392,7 +451,7 @@ public class GameRoom implements Runnable, GameRoomContext {
     // Metadata accessors (used by ServerCore for RoomListBroadcast)
     // -------------------------------------------------------------------------
 
-    public String getHostName() {
+    public synchronized String getHostName() {
         return connToName.getOrDefault(hostConnId, "");
     }
 

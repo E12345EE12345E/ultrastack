@@ -11,7 +11,9 @@ import com.badlogic.gdx.controllers.Controller;
 import com.badlogic.gdx.controllers.ControllerAdapter;
 import com.badlogic.gdx.controllers.Controllers;
 
+import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
+import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.lwjgl3.ClientApp;
@@ -33,17 +35,20 @@ import me.ethanchen.network.packets.s2c.ParticleSpawner;
 import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.game.board.Piece;
+import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 public class GameScreen extends MenuScreen {
     private GameHandler game;
     private GameDrawMode drawMode;
     private long lastUpdateMs;
-    private int deltatime;
-    private int playerID;
+    private int deltaTime;
+    private int playerId;
 
     private final ArrayList<PendingMove> pendingMoves = new ArrayList<>();
     private int nextMoveId = 0;
+    private long lastMoveSendMs = 0;
+    private static final long MOVE_RESEND_INTERVAL_MS = 100;
 
     // ARR/DAS state
     private boolean leftHeld = false;
@@ -76,6 +81,9 @@ public class GameScreen extends MenuScreen {
     // Latest score-mode data received from the server (null until first packet arrives)
     private ScoreModeData latestScoreMode;
 
+    // Latest puzzle-mode data received from the server (null until first packet arrives)
+    private PuzzleModeData latestPuzzleMode;
+
     // Absolute wall-clock ms when the 4-minute countdown expires
     private long gameEndTargetMs;
 
@@ -89,33 +97,36 @@ public class GameScreen extends MenuScreen {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
         lastUpdateMs = System.currentTimeMillis();
         long startGameTimer = b.startTimeMS - System.currentTimeMillis();
-        playerID = b.playerID;
+        playerId = b.playerID;
         startTimeMS = b.startTimeMS;
         playerNames = b.playerNames;
         game = new GameHandler(b.totalPlayers);
         game.init(b.mode, startGameTimer);
-        gameEndTargetMs = b.startTimeMS + 4L * 60 * 1000;
-        for (int i = 0; i < b.boards.length; i++) {
-            Board board = new Board(b.boards[i]);
-            game.getBoards().set(i, board);
+        gameEndTargetMs = b.startTimeMS + GameConstants.SCORE_MODE_DURATION_MS;
+        if (b.boards != null) {
+            int count = Math.min(b.boards.length, game.getBoards().size());
+            for (int i = 0; i < count; i++) {
+                Board board = new Board(b.boards[i]);
+                game.getBoards().set(i, board);
+            }
         }
         switch (b.mode) {
             case MULTIPLAYER_SCORE:
+            case MULTIPLAYER_PUZZLE:
                 drawMode = GameDrawMode.SINGLE_BOARD;
                 break;
             default:
                 drawMode = GameDrawMode.NONE;
                 break;
         }
-        System.out.println("playerID=" + playerID);
         Controllers.addListener(controllerAdapter);
         AudioManager.getInstance().playMusic(MusicTag.MULTIPLAYER_GAME);
     }
 
     @Override
     public void update() {
-        deltatime = (int)(System.currentTimeMillis() - lastUpdateMs);
-        game.update(deltatime);
+        deltaTime = (int)(System.currentTimeMillis() - lastUpdateMs);
+        game.update(deltaTime);
         lastUpdateMs = System.currentTimeMillis();
 
         tickAutoShift();
@@ -125,13 +136,13 @@ public class GameScreen extends MenuScreen {
         Iterator<Particle> pit = particles.iterator();
         while (pit.hasNext()) {
             Particle p = pit.next();
-            p.update(deltatime);
+            p.update(deltaTime);
             if (p.isDead()) pit.remove();
         }
 
         // End-game fade-to-black
         if (exploded) {
-            fadeTimerMs += deltatime;
+            fadeTimerMs += deltaTime;
             if (fadeTimerMs >= 1000 && endGamePacket != null) {
                 EndGameBroadcast pkt = endGamePacket;
                 endGamePacket = null;
@@ -148,15 +159,25 @@ public class GameScreen extends MenuScreen {
                 app.switchMenu(new MainMenu(app));
                 return;
             }
-            MoveListRequest req = new MoveListRequest();
-            req.ids = new int[pendingMoves.size()];
-            req.types = new byte[pendingMoves.size()];
-            for (int i = 0; i < pendingMoves.size(); i++) {
-                req.ids[i] = pendingMoves.get(i).id;
-                req.types[i] = (byte) pendingMoves.get(i).type.ordinal();
+            // Resends are only needed periodically as a reliability measure against dropped UDP
+            // packets; enqueueing a move (see queueMove) already sends it right away.
+            if (System.currentTimeMillis() - lastMoveSendMs >= MOVE_RESEND_INTERVAL_MS) {
+                sendPendingMoves();
             }
-            app.sendUDP(req);
         }
+    }
+
+    private void sendPendingMoves() {
+        if (pendingMoves.isEmpty()) return;
+        MoveListRequest req = new MoveListRequest();
+        req.ids = new int[pendingMoves.size()];
+        req.types = new byte[pendingMoves.size()];
+        for (int i = 0; i < pendingMoves.size(); i++) {
+            req.ids[i] = pendingMoves.get(i).id;
+            req.types[i] = (byte) pendingMoves.get(i).type.ordinal();
+        }
+        app.sendUDP(req);
+        lastMoveSendMs = System.currentTimeMillis();
     }
 
     @Override
@@ -184,10 +205,10 @@ public class GameScreen extends MenuScreen {
                         glowValues[i] = 0f;
                     }
                 }
-                if (ownPieceHoldGlow && playerID >= 0 && playerID < glowValues.length
-                        && board.getActivePieces().size() > playerID
-                        && board.getActivePieces().get(playerID).isBlockedFromSpawning) {
-                    glowValues[playerID] = 2f;
+                if (ownPieceHoldGlow && playerId >= 0 && playerId < glowValues.length
+                        && board.getActivePieces().size() > playerId
+                        && board.getActivePieces().get(playerId).isBlockedFromSpawning) {
+                    glowValues[playerId] = 2f;
                 }
 
                 // blockedWhiteAmt: ramp from 0->1 during the first second of the explode countdown
@@ -210,7 +231,7 @@ public class GameScreen extends MenuScreen {
 
                 BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
                         glowValues, shadows, blockedWhiteAmt, !exploded,
-                        playerID, otherPlayerGrayscaleAmt);
+                        playerId, otherPlayerGrayscaleAmt);
                 BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
 
                 // Draw repeat-column red highlights
@@ -243,10 +264,17 @@ public class GameScreen extends MenuScreen {
                 float timerBoxSize = tileSize * 5f;
                 float timerBoxX = originX - timerBoxSize - tileSize * 0.5f;
                 float timerBoxY = originY;
-                long currentScore = latestScoreMode != null ? latestScoreMode.totalScore : 0;
-                BoardRenderer.getInstance().drawTimerBox(
-                        gameEndTargetMs, currentScore, timerBoxX, timerBoxY, timerBoxSize, tileSize,
-                        shapes, sprites, font);
+                if (game.getMode() == GameMode.MULTIPLAYER_PUZZLE) {
+                    long elapsedMs = latestPuzzleMode != null ? latestPuzzleMode.elapsedMs : 0;
+                    BoardRenderer.getInstance().drawCountUpTimerBox(
+                            elapsedMs, timerBoxX, timerBoxY, timerBoxSize, tileSize,
+                            shapes, sprites, font);
+                } else {
+                    long currentScore = latestScoreMode != null ? latestScoreMode.totalScore : 0;
+                    BoardRenderer.getInstance().drawTimerBox(
+                            gameEndTargetMs, currentScore, timerBoxX, timerBoxY, timerBoxSize, tileSize,
+                            shapes, sprites, font);
+                }
 
                 // Pre-start countdown ("3", "2", "1") and post-start "Start" flash
                 {
@@ -361,42 +389,16 @@ public class GameScreen extends MenuScreen {
 
         boolean isLeftKey  = keycode == keys.left  || (keys.left2  != -1 && keycode == keys.left2);
         boolean isRightKey = keycode == keys.right || (keys.right2 != -1 && keycode == keys.right2);
-
         if (isLeftKey || isRightKey) {
-            boolean isLeft = isLeftKey;
-            if (isLeft) leftHeld = true; else rightHeld = true;
-
-            int newDir = isLeft ? -1 : 1;
-            heldDirection = newDir;
-            dasTimer = 0;
-            arrTimer = 0;
-            dasCharged = false;
-
-            if (!game.isStarted()) return true;
-            Board board = game.getBoards().get(0);
-            if (board.getActivePieces().size() <= playerID) return true;
-            queueMove(isLeft ? MoveType.LEFT : MoveType.RIGHT);
-            return true;
+            return handleDirectionDown(isLeftKey);
         }
 
         boolean isSoftDrop = keycode == keys.softDrop || (keys.softDrop2 != -1 && keycode == keys.softDrop2);
         if (isSoftDrop) {
-            softDropHeld = true;
-            softDropTimer = 0;
-            if (game.isStarted() && game.getGravity() > SOFT_DROP_INTERVAL_MS) {
-                Board board = game.getBoards().get(0);
-                if (board.getActivePieces().size() > playerID) {
-                    queueMove(MoveType.SOFT_DROP);
-                    game.resetGravityTimer();
-                }
-            }
-            return true;
+            return handleSoftDropDown();
         }
 
-        if (!game.isStarted()) return false;
-        Board board = game.getBoards().get(0);
-        if (board.getActivePieces().size() <= playerID) return false;
-
+        if (!canAct()) return false;
         MoveType type = null;
         if      (keycode == keys.hardDrop  || (keys.hardDrop2  != -1 && keycode == keys.hardDrop2))  type = MoveType.HARD_DROP;
         else if (keycode == keys.rotateCw  || (keys.rotateCw2  != -1 && keycode == keys.rotateCw2))  type = MoveType.ROTATE_CW;
@@ -415,30 +417,79 @@ public class GameScreen extends MenuScreen {
 
         boolean isLeftKey  = keycode == keys.left  || (keys.left2  != -1 && keycode == keys.left2);
         boolean isRightKey = keycode == keys.right || (keys.right2 != -1 && keycode == keys.right2);
-
         if (isLeftKey || isRightKey) {
-            boolean isLeft = isLeftKey;
-            if (isLeft) leftHeld = false; else rightHeld = false;
-
-            boolean otherHeld = isLeft ? rightHeld : leftHeld;
-            if (otherHeld) {
-                heldDirection = isLeft ? 1 : -1;
-                dasTimer = 0;
-                arrTimer = 0;
-                dasCharged = false;
-            } else {
-                heldDirection = 0;
-            }
-            return true;
+            return handleDirectionUp(isLeftKey);
         }
 
         boolean isSoftDrop = keycode == keys.softDrop || (keys.softDrop2 != -1 && keycode == keys.softDrop2);
         if (isSoftDrop) {
-            softDropHeld = false;
-            return true;
+            return handleSoftDropUp();
         }
 
         return super.keyUp(keycode);
+    }
+
+    /**
+     * Shared handling for a directional (left/right) key or controller-button press: updates
+     * held/DAS state and, if a piece is active, immediately queues the first move in that
+     * direction. Always returns {@code true} since the input was recognized as a direction key.
+     */
+    private boolean handleDirectionDown(boolean isLeft) {
+        if (isLeft) leftHeld = true; else rightHeld = true;
+
+        heldDirection = isLeft ? -1 : 1;
+        dasTimer = 0;
+        arrTimer = 0;
+        dasCharged = false;
+
+        if (!game.isStarted()) return true;
+        Board board = game.getBoards().get(0);
+        if (board.getActivePieces().size() <= playerId) return true;
+        queueMove(isLeft ? MoveType.LEFT : MoveType.RIGHT);
+        return true;
+    }
+
+    /** Shared handling for a directional key/button release: restores DAS state for the other held direction, if any. */
+    private boolean handleDirectionUp(boolean isLeft) {
+        if (isLeft) leftHeld = false; else rightHeld = false;
+
+        boolean otherHeld = isLeft ? rightHeld : leftHeld;
+        if (otherHeld) {
+            heldDirection = isLeft ? 1 : -1;
+            dasTimer = 0;
+            arrTimer = 0;
+            dasCharged = false;
+        } else {
+            heldDirection = 0;
+        }
+        return true;
+    }
+
+    /** Shared handling for a soft-drop key/button press. */
+    private boolean handleSoftDropDown() {
+        softDropHeld = true;
+        softDropTimer = 0;
+        if (game.isStarted() && game.getGravity() > SOFT_DROP_INTERVAL_MS) {
+            Board board = game.getBoards().get(0);
+            if (board.getActivePieces().size() > playerId) {
+                queueMove(MoveType.SOFT_DROP);
+                game.resetGravityTimer();
+            }
+        }
+        return true;
+    }
+
+    /** Shared handling for a soft-drop key/button release. */
+    private boolean handleSoftDropUp() {
+        softDropHeld = false;
+        return true;
+    }
+
+    /** True if the game has started and our own piece is currently active on the board. */
+    private boolean canAct() {
+        if (!game.isStarted()) return false;
+        Board board = game.getBoards().get(0);
+        return board.getActivePieces().size() > playerId;
     }
 
     private void queueMove(MoveType type) {
@@ -452,7 +503,7 @@ public class GameScreen extends MenuScreen {
         // Hard drop and hold are server-authoritative: do NOT apply locally to avoid
         // desyncing the piece queue during prediction replay.
         if (type != MoveType.HARD_DROP && type != MoveType.HOLD) {
-            boolean moved = board.applyMove(playerID, type);
+            boolean moved = board.applyMove(playerId, type);
             if (moved) {
                 if (type == MoveType.LEFT || type == MoveType.RIGHT || type == MoveType.SOFT_DROP) {
                     AudioManager.getInstance().playMoveSound();
@@ -461,15 +512,16 @@ public class GameScreen extends MenuScreen {
                 }
             }
         }
+        sendPendingMoves();
     }
 
     private void tickSoftDrop() {
         if (!softDropHeld || !game.isStarted()) return;
         if (game.getGravity() <= SOFT_DROP_INTERVAL_MS) return;
         Board board = game.getBoards().get(0);
-        if (board.getActivePieces().size() <= playerID) return;
+        if (board.getActivePieces().size() <= playerId) return;
 
-        softDropTimer += deltatime;
+        softDropTimer += deltaTime;
         while (softDropTimer >= SOFT_DROP_INTERVAL_MS) {
             softDropTimer -= SOFT_DROP_INTERVAL_MS;
             queueMove(MoveType.SOFT_DROP);
@@ -480,18 +532,18 @@ public class GameScreen extends MenuScreen {
     private void tickAutoShift() {
         if (heldDirection == 0 || !game.isStarted()) return;
         Board board = game.getBoards().get(0);
-        if (board.getActivePieces().size() <= playerID) return;
+        if (board.getActivePieces().size() <= playerId) return;
 
         GameSettings s = app.getSettings();
 
         if (!dasCharged) {
-            dasTimer += deltatime;
+            dasTimer += deltaTime;
             if (dasTimer >= s.das) {
                 dasCharged = true;
                 arrTimer = 0;
             }
         } else {
-            arrTimer += deltatime;
+            arrTimer += deltaTime;
             while (arrTimer >= s.arr) {
                 arrTimer -= s.arr;
                 queueMove(heldDirection < 0 ? MoveType.LEFT : MoveType.RIGHT);
@@ -503,8 +555,11 @@ public class GameScreen extends MenuScreen {
     public void passClientPacket(ClientPacketWrapper w) {
         if (w.packet instanceof LightGameStateBroadcast) {
             LightGameStateBroadcast p = (LightGameStateBroadcast) w.packet;
-            for (int i = 0; i < game.getBoards().size(); i++) {
-                game.getBoards().get(i).updateFromNetBoardLight(p.boards[i]);
+            if (p.boards != null) {
+                int count = Math.min(p.boards.length, game.getBoards().size());
+                for (int i = 0; i < count; i++) {
+                    game.getBoards().get(i).updateFromNetBoardLight(p.boards[i]);
+                }
             }
 
             // Drop moves the server has already processed
@@ -518,7 +573,7 @@ public class GameScreen extends MenuScreen {
             Board board = game.getBoards().get(0);
             for (PendingMove pm : pendingMoves) {
                 if (pm.type != MoveType.HARD_DROP && pm.type != MoveType.HOLD) {
-                    board.applyMove(playerID, pm.type);
+                    board.applyMove(playerId, pm.type);
                 }
             }
 
@@ -532,6 +587,11 @@ public class GameScreen extends MenuScreen {
             // Cache score-mode data
             if (p.scoreMode != null) {
                 latestScoreMode = p.scoreMode;
+            }
+
+            // Cache puzzle-mode data
+            if (p.puzzleMode != null) {
+                latestPuzzleMode = p.puzzleMode;
             }
 
             // Re-anchor gravity to the server's state to prevent prediction drift/jitter
@@ -589,7 +649,7 @@ public class GameScreen extends MenuScreen {
 
         if (w.packet instanceof PlacementSoundBroadcast) {
             PlacementSoundBroadcast p = (PlacementSoundBroadcast) w.packet;
-            AudioManager.getInstance().playPlaceSound(p.playerId == playerID);
+            AudioManager.getInstance().playPlaceSound(p.playerId == playerId);
             if (p.combo >= 0) {
                 AudioManager.getInstance().playClearSound(p.combo);
             }
@@ -598,8 +658,8 @@ public class GameScreen extends MenuScreen {
         if (w.packet instanceof HoldSoundBroadcast) {
             HoldSoundBroadcast p = (HoldSoundBroadcast) w.packet;
             if (p.success) {
-                AudioManager.getInstance().playHoldSound(p.playerId == playerID, true);
-            } else if (p.playerId == playerID) {
+                AudioManager.getInstance().playHoldSound(p.playerId == playerId, true);
+            } else if (p.playerId == playerId) {
                 AudioManager.getInstance().playHoldSound(true, false);
             }
         }
@@ -761,40 +821,15 @@ public class GameScreen extends MenuScreen {
         GameSettings.MovementKeys keys = app.getSettings().movement;
 
         if (isCtrlLeft(b) || isCtrlRight(b)) {
-            boolean isLeft = isCtrlLeft(b);
-            if (isLeft) leftHeld = true; else rightHeld = true;
-
-            int newDir = isLeft ? -1 : 1;
-            heldDirection = newDir;
-            dasTimer = 0;
-            arrTimer = 0;
-            dasCharged = false;
-
-            if (!game.isStarted()) return true;
-            Board board = game.getBoards().get(0);
-            if (board.getActivePieces().size() <= playerID) return true;
-            queueMove(isLeft ? MoveType.LEFT : MoveType.RIGHT);
-            return true;
+            return handleDirectionDown(isCtrlLeft(b));
         }
 
         boolean isSoftDrop = b != -1 && (b == keys.ctrlSoftDrop || b == keys.ctrlSoftDrop2);
         if (isSoftDrop) {
-            softDropHeld = true;
-            softDropTimer = 0;
-            if (game.isStarted() && game.getGravity() > SOFT_DROP_INTERVAL_MS) {
-                Board board = game.getBoards().get(0);
-                if (board.getActivePieces().size() > playerID) {
-                    queueMove(MoveType.SOFT_DROP);
-                    game.resetGravityTimer();
-                }
-            }
-            return true;
+            return handleSoftDropDown();
         }
 
-        if (!game.isStarted()) return false;
-        Board board = game.getBoards().get(0);
-        if (board.getActivePieces().size() <= playerID) return false;
-
+        if (!canAct()) return false;
         MoveType type = null;
         if      (b != -1 && (b == keys.ctrlHardDrop  || b == keys.ctrlHardDrop2))  type = MoveType.HARD_DROP;
         else if (b != -1 && (b == keys.ctrlRotateCw   || b == keys.ctrlRotateCw2))  type = MoveType.ROTATE_CW;
@@ -809,26 +844,13 @@ public class GameScreen extends MenuScreen {
 
     private boolean onControllerButtonUp(int b) {
         if (isCtrlLeft(b) || isCtrlRight(b)) {
-            boolean isLeft = isCtrlLeft(b);
-            if (isLeft) leftHeld = false; else rightHeld = false;
-
-            boolean otherHeld = isLeft ? rightHeld : leftHeld;
-            if (otherHeld) {
-                heldDirection = isLeft ? 1 : -1;
-                dasTimer = 0;
-                arrTimer = 0;
-                dasCharged = false;
-            } else {
-                heldDirection = 0;
-            }
-            return true;
+            return handleDirectionUp(isCtrlLeft(b));
         }
 
         GameSettings.MovementKeys keys = app.getSettings().movement;
         boolean isSoftDrop = b != -1 && (b == keys.ctrlSoftDrop || b == keys.ctrlSoftDrop2);
         if (isSoftDrop) {
-            softDropHeld = false;
-            return true;
+            return handleSoftDropUp();
         }
 
         return false;
@@ -844,7 +866,7 @@ public class GameScreen extends MenuScreen {
         }
     }
 
-    private static enum GameDrawMode {
+    private enum GameDrawMode {
         NONE,
         SINGLE_BOARD
     }
