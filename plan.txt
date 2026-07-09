@@ -1,8 +1,7 @@
 pause menu
 
-other gamemodes
-
-sfx bump
 sfx tspin turn
 sfx clear tetris clear spin
 sfx die
+
+other gamemodes

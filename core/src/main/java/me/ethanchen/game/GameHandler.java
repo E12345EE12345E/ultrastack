@@ -112,6 +112,12 @@ public class GameHandler {
             pendingLockResults.addAll(b.updateLockTimers(deltaTime));
     }
 
+    private void doMovementTimers(int deltaTime) {
+        if (!started) return;
+        for (Board b : boards)
+            b.updateMovementTimers(deltaTime);
+    }
+
     /**
      * Returns all auto-lock results accumulated since the last call and clears the list.
      */

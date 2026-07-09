@@ -25,6 +25,7 @@ import me.ethanchen.lwjgl3.render.Particle;
 import me.ethanchen.lwjgl3.render.PieceTints;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
+import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.LightGameStateBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
@@ -661,6 +662,12 @@ public class GameScreen extends MenuScreen {
             } else if (p.playerId == playerId) {
                 AudioManager.getInstance().playHoldSound(true, false);
             }
+        }
+
+        if (w.packet instanceof BumpSoundBroadcast) {
+            BumpSoundBroadcast p = (BumpSoundBroadcast) w.packet;
+            boolean self = p.playerId == playerID || p.otherPlayerId == playerID;
+            AudioManager.getInstance().playBumpSound(self);
         }
     }
 

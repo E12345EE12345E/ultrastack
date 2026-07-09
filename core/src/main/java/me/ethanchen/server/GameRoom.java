@@ -321,6 +321,12 @@ public class GameRoom implements Runnable, GameRoomContext {
                 broadcastMembersTCP(hsb);
             }
         }
+        ArrayList<BumpSoundBroadcast> bumpSounds = serverGame.getAndClearPendingBumpSounds();
+        if (bumpSounds != null) {
+            for (BumpSoundBroadcast bsb : bumpSounds) {
+                broadcastMembersUDP(bsb);
+            }
+        }
 
         // Pre-build board snapshots
         Board.NetBoardLight[] boardSnapshots =
