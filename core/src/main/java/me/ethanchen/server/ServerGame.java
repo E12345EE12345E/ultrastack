@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
 
-import com.badlogic.gdx.utils.Json;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
@@ -39,8 +38,8 @@ public class ServerGame {
 
     // Hold state
     private long lastHoldUsedMs = 0;
-    private static final long HOLD_GLOBAL_LOCK_MS = 500;
-    private static final long HARD_DROP_SUPPRESS_MS = 250;
+    private static final long HOLD_GLOBAL_LOCK_MS = 1000;
+    private static final long HARD_DROP_SUPPRESS_MS = 250L;
 
     // Bump/blocked event threshold
     private static final float BUMP_TIMER_THRESHOLD_MS = 400f;
@@ -741,53 +740,13 @@ public class ServerGame {
         if (gameEnded) return;
         gameEnded = true;
         ScoreModeEndData scoreEnd = null;
-        String extraJson = null;
         if (gamemode == GameMode.MULTIPLAYER_SCORE) {
             scoreEnd = new ScoreModeEndData();
             scoreEnd.finalScore = totalScore;
             scoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
-            extraJson = new Json().toJson(scoreEnd);
         }
-
-        long finalScore = computeFinalScore();
-
-        GameEndInfo info = new GameEndInfo();
-        info.mode = gamemode;
-        info.win = win;
-        info.disconnected = disconnected;
-        info.scoreModeEnd = scoreEnd;
-        info.score = finalScore;
-        info.displayScore = computeFinalDisplayScore(finalScore);
-        info.extraJson = extraJson;
-
-        room.sendEndGame(info);
+        room.sendEndGame(win, scoreEnd, disconnected);
         stopGame();
-    }
-
-    /**
-     * Returns the hidden, sortable score for the current gamemode. Always a {@code long}
-     * regardless of what the gamemode actually displays to players.
-     */
-    private long computeFinalScore() {
-        switch (gamemode) {
-            case MULTIPLAYER_SCORE:
-                return totalScore;
-            default:
-                return 0L;
-        }
-    }
-
-    /**
-     * Returns the leaderboard-facing display string for the current gamemode. For
-     * MULTIPLAYER_SCORE this is simply the score itself; future gamemodes may format this
-     * differently than the sortable {@link #computeFinalScore()} value (e.g. a time-based
-     * mode could sort by elapsed milliseconds but display "0:12.9").
-     */
-    private String computeFinalDisplayScore(long score) {
-        switch (gamemode) {
-            default:
-                return String.valueOf(score);
-        }
     }
 
     public void handleDisconnectedPlayer(int id) {

@@ -9,6 +9,7 @@ import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.*;
+import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 import me.ethanchen.util.TextSanitizer;
 
 import java.util.ArrayList;
@@ -29,9 +30,7 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final List<Integer> slotToConn = new ArrayList<>();
     private final Map<Integer, Integer> connToSlot = new HashMap<>();
     private final Map<Integer, String> connToName = new HashMap<>();
-    private final Map<Integer, String> connToUuid = new HashMap<>();
     private final int hostConnId;
-    private final ResultRecorder resultRecorder;
 
     private ServerGame serverGame;
     private volatile boolean running;
@@ -39,13 +38,11 @@ public class GameRoom implements Runnable, GameRoomContext {
     private Thread thread;
     private int t;
 
-    public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
-                     ResultRecorder resultRecorder) {
+    public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
         this.roomId = roomId;
         this.sender = sender;
         this.hostConnId = hostConnId;
-        this.resultRecorder = resultRecorder;
-        addMember(hostConnId, hostName, hostUuid);
+        addMember(hostConnId, hostName);
     }
 
     // -------------------------------------------------------------------------
@@ -56,13 +53,12 @@ public class GameRoom implements Runnable, GameRoomContext {
      * Adds a member to this room and broadcasts the updated player list to all members.
      * Must only be called before a game starts.
      */
-    public synchronized void addMember(int connId, String name, String uuid) {
+    public synchronized void addMember(int connId, String name) {
         if (connToSlot.containsKey(connId)) return;
         int slot = slotToConn.size();
         slotToConn.add(connId);
         connToSlot.put(connId, slot);
         connToName.put(connId, name);
-        connToUuid.put(connId, uuid);
         broadcastPlayerList();
     }
 
@@ -96,7 +92,6 @@ public class GameRoom implements Runnable, GameRoomContext {
             slotToConn.clear();
             connToSlot.clear();
             connToName.clear();
-            connToUuid.clear();
             roomEmpty = true;
             return evicted;
         }
@@ -109,7 +104,6 @@ public class GameRoom implements Runnable, GameRoomContext {
             connToSlot.put(slotToConn.get(i), i);
         }
         connToName.remove(connId);
-        connToUuid.remove(connId);
 
         if (serverGame != null && serverGame.isInProgress()) {
             serverGame.handleDisconnectedPlayer(slot);
@@ -331,12 +325,16 @@ public class GameRoom implements Runnable, GameRoomContext {
     }
 
     @Override
-    public void sendEndGame(GameEndInfo info) {
+    public void sendEndGame(boolean win, ScoreModeEndData scoreEnd, boolean disconnected) {
         EndGameBroadcast b = new EndGameBroadcast();
-        b.win = info.win;
-        b.disconnected = info.disconnected;
-        b.scoreModeEnd = info.scoreModeEnd;
-        b.mode = info.mode;
+        b.win = win;
+        b.disconnected = disconnected;
+        b.scoreModeEnd = scoreEnd;
+        if (serverGame != null && serverGame.getGame() != null) {
+            b.mode = serverGame.getGame().getMode();
+        } else {
+            b.mode = GameMode.NONE;
+        }
         int playerCount = slotToConn.size();
         b.playerNames = new String[playerCount];
         for (int i = 0; i < playerCount; i++) {
@@ -344,25 +342,6 @@ public class GameRoom implements Runnable, GameRoomContext {
             b.playerNames[i] = connId != null ? connToName.getOrDefault(connId, "") : "";
         }
         broadcastMembersTCP(b);
-
-        if (resultRecorder != null && info.mode != GameMode.NONE) {
-            GameResultData data = new GameResultData();
-            data.gamemode = info.mode.name();
-            data.win = info.win;
-            data.disconnected = info.disconnected;
-            data.score = info.score;
-            data.displayScore = info.displayScore;
-            data.extraJson = info.extraJson;
-            data.timestampMs = System.currentTimeMillis();
-            data.players = new PlayerResultInfo[playerCount];
-            for (int i = 0; i < playerCount; i++) {
-                Integer connId = slotToConn.get(i);
-                String name = connId != null ? connToName.getOrDefault(connId, "") : "";
-                String uuid = connId != null ? connToUuid.getOrDefault(connId, "") : "";
-                data.players[i] = new PlayerResultInfo(name, uuid);
-            }
-            resultRecorder.recordGameResult(data);
-        }
     }
 
     // -------------------------------------------------------------------------

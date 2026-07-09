@@ -7,8 +7,7 @@ public class DedicatedServer {
     public void start() throws Exception {
         AccountStore accountStore = new AccountStore("accounts.json");
         AccountAuthProvider authProvider = new AccountAuthProvider(accountStore);
-        GameResultStore resultStore = new GameResultStore("results.db");
-        ServerCore serverCore = new ServerCore(authProvider, resultStore, 4); // 4-digit room IDs
+        ServerCore serverCore = new ServerCore(authProvider, 4); // 4-digit room IDs
         serverCore.start(NetConfig.PORT);
         System.out.println("[DedicatedServer] Running on port " + NetConfig.PORT);
     }
