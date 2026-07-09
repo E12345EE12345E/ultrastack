@@ -7,6 +7,10 @@ import java.util.Random;
 import com.badlogic.gdx.math.Vector2;
 
 import me.ethanchen.game.GameConstants;
+import me.ethanchen.network.dto.NetBoardFull;
+import me.ethanchen.network.dto.NetBoardLight;
+import me.ethanchen.network.dto.NetPiece;
+import me.ethanchen.network.dto.NetQueue;
 
 public class Board {
     protected final boolean[][] allowedTiles;
@@ -40,104 +44,14 @@ public class Board {
     // Init
 
     public Board(Presets preset) {
-        Random r = new Random();
-        switch (preset) {
-            default:
-            case STANDARD_SINGLE:
-                width = 10;
-                height = 24;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(4, 20)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 1);
-                return;
-            case STANDARD_DUO:
-                width = 10;
-                height = 24;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 2);
-                return;
-            case STANDARD_TRIO:
-                width = 16;
-                height = 24;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                /*for (int i=21; i<24; i++) {
-                    allowedTiles[i][4] = false;
-                    allowedTiles[i][5] = false;
-                    allowedTiles[i][10] = false;
-                    allowedTiles[i][11] = false;
-                }*/
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20), new Vector2(13, 20)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 3);
-                return;
-            case STANDARD_4P:
-                width = 22;
-                height = 24;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(1, 20), new Vector2(7, 20), new Vector2(13, 20), new Vector2(19, 20)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 4);
-                return;
-            case SHORT_SINGLE:
-                width = 10;
-                height = 16;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(4, 12)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 1);
-                return;
-            case SHORT_DUO:
-                width = 10;
-                height = 16;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 2);
-                return;
-            case SHORT_TRIO:
-                width = 16;
-                height = 16;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12), new Vector2(13, 12)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 3);
-                return;
-            case SHORT_4P:
-                width = 22;
-                height = 16;
-                allowedTiles = new boolean[height][width];
-                for (boolean[] row : allowedTiles) Arrays.fill(row, true);
-                board = emptyBoard();
-                spawnPositions = new Vector2[]{new Vector2(1, 12), new Vector2(7, 12), new Vector2(13, 12), new Vector2(19, 12)};
-                pieceQueues = new PieceQueue[]{new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7), new PieceQueue(r.nextInt(), PieceQueue.BagTypes.BAG_7)};
-                activePieces = new ArrayList<Piece>();
-                assert(spawnPositions.length == 4);
-                return;
-        }
+        BoardPreset p = BoardPreset.of(preset);
+        this.width = p.width;
+        this.height = p.height;
+        this.allowedTiles = p.allowedTiles;
+        this.board = emptyBoard();
+        this.spawnPositions = p.spawnPositions;
+        this.pieceQueues = p.pieceQueues;
+        this.activePieces = new ArrayList<>();
     }
 
     public Board(NetBoardFull nb) {
@@ -213,69 +127,13 @@ public class Board {
     // Piece
 
     public boolean canMovePiece(int id, int xdiff, int ydiff) {
-        if (id < 0 || id >= activePieces.size()) return false;
-        Piece p = activePieces.get(id);
-        ArrayList<Vector2> checkLocs = new ArrayList<Vector2>();
-        for (int i=0; i<p.tiles.length; i++) {
-            checkLocs.add(new Vector2(p.location.x + p.tiles[i].x + xdiff, p.location.y + p.tiles[i].y + ydiff));
-        }
-        for (Vector2 loc : checkLocs) {
-            // bounds check
-            if (loc.x < 0 || loc.y < 0 || loc.x >= width || loc.y >= height) return false;
-            // board check
-            if (board[(int) loc.y][(int) loc.x] == null || board[(int) loc.y][(int) loc.x].get() != 0) return false;
-            if (!allowedTiles[(int) loc.y][(int) loc.x]) return false;
-            // active pieces check
-            for (int i=0; i<activePieces.size(); i++) {
-                if (i==id) continue;
-                for (Vector2 t : activePieces.get(i).tiles) if (loc.x == t.x + activePieces.get(i).location.x && loc.y == t.y + activePieces.get(i).location.y) return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Returns the id of another player whose active piece is the sole reason piece {@code id}
-     * cannot move laterally by {@code xdiff} columns.  Returns -1 if the move is blocked by a
-     * wall, the board floor/ceiling, any locked tile, a disallowed cell, or if more than one
-     * other player contributes to the blockage.  This enforces the "fully blocked by a single
-     * other player" requirement for the bump event.
-     */
-    public int getLateralBlocker(int id, int xdiff) {
-        if (id < 0 || id >= activePieces.size()) return -1;
-        Piece p = activePieces.get(id);
-        int blockerId = -1;
-        for (int i = 0; i < p.tiles.length; i++) {
-            float lx = p.location.x + p.tiles[i].x + xdiff;
-            float ly = p.location.y + p.tiles[i].y;
-            // Any wall/floor/ceiling/locked-tile involvement means it is NOT a pure player bump
-            if (lx < 0 || lx >= width || ly < 0 || ly >= height) return -1;
-            int ix = (int) lx, iy = (int) ly;
-            if (!allowedTiles[iy][ix]) return -1;
-            if (board[iy][ix] != null && board[iy][ix].get() != 0) return -1;
-            // Check if another player's active piece occupies this cell
-            for (int j = 0; j < activePieces.size(); j++) {
-                if (j == id) continue;
-                Piece other = activePieces.get(j);
-                for (Vector2 t : other.tiles) {
-                    if (lx == t.x + other.location.x && ly == t.y + other.location.y) {
-                        if (blockerId == -1) {
-                            blockerId = j;
-                        } else if (blockerId != j) {
-                            return -1; // two different players involved
-                        }
-                    }
-                }
-            }
-        }
-        return blockerId;
+        return BoardCollision.canMovePiece(this, id, xdiff, ydiff);
     }
 
     public boolean moveLeft(int id) {
         if (canMovePiece(id, -1, 0)) {
             Piece p = activePieces.get(id);
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-            p.movementTimer = 0f;
             p.location.add(-1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -287,7 +145,6 @@ public class Board {
         if (canMovePiece(id, 1, 0)) {
             Piece p = activePieces.get(id);
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-            p.movementTimer = 0f;
             p.location.add(1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -312,15 +169,13 @@ public class Board {
         p.rotateCW();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-            p.movementTimer = 0f;
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
         }
-        Vector2[] kicks = kickTableFor(p.type);
-        if (kicks != null && tryKicks(id, fromRotation * 2, kicks)) {
+        Vector2[] kicks = BoardCollision.kickTableFor(p.type);
+        if (kicks != null && BoardCollision.tryKicks(this, id, fromRotation * 2, kicks)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-            p.movementTimer = 0f;
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -335,70 +190,19 @@ public class Board {
         p.rotateCCW();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-            p.movementTimer = 0f;
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
         }
-        Vector2[] kicks = kickTableFor(p.type);
+        Vector2[] kicks = BoardCollision.kickTableFor(p.type);
         int row = (fromRotation == 0) ? 7 : fromRotation * 2 - 1;
-        if (kicks != null && tryKicks(id, row, kicks)) {
+        if (kicks != null && BoardCollision.tryKicks(this, id, row, kicks)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-            p.movementTimer = 0f;
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
         }
         p.rotateCW();
-        return false;
-    }
-
-    /** Returns the SRS kick table for the given piece type, or null if no kicks apply. */
-    private static Vector2[] kickTableFor(byte type) {
-        if (type == Piece.I) return Piece.WALL_KICKS_I;
-        if (type == Piece.J || type == Piece.L || type == Piece.S
-                || type == Piece.T || type == Piece.Z) return Piece.WALL_KICKS_JLSTZ;
-        return null;
-    }
-
-    /** Returns the SRS+ 180-rotation kick table for the given piece type, or null if none. */
-    private static Vector2[] kickTable180For(byte type) {
-        if (type == Piece.I) return Piece.WALL_KICKS_180_I;
-        if (type == Piece.J || type == Piece.L || type == Piece.S
-                || type == Piece.T || type == Piece.Z) return Piece.WALL_KICKS_180_JLSTZ;
-        return null;
-    }
-
-    /**
-     * Tries kick tests 1–4 for the given kick table row (test 0 is (0,0), already tried).
-     * Applies the offset and returns true on the first passing test.
-     */
-    private boolean tryKicks(int id, int row, Vector2[] kickTable) {
-        int base = row * 5;
-        for (int i = 1; i < 5; i++) {
-            Vector2 k = kickTable[base + i];
-            if (canMovePiece(id, (int) k.x, (int) k.y)) {
-                activePieces.get(id).location.add(k.x, k.y);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Tries up to {@code stride} 180-rotation kicks from the table, starting at
-     * {@code fromRotation * stride}.  Unlike {@link #tryKicks}, all entries are real
-     * offsets — there is no implicit (0,0) test 0.
-     */
-    private boolean tryKicks180(int id, int fromRotation, Vector2[] kickTable, int stride) {
-        int base = fromRotation * stride;
-        for (int i = 0; i < stride; i++) {
-            Vector2 k = kickTable[base + i];
-            if (canMovePiece(id, (int) k.x, (int) k.y)) {
-                activePieces.get(id).location.add(k.x, k.y);
-                return true;
-            }
-        }
         return false;
     }
 
@@ -431,17 +235,15 @@ public class Board {
         p.rotate180();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-            p.movementTimer = 0f;
             p.rotateTexCW(); p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
         }
-        Vector2[] kicks180 = kickTable180For(p.type);
+        Vector2[] kicks180 = BoardCollision.kickTable180For(p.type);
         if (kicks180 != null) {
             int stride = (p.type == Piece.I) ? 1 : 5;
-            if (tryKicks180(id, fromRotation, kicks180, stride)) {
+            if (BoardCollision.tryKicks180(this, id, fromRotation, kicks180, stride)) {
                 if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
-                p.movementTimer = 0f;
                 p.rotateTexCW(); p.rotateTexCW();
                 p.lastMoveWasRotation = true;
                 return true;
@@ -459,11 +261,8 @@ public class Board {
         switch (t) {
             case LEFT: return moveLeft(pieceId);
             case RIGHT: return moveRight(pieceId);
-            case SOFT_DROP: {
-                boolean moved = moveDown(pieceId);
-                if (moved) activePieces.get(pieceId).movementTimer = 0f;
-                return moved;
-            }
+            case SOFT_DROP:
+                return moveDown(pieceId);
             case ROTATE_CW: return rotateCW(pieceId);
             case ROTATE_CCW: return rotateCCW(pieceId);
             case ROTATE_180: return rotate180(pieceId);
@@ -480,46 +279,9 @@ public class Board {
         }
     }
 
-    private boolean isSolid(int x, int y) {
-        if (x < 0 || x >= width || y < 0 || y >= height) return true;
-        if (!allowedTiles[y][x]) return true;
-        return board[y][x].get() != Tile.EMPTY;
-    }
-
     private static int[] rotateOffset(int x, int y, int r) {
         for (int i = 0; i < r; i++) { int t = x; x = y; y = -t; }
         return new int[]{x, y};
-    }
-
-    /**
-     * Scans the cells directly below each mino of piece {@code id} at its current
-     * position and returns the id of the single other player whose active piece is
-     * responsible for supporting it.  Returns -1 if no other player is found, the floor
-     * is involved, or multiple players are involved.
-     */
-    private int findRestingBlocker(int id) {
-        Piece p = activePieces.get(id);
-        int blockerId = -1;
-        for (Vector2 offset : p.tiles) {
-            int mx = (int) Math.floor(p.location.x + offset.x);
-            int my = (int) Math.floor(p.location.y + offset.y);
-            int below = my - 1;
-            if (below < 0) return -1; // resting on floor
-            for (int j = 0; j < activePieces.size(); j++) {
-                if (j == id) continue;
-                Piece other = activePieces.get(j);
-                for (Vector2 t : other.tiles) {
-                    if (mx == (int)(t.x + other.location.x) && below == (int)(t.y + other.location.y)) {
-                        if (blockerId == -1) {
-                            blockerId = j;
-                        } else if (blockerId != j) {
-                            return -1;
-                        }
-                    }
-                }
-            }
-        }
-        return blockerId;
     }
 
     /**
@@ -544,27 +306,6 @@ public class Board {
         }
 
         return lockPieceInPlace(id, dropDistance, true);
-    }
-
-    /**
-     * Returns true if piece {@code id} currently has solid support directly below at
-     * least one of its minoes (floor, {@code allowedTiles=false} barrier, or non-empty
-     * board tile).  Other active pieces are NOT counted as solid support — this mirrors
-     * the {@code hasSolidSupport} check inside {@link #lockPieceInPlace}.
-     */
-    private boolean hasSolidSupportNow(int id) {
-        Piece p = activePieces.get(id);
-        for (Vector2 offset : p.tiles) {
-            int mx = (int) Math.floor(p.location.x + offset.x);
-            int my = (int) Math.floor(p.location.y + offset.y);
-            int below = my - 1;
-            if (below < 0) return true;
-            if (mx >= 0 && mx < width && below >= 0 && below < height) {
-                if (!allowedTiles[below][mx]) return true;
-                if (board[below][mx].get() != Tile.EMPTY) return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -601,21 +342,11 @@ public class Board {
         result.manual = manual;
 
         // Check for solid support (floor, board tile, or disallowed cell below each mino)
-        boolean hasSolidSupport = false;
-        for (Vector2 offset : p.tiles) {
-            int mx = (int) Math.floor(p.location.x + offset.x);
-            int my = (int) Math.floor(p.location.y + offset.y);
-            int below = my - 1;
-            if (below < 0) { hasSolidSupport = true; break; }
-            if (mx >= 0 && mx < width && below >= 0 && below < height) {
-                if (!allowedTiles[below][mx]) { hasSolidSupport = true; break; }
-                if (board[below][mx].get() != Tile.EMPTY) { hasSolidSupport = true; break; }
-            }
-        }
+        boolean hasSolidSupport = BoardCollision.hasSolidSupportAt(this, p, p.location.x, p.location.y);
 
         if (!hasSolidSupport) {
             result.placed = false;
-            result.blockedByPlayerId = findRestingBlocker(id);
+            result.blockedByPlayerId = BoardCollision.findRestingBlocker(this, id);
             return result;
         }
 
@@ -634,8 +365,8 @@ public class Board {
                 // Front corners (in front of the T stem): (-1,1) and (1,1)
                 int[] b1 = rotateOffset(-1, -1, p.rotation), b2 = rotateOffset(1, -1, p.rotation);
                 int[] f1 = rotateOffset(-1,  1, p.rotation), f2 = rotateOffset(1,  1, p.rotation);
-                int back  = (isSolid(px + b1[0], py + b1[1]) ? 1 : 0) + (isSolid(px + b2[0], py + b2[1]) ? 1 : 0);
-                int front = (isSolid(px + f1[0], py + f1[1]) ? 1 : 0) + (isSolid(px + f2[0], py + f2[1]) ? 1 : 0);
+                int back  = (BoardCollision.isSolid(this, px + b1[0], py + b1[1]) ? 1 : 0) + (BoardCollision.isSolid(this, px + b2[0], py + b2[1]) ? 1 : 0);
+                int front = (BoardCollision.isSolid(this, px + f1[0], py + f1[1]) ? 1 : 0) + (BoardCollision.isSolid(this, px + f2[0], py + f2[1]) ? 1 : 0);
                 if (front == 2 && back >= 1) {
                     spinType = SpinType.T_SPIN;
                 } else if (back == 2 && front == 1) {
@@ -670,7 +401,7 @@ public class Board {
         spawnNextPiece(id);
 
         // Clear and settle
-        clearAndSettle(result);
+        BoardLineClear.clearAndSettle(this, result);
 
         return result;
     }
@@ -684,19 +415,10 @@ public class Board {
     public LineClearResult tryMovementLock(int id) {
         if (id < 0 || id >= activePieces.size()) return null;
         Piece p = activePieces.get(id);
-        if (p.lockedMovementCounter > GameConstants.MOVEMENT_LOCK_COUNTER_LIMIT && hasSolidSupportNow(id))
+        if (p.lockedMovementCounter > GameConstants.MOVEMENT_LOCK_COUNTER_LIMIT
+                && BoardCollision.hasSolidSupportNow(this, id))
             return lockDrop(id);
         return null;
-    }
-
-    /**
-     * Advances movement timers for all active pieces by {@code deltaMs} milliseconds.
-     * The timer counts up each tick; it is reset to 0 on manual move, rotate, or soft-drop.
-     */
-    public void updateMovementTimers(int deltaMs) {
-        for (int i = 0; i < activePieces.size(); i++) {
-            activePieces.get(i).movementTimer += deltaMs;
-        }
     }
 
     /**
@@ -712,7 +434,7 @@ public class Board {
         for (int i = 0; i < activePieces.size(); i++) {
             Piece p = activePieces.get(i);
             if (p.isBlockedFromSpawning) continue;
-            if (hasSolidSupportNow(i)) {
+            if (BoardCollision.hasSolidSupportNow(this, i)) {
                 p.lockTime += deltaMs;
                 if (p.lockTime >= GameConstants.LOCK_DELAY_MS) {
                     LineClearResult r = lockDrop(i);
@@ -723,82 +445,6 @@ public class Board {
             }
         }
         return results;
-    }
-
-    /**
-     * Detects full rows, records cleared cells, clears them, then drops entire rows
-     * down to fill the cleared gaps.  Every row above a cleared row shifts down as a
-     * unit (row-based compaction), so relative horizontal order is always preserved.
-     * {@code allowedTiles=false} cells are permanent board features: their positions
-     * are never overwritten.
-     */
-    private void clearAndSettle(LineClearResult r) {
-        // Build set of x-columns the placed piece occupied, per row
-        java.util.HashMap<Integer, java.util.ArrayList<Integer>> placedByRow =
-            new java.util.HashMap<>();
-        for (int[] cell : r.placedCells) {
-            placedByRow.computeIfAbsent(cell[1], k -> new java.util.ArrayList<>()).add(cell[0]);
-        }
-
-        // Detect full rows (full = every column is either non-empty board tile or !allowedTiles)
-        java.util.ArrayList<Integer> fullRows = new java.util.ArrayList<>();
-        for (int y = 0; y < height; y++) {
-            boolean full = true;
-            for (int x = 0; x < width; x++) {
-                if (allowedTiles[y][x] && board[y][x].get() == Tile.EMPTY) {
-                    full = false;
-                    break;
-                }
-            }
-            if (full) fullRows.add(y);
-        }
-
-        if (fullRows.isEmpty()) return;
-
-        // Fill result: clearedRows, filledColumnsPerClearedRow, clearedCells
-        r.clearedRows = new int[fullRows.size()];
-        java.util.HashSet<Integer> clearedRowSet = new java.util.HashSet<>();
-        for (int i = 0; i < fullRows.size(); i++) {
-            int y = fullRows.get(i);
-            r.clearedRows[i] = y;
-            clearedRowSet.add(y);
-
-            java.util.ArrayList<Integer> placedCols = placedByRow.getOrDefault(y, new java.util.ArrayList<>());
-            r.filledColumnsPerClearedRow.add(placedCols.stream().mapToInt(Integer::intValue).toArray());
-
-            for (int x = 0; x < width; x++) {
-                if (allowedTiles[y][x] && board[y][x].get() != Tile.EMPTY) {
-                    r.clearedCells.add(new int[]{x, y, board[y][x].get()});
-                }
-            }
-        }
-
-        // Row-based compaction: walk rows bottom-to-top with a write pointer.
-        // Cleared rows are skipped; all other rows are shifted down to fill the gaps.
-        // allowedTiles=false cells are permanent and never written.
-        int writeY = 0;
-        for (int readY = 0; readY < height; readY++) {
-            if (clearedRowSet.contains(readY)) continue; // skip cleared rows
-            if (readY != writeY) {
-                for (int x = 0; x < width; x++) {
-                    if (allowedTiles[writeY][x]) {
-                        // Source row may cross a barrier column — treat those as empty
-                        byte src = allowedTiles[readY][x] ? board[readY][x].get() : Tile.EMPTY;
-                        byte tex = allowedTiles[readY][x] ? board[readY][x].tex() : Tile.SINGLE_TILE;
-                        board[writeY][x].set(src, tex);
-                    }
-                }
-            }
-            writeY++;
-        }
-        // Rows from writeY to height-1 are now vacant
-        for (int y = writeY; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                if (allowedTiles[y][x]) {
-                    board[y][x].set(Tile.EMPTY, Tile.SINGLE_TILE);
-                }
-            }
-        }
     }
 
     /**
@@ -854,48 +500,13 @@ public class Board {
 
         float sx = p.location.x;
         float sy = p.location.y;
-        while (canPieceBeAt(id, sx, sy - 1)) sy--;
+        while (BoardCollision.canPieceBeAt(this, id, sx, sy - 1)) sy--;
 
         ShadowInfo info = new ShadowInfo();
         info.locationX = sx;
         info.locationY = sy;
-
-        // Solid support check (same logic as hardDrop)
-        for (Vector2 offset : p.tiles) {
-            int mx = (int) Math.floor(sx + offset.x);
-            int my = (int) Math.floor(sy + offset.y);
-            int below = my - 1;
-            if (below < 0) { info.wouldPlace = true; break; }
-            if (mx >= 0 && mx < width && below >= 0 && below < height) {
-                if (!allowedTiles[below][mx]) { info.wouldPlace = true; break; }
-                if (board[below][mx].get() != Tile.EMPTY) { info.wouldPlace = true; break; }
-            }
-        }
+        info.wouldPlace = BoardCollision.hasSolidSupportAt(this, p, sx, sy);
         return info;
-    }
-
-    /**
-     * Checks whether piece {@code id} can occupy the position with anchor ({@code baseX}, {@code baseY})
-     * without mutating any state.  Mirrors the logic in {@link #canMovePiece} exactly.
-     */
-    private boolean canPieceBeAt(int id, float baseX, float baseY) {
-        Piece p = activePieces.get(id);
-        for (int i = 0; i < p.tiles.length; i++) {
-            float lx = baseX + p.tiles[i].x;
-            float ly = baseY + p.tiles[i].y;
-            if (lx < 0 || ly < 0 || lx >= width || ly >= height) return false;
-            int ix = (int) lx, iy = (int) ly;
-            if (board[iy][ix] == null || board[iy][ix].get() != 0) return false;
-            if (!allowedTiles[iy][ix]) return false;
-            for (int j = 0; j < activePieces.size(); j++) {
-                if (j == id) continue;
-                for (Vector2 t : activePieces.get(j).tiles) {
-                    if (lx == t.x + activePieces.get(j).location.x &&
-                        ly == t.y + activePieces.get(j).location.y) return false;
-                }
-            }
-        }
-        return true;
     }
 
     /** Result of {@link Board#getShadow(int)}. */
@@ -914,7 +525,7 @@ public class Board {
         NetBoardLight retval = new NetBoardLight();
         retval.tileid = new byte[width*height];
         retval.tileconnections = new byte[width*height];
-        retval.pieces = new Piece.NetPiece[activePieces.size()];
+        retval.pieces = new NetPiece[activePieces.size()];
         for (int y=0; y<height; y++) {
             for (int x=0; x<width; x++) {
                 retval.tileid[y*width + x] = board[y][x].get();
@@ -940,8 +551,8 @@ public class Board {
         retval.height = height;
         retval.spawnposx = new byte[spawnPositions.length];
         retval.spawnposy = new byte[spawnPositions.length];
-        retval.queues = new PieceQueue.NetQueue[pieceQueues.length];
-        retval.pieces = new Piece.NetPiece[activePieces.size()];
+        retval.queues = new NetQueue[pieceQueues.length];
+        retval.pieces = new NetPiece[activePieces.size()];
         for (int y=0; y<height; y++) {
             for (int x=0; x<width; x++) {
                 retval.tileid[y*width + x] = board[y][x].get();
@@ -1002,31 +613,11 @@ public class Board {
         SHORT_4P
     }
 
-    public static class NetBoardLight { // smaller class to be sent over UDP constantly (20-30 times/sec)
-        public byte[] tileid;
-        public byte[] tileconnections;
-        public Piece.NetPiece[] pieces;
-        public byte heldPieceType;
-        public boolean[] playerHoldUsed;
-    }
-
     public static NetBoardLight lightNetBoardFrom(NetBoardFull full) {
         NetBoardLight retval = new NetBoardLight();
         retval.pieces = full.pieces;
         retval.tileid = full.tileid;
         retval.tileconnections = full.tileconnections;
         return retval;
-    }
-
-    public static class NetBoardFull { // bigger class, sent initially and then rarely on desyncs (avoiding excessive bandwidth usage)
-        public byte[] tileid;
-        public byte[] tileconnections;
-        public boolean[] allowedtiles;
-        public byte width;
-        public byte height;
-        public byte[] spawnposx;
-        public byte[] spawnposy;
-        public PieceQueue.NetQueue[] queues;
-        public Piece.NetPiece[] pieces;
     }
 }

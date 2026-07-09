@@ -7,17 +7,22 @@ package me.ethanchen.network.packets.s2c;
  * Coordinates are in board-tile space (matching {@code Board.getBoard()[y][x]} indices).
  */
 public class NetParticle {
+    /** White square flash at placement (no gravity, fades quickly). */
+    public static final byte KIND_FLASH = 0;
+    /** Colored shard affected by gravity, fades over ~0.5 s. */
+    public static final byte KIND_TILE_BREAK = 1;
+    /** Floating score text; {@code value} = points awarded. */
+    public static final byte KIND_POPUP_SCORE = 2;
+    /**
+     * Floating bonus text; {@code value} = 4-bit bonus bitfield
+     * (bit0=B2B, bit1=DifferentColumn, bit2=Combo, bit3=Glow).
+     */
+    public static final byte KIND_POPUP_SCORE_MULTIPLIER = 3;
+
     /** Index into the {@code boards[]} array that this particle belongs to. */
     public byte boardIndex;
 
-    /**
-     * Kind of particle effect to spawn.
-     * 0 = FLASH  — white square flash at placement (no gravity, fades quickly)
-     * 1 = TILE_BREAK — colored shard affected by gravity, fades over ~0.5 s
-     * 2 = POPUP_SCORE — floating score text; {@code value} = points awarded
-     * 3 = POPUP_SCORE_MULTIPLIER — floating bonus text; {@code value} = 4-bit bonus bitfield
-     *     (bit0=B2B, bit1=DifferentColumn, bit2=Combo, bit3=Glow)
-     */
+    /** Kind of particle effect to spawn; one of the {@code KIND_*} constants above. */
     public byte kind;
 
     /**

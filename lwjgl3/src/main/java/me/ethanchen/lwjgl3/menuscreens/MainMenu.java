@@ -25,10 +25,4 @@ public class MainMenu extends MenuScreen {
         
     }
 
-    @Override
-    public void render() {
-        elements.forEach(element -> {
-            element.render(shapes, sprites, font);
-        });
-    }
 }

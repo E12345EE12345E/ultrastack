@@ -1,9 +1,9 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
-import me.ethanchen.game.GameMode;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.network.ClientPacketWrapper;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.s2c.RoomJoinResponse;
 import me.ethanchen.network.packets.s2c.RoomListBroadcast;
 
@@ -13,6 +13,10 @@ public class RoomBrowserMenu extends MenuScreen {
     private int tickCount;
     private TextInput roomListText;
     private TextInput messageText;
+
+    private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
+            .on(RoomListBroadcast.class, w -> handleRoomList((RoomListBroadcast) w.packet))
+            .on(RoomJoinResponse.class, w -> handleRoomJoinResponse((RoomJoinResponse) w.packet));
 
     public RoomBrowserMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -44,7 +48,7 @@ public class RoomBrowserMenu extends MenuScreen {
         }));
 
         elements.add(new UIButton(0.7, 0.125, 0.3, 0.1, "Create Room", () -> {
-            app.sendCreateRoomRequest(GameMode.MULTIPLAYER_SCORE);
+            app.sendCreateRoomRequest();
         }));
 
         elements.add(new UIButton(0.5, 0.04, 0.3, 0.07, "Disconnect", () -> {
@@ -69,41 +73,36 @@ public class RoomBrowserMenu extends MenuScreen {
         }
     }
 
-    @Override
-    public void render() {
-        elements.forEach(element -> element.render(shapes, sprites, font));
-    }
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
-        if (w.packet instanceof RoomListBroadcast) {
-            RoomListBroadcast p = (RoomListBroadcast) w.packet;
-            if (p.roomIds == null || p.roomIds.length == 0) {
-                roomListText.set("No rooms available.");
+        dispatcher.dispatch(w);
+    }
+
+    private void handleRoomList(RoomListBroadcast p) {
+        if (p.rooms == null || p.rooms.length == 0) {
+            roomListText.set("No rooms available.");
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (me.ethanchen.network.dto.RoomInfo r : p.rooms) {
+            if (r.inProgress) {
+                sb.append(r.roomId).append(" | [IN PROGRESS]\n");
             } else {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < p.roomIds.length; i++) {
-                    if (p.inProgress != null && i < p.inProgress.length && p.inProgress[i]) {
-                        sb.append(p.roomIds[i]).append(" | [IN PROGRESS]\n");
-                    } else {
-                        String host = (p.hostNames != null && i < p.hostNames.length) ? p.hostNames[i] : "?";
-                        int count = (p.playerCounts != null && i < p.playerCounts.length) ? p.playerCounts[i] : 0;
-                        sb.append(p.roomIds[i])
-                          .append(" | host: ").append(host)
-                          .append(" | players: ").append(count)
-                          .append("\n");
-                    }
-                }
-                roomListText.set(sb.toString().trim());
+                sb.append(r.roomId)
+                  .append(" | host: ").append(r.hostName != null ? r.hostName : "?")
+                  .append(" | players: ").append(r.playerCount)
+                  .append("\n");
             }
         }
-        if (w.packet instanceof RoomJoinResponse) {
-            RoomJoinResponse res = (RoomJoinResponse) w.packet;
-            if (res.success) {
-                app.switchMenu(new MultiplayerLobby(app, res.isHost));
-            } else {
-                messageText.set(res.reason != null && !res.reason.isEmpty() ? res.reason : "Could not join room.");
-            }
+        roomListText.set(sb.toString().trim());
+    }
+
+    private void handleRoomJoinResponse(RoomJoinResponse res) {
+        if (res.success) {
+            app.switchMenu(new MultiplayerLobby(app, res.isHost));
+        } else {
+            messageText.set(res.reason != null && !res.reason.isEmpty() ? res.reason : "Could not join room.");
         }
     }
 }

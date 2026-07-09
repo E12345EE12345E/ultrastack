@@ -5,6 +5,7 @@ import java.util.ArrayDeque;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.network.ClientPacketWrapper;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.LobbyPlayerListBroadcast;
@@ -21,6 +22,12 @@ public class MultiplayerLobby extends MenuScreen {
     private TextInput playerNameList;
     private ArrayDeque<String> chatLines;
     private boolean isHost;
+
+    private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
+            .on(TextMessageBroadcast.class, w -> handleTextMessage((TextMessageBroadcast) w.packet))
+            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet)))
+            .on(LobbyPlayerListBroadcast.class, w -> handlePlayerList((LobbyPlayerListBroadcast) w.packet))
+            .on(RoomClosedBroadcast.class, w -> handleRoomClosed());
 
     public MultiplayerLobby(ClientApp app, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -82,41 +89,33 @@ public class MultiplayerLobby extends MenuScreen {
     }
 
     @Override
-    public void render() {
-        elements.forEach(element -> {
-            element.render(shapes, sprites, font);
-        });
+    public void passClientPacket(ClientPacketWrapper w) {
+        dispatcher.dispatch(w);
     }
 
-    @Override
-    public void passClientPacket(ClientPacketWrapper w) {
-        if (w.packet instanceof TextMessageBroadcast) {
-            TextMessageBroadcast p = (TextMessageBroadcast) w.packet;
-            chatLines.add("[" + p.sender + "] " + p.message + " ");
-            while (chatLines.size() > MAX_CHAT_LINES) {
-                chatLines.removeFirst();
-            }
-            chat.set(String.join("\n", chatLines));
+    private void handleTextMessage(TextMessageBroadcast p) {
+        chatLines.add("[" + p.sender + "] " + p.message + " ");
+        while (chatLines.size() > MAX_CHAT_LINES) {
+            chatLines.removeFirst();
         }
-        if (w.packet instanceof StartGameBroadcast) {
-            app.switchMenu(new GameScreen(app, (StartGameBroadcast)w.packet));
+        chat.set(String.join("\n", chatLines));
+    }
+
+    private void handlePlayerList(LobbyPlayerListBroadcast p) {
+        String playerListing = "";
+        for (int i=0; i<p.playerNames.length; i++) {
+            playerListing += "p" + (i+1) + ": " + p.playerNames[i] + "\n";
         }
-        if (w.packet instanceof LobbyPlayerListBroadcast) {
-            LobbyPlayerListBroadcast p = (LobbyPlayerListBroadcast) w.packet;
-            String playerListing = "";
-            for (int i=0; i<p.playerNames.length; i++) {
-                playerListing += "p" + (i+1) + ": " + p.playerNames[i] + "\n";
-            }
-            playerNameList.set(playerListing);
-        }
-        if (w.packet instanceof RoomClosedBroadcast) {
-            // Host left the lobby — return to the room browser (stay connected online).
-            if (app.isLanMode()) {
-                app.disconnect();
-                app.switchMenu(new LanMenu(app));
-            } else {
-                app.switchMenu(new RoomBrowserMenu(app));
-            }
+        playerNameList.set(playerListing);
+    }
+
+    private void handleRoomClosed() {
+        // Host left the lobby — return to the room browser (stay connected online).
+        if (app.isLanMode()) {
+            app.disconnect();
+            app.switchMenu(new LanMenu(app));
+        } else {
+            app.switchMenu(new RoomBrowserMenu(app));
         }
     }
 }

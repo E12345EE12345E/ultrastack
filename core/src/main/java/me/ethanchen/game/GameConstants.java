@@ -59,4 +59,39 @@ public final class GameConstants {
 
     /** Server/room tick rate in milliseconds (~60 Hz). */
     public static final long TICK_MS = 16;
+
+    /** Countdown (ms) between a host starting a game and the game actually beginning. */
+    public static final int GAME_START_DELAY_MS = 5000;
+
+    /** Room-thread ticks between lobby player-list UDP refreshes (~160ms at 60Hz). */
+    public static final int LOBBY_UDP_REFRESH_INTERVAL_TICKS = 10;
+
+    /** Server-loop ticks between public room-list broadcasts (~5s at 60Hz). */
+    public static final int ROOM_LIST_BROADCAST_INTERVAL_TICKS = 300;
+
+    /** ServerGame ticks between net-state broadcasts (halves the ~60Hz tick rate to ~30Hz). */
+    public static final int NET_UPDATE_BROADCAST_INTERVAL_TICKS = 2;
+
+    // Base score by lines cleared (index 1-3; index 4 only populated for standard/all-spin
+    // clears). MULTIPLAYER_SCORE mode; see ServerGame#baseScore.
+    public static final long SCORE_SINGLE = 100;
+    public static final long SCORE_DOUBLE = 200;
+    public static final long SCORE_TRIPLE = 300;
+    public static final long SCORE_TETRIS = 800;
+
+    public static final long SCORE_TSPIN_SINGLE = 400;
+    public static final long SCORE_TSPIN_DOUBLE = 800;
+    public static final long SCORE_TSPIN_TRIPLE = 1200;
+
+    public static final long SCORE_TSPIN_MINI_SINGLE = 200;
+    public static final long SCORE_TSPIN_MINI_DOUBLE = 800;
+
+    public static final long SCORE_ALL_SPIN_SINGLE = 150;
+    public static final long SCORE_ALL_SPIN_DOUBLE = 300;
+    public static final long SCORE_ALL_SPIN_TRIPLE = 450;
+    public static final long SCORE_ALL_SPIN_TETRIS = 800;
+
+    public static final long SCORE_SMALL_SPIN_SINGLE = 200;
+    public static final long SCORE_SMALL_SPIN_DOUBLE = 400;
+    public static final long SCORE_SMALL_SPIN_TRIPLE = 600;
 }

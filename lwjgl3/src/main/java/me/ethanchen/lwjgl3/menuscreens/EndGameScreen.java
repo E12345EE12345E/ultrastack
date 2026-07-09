@@ -68,8 +68,4 @@ public class EndGameScreen extends MenuScreen {
     public void update() {
     }
 
-    @Override
-    public void render() {
-        elements.forEach(element -> element.render(shapes, sprites, font));
-    }
 }

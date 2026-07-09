@@ -18,7 +18,6 @@ import com.badlogic.gdx.utils.Queue;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.esotericsoftware.kryonet.Client;
 
-import me.ethanchen.game.GameMode;
 import me.ethanchen.lwjgl3.menuscreens.MainMenu;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 import me.ethanchen.lwjgl3.music.AudioManager;
@@ -326,10 +325,8 @@ public class ClientApp extends ApplicationAdapter {
         return sendTCP(new RoomListRequest());
     }
 
-    public boolean sendCreateRoomRequest(GameMode gameMode) {
-        CreateRoomRequest req = new CreateRoomRequest();
-        req.gamemode = gameMode;
-        return sendTCP(req);
+    public boolean sendCreateRoomRequest() {
+        return sendTCP(new CreateRoomRequest());
     }
 
     public boolean sendJoinRoomRequest(String roomId) {

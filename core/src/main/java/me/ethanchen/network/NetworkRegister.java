@@ -3,10 +3,13 @@ package me.ethanchen.network;
 import com.esotericsoftware.kryo.Kryo;
 
 import me.ethanchen.game.GameMode;
-import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.MoveType;
-import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.PieceQueue;
+import me.ethanchen.network.dto.NetBoardFull;
+import me.ethanchen.network.dto.NetBoardLight;
+import me.ethanchen.network.dto.NetPiece;
+import me.ethanchen.network.dto.NetQueue;
+import me.ethanchen.network.dto.RoomInfo;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.*;
 import me.ethanchen.network.packets.other.*;
@@ -69,14 +72,14 @@ public class NetworkRegister {
         kryo.register(String[].class);
         kryo.register(GameMode.class);
         kryo.register(MoveType.class);
-        kryo.register(Board.NetBoardFull.class);
-        kryo.register(Board.NetBoardLight.class);
-        kryo.register(Board.NetBoardFull[].class);
-        kryo.register(Board.NetBoardLight[].class);
-        kryo.register(Piece.NetPiece.class);
-        kryo.register(PieceQueue.NetQueue.class);
-        kryo.register(Piece.NetPiece[].class);
-        kryo.register(PieceQueue.NetQueue[].class);
+        kryo.register(NetBoardFull.class);
+        kryo.register(NetBoardLight.class);
+        kryo.register(NetBoardFull[].class);
+        kryo.register(NetBoardLight[].class);
+        kryo.register(NetPiece.class);
+        kryo.register(NetQueue.class);
+        kryo.register(NetPiece[].class);
+        kryo.register(NetQueue[].class);
         kryo.register(PieceQueue.BagTypes.class);
         kryo.register(NetParticle.class);
         kryo.register(NetParticle[].class);
@@ -84,5 +87,7 @@ public class NetworkRegister {
         kryo.register(ParticleSpawner[].class);
         // Room lifecycle
         kryo.register(RoomClosedBroadcast.class);
+        kryo.register(RoomInfo.class);
+        kryo.register(RoomInfo[].class);
     }
 }

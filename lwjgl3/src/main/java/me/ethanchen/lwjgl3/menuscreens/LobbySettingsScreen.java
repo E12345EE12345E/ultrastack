@@ -55,11 +55,6 @@ public class LobbySettingsScreen extends MenuScreen {
     }
 
     @Override
-    public void render() {
-        elements.forEach(element -> element.render(shapes, sprites, font));
-    }
-
-    @Override
     public void passClientPacket(ClientPacketWrapper w) {
         // Delegate to the retained chat screen so its state (chat lines, player list) stays
         // fresh, and so StartGameBroadcast/RoomClosedBroadcast handling works the same
