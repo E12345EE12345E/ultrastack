@@ -25,7 +25,7 @@ public class MultiplayerLobby extends MenuScreen {
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(TextMessageBroadcast.class, w -> handleTextMessage((TextMessageBroadcast) w.packet))
-            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet)))
+            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, isHost)))
             .on(LobbyPlayerListBroadcast.class, w -> handlePlayerList((LobbyPlayerListBroadcast) w.packet))
             .on(RoomClosedBroadcast.class, w -> handleRoomClosed());
 

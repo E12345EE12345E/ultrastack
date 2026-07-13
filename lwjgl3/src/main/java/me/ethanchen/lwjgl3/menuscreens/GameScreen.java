@@ -49,6 +49,7 @@ public class GameScreen extends MenuScreen {
     private long lastUpdateMs;
     private int deltaTime;
     private int playerId;
+    private final boolean isHost;
 
     private final ArrayList<Particle> particles = new ArrayList<>();
     private final Random particleRng = new Random();
@@ -86,8 +87,9 @@ public class GameScreen extends MenuScreen {
                 .on(BumpSoundBroadcast.class,       w -> handleBumpSound((BumpSoundBroadcast) w.packet));
     }
 
-    public GameScreen(ClientApp app, StartGameBroadcast b) {
+    public GameScreen(ClientApp app, StartGameBroadcast b, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
+        this.isHost = isHost;
         lastUpdateMs = System.currentTimeMillis();
         long startGameTimer = b.startTimeMS - System.currentTimeMillis();
         playerId = b.playerId;
@@ -137,8 +139,10 @@ public class GameScreen extends MenuScreen {
             if (fadeTimerMs >= 1000 && endGamePacket != null) {
                 EndGameBroadcast pkt = endGamePacket;
                 endGamePacket = null;
-                app.disconnect();
-                app.switchMenu(new EndGameScreen(app, pkt));
+                // Players remain members of the same room server-side after a game ends (the
+                // room only stops being "in progress"), so stay connected here and let
+                // EndGameScreen return straight to that room's lobby.
+                app.switchMenu(new EndGameScreen(app, pkt, isHost));
                 return;
             }
         }

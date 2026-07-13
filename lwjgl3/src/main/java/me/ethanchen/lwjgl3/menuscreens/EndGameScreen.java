@@ -7,8 +7,11 @@ import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 
 public class EndGameScreen extends MenuScreen {
-    public EndGameScreen(ClientApp app, EndGameBroadcast pkt) {
+    private final boolean isHost;
+
+    public EndGameScreen(ClientApp app, EndGameBroadcast pkt, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
+        this.isHost = isHost;
 
         String title = pkt.win ? "VICTORY" : "DEFEAT";
         elements.add(new UIText(0.5, 0.85, title, 5));
@@ -44,24 +47,18 @@ public class EndGameScreen extends MenuScreen {
             elements.add(new UIText(0.5, scoreY, timeText, 2.5));
         }
 
-        elements.add(new UIButton(0.5, 0.15, 0.4, 0.1, "Back to Menu", () -> {
-            if (app.isLanMode()) {
-                app.switchMenu(new LanMenu(app));
-            } else {
-                app.sendLeaveRoomRequest();
-                app.switchMenu(new RoomBrowserMenu(app));
-            }
-        }));
+        elements.add(new UIButton(0.5, 0.15, 0.4, 0.1, "Back to Menu", this::backToRoom));
+    }
+
+    private void backToRoom() {
+        // Still a member of the same room (game end doesn't remove anyone from the room), so
+        // just return to its lobby rather than leaving and going back to the room browser/LAN menu.
+        app.switchMenu(new MultiplayerLobby(app, isHost));
     }
 
     @Override
     protected void onEscPressed() {
-        if (app.isLanMode()) {
-            app.switchMenu(new LanMenu(app));
-        } else {
-            app.sendLeaveRoomRequest();
-            app.switchMenu(new RoomBrowserMenu(app));
-        }
+        backToRoom();
     }
 
     @Override

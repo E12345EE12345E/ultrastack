@@ -28,6 +28,10 @@ public class ServerCore implements PacketSender, Runnable {
     private final ConcurrentLinkedQueue<ServerPacketWrapper> inbound = new ConcurrentLinkedQueue<>();
     private final ConcurrentHashMap<Integer, Session> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, GameRoom> rooms = new ConcurrentHashMap<>();
+    // accountUuid -> connectionId of the session currently holding a room slot for that
+    // account. Multiple connections may be logged into the same account simultaneously, but
+    // only one of them may be in a room at a time; see claimAccountRoomSlot/releaseAccountRoomSlot.
+    private final ConcurrentHashMap<String, Integer> accountRoomClaims = new ConcurrentHashMap<>();
 
     private final AuthProvider authProvider; // null = LAN mode
     private final ResultRecorder resultRecorder; // null = results not persisted (e.g. LAN mode)
@@ -50,7 +54,8 @@ public class ServerCore implements PacketSender, Runnable {
         this.dispatcher = buildDispatcher();
     }
 
-    /** LAN-mode constructor (no auth, single implicit "LAN" room; results stay unpersisted). */
+    /** LAN-mode constructor (no auth, single implicit "LAN" room; results stay unpersisted).
+     *  {@code lanJoinCode == 0} means no passcode is required to join. */
     public ServerCore(long lanJoinCode, int roomIdDigits) {
         this.authProvider = null;
         this.resultRecorder = null;
@@ -309,7 +314,20 @@ public class ServerCore implements PacketSender, Runnable {
 
     private void handleCreateRoom(ServerPacketWrapper w, Session session) {
         if (!session.authenticated) return;
-        if (session.currentRoomId != null) return; // already in a room
+        if (session.currentRoomId != null) {
+            RoomJoinResponse res = new RoomJoinResponse();
+            res.success = false;
+            res.reason = "already in a room";
+            sendTCP(w.connectionID, res);
+            return;
+        }
+        if (!claimAccountRoomSlot(session)) {
+            RoomJoinResponse res = new RoomJoinResponse();
+            res.success = false;
+            res.reason = "account already in a room on another connection";
+            sendTCP(w.connectionID, res);
+            return;
+        }
 
         String roomId = generateRoomId();
         GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid, resultRecorder);
@@ -334,9 +352,17 @@ public class ServerCore implements PacketSender, Runnable {
             sendTCP(w.connectionID, res);
             return;
         }
+        if (!claimAccountRoomSlot(session)) {
+            RoomJoinResponse res = new RoomJoinResponse();
+            res.success = false;
+            res.reason = "account already in a room on another connection";
+            sendTCP(w.connectionID, res);
+            return;
+        }
         JoinRoomRequest req = (JoinRoomRequest) w.packet;
         GameRoom room = rooms.get(req.roomId);
         if (room == null) {
+            releaseAccountRoomSlot(session);
             RoomJoinResponse res = new RoomJoinResponse();
             res.success = false;
             res.reason = "room not found";
@@ -345,6 +371,7 @@ public class ServerCore implements PacketSender, Runnable {
         }
         int slotId = room.tryAddMember(w.connectionID, session.username, session.accountUuid, GameConstants.MAX_PLAYERS);
         if (slotId < 0) {
+            releaseAccountRoomSlot(session);
             RoomJoinResponse res = new RoomJoinResponse();
             res.success = false;
             res.reason = room.isInProgress() ? "game already in progress" : "room full";
@@ -365,6 +392,7 @@ public class ServerCore implements PacketSender, Runnable {
         if (session.currentRoomId == null) return;
         evictFromRoom(session.connectionId, session.currentRoomId);
         session.currentRoomId = null;
+        releaseAccountRoomSlot(session);
     }
 
     // -------------------------------------------------------------------------
@@ -379,6 +407,7 @@ public class ServerCore implements PacketSender, Runnable {
         if (session.currentRoomId != null) {
             evictFromRoom(connectionId, session.currentRoomId);
         }
+        releaseAccountRoomSlot(session);
     }
 
     /**
@@ -393,11 +422,39 @@ public class ServerCore implements PacketSender, Runnable {
         List<Integer> evicted = room.handleDisconnect(connectionId);
         for (int evictedConnId : evicted) {
             Session evictedSession = sessions.get(evictedConnId);
-            if (evictedSession != null) evictedSession.currentRoomId = null;
+            if (evictedSession != null) {
+                evictedSession.currentRoomId = null;
+                releaseAccountRoomSlot(evictedSession);
+            }
         }
         if (room.isEmpty()) {
             rooms.remove(roomId);
             room.stop();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Per-account room-slot claims (prevents two connections logged into the same account
+    // from being in a room simultaneously)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Atomically claims the "in a room" slot for {@code session}'s account.
+     *
+     * @return {@code true} if this connection now holds (or already held) the claim,
+     *         {@code false} if a different connection logged into the same account already
+     *         holds it.
+     */
+    private boolean claimAccountRoomSlot(Session session) {
+        if (session.accountUuid == null) return true;
+        Integer existing = accountRoomClaims.putIfAbsent(session.accountUuid, session.connectionId);
+        return existing == null || existing.intValue() == session.connectionId;
+    }
+
+    /** Releases {@code session}'s account claim, but only if it's the one still holding it. */
+    private void releaseAccountRoomSlot(Session session) {
+        if (session.accountUuid != null) {
+            accountRoomClaims.remove(session.accountUuid, session.connectionId);
         }
     }
 

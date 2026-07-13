@@ -42,7 +42,7 @@ public class LanMenu extends MenuScreen {
         hostUsernameBox.sanitize = 2;
         elements.add(hostUsernameBox);
 
-        elements.add(new UIText(0.25, 0.59, "Join Code (numbers only)", 1));
+        elements.add(new UIText(0.25, 0.59, "Join Code (optional, numbers only)", 1));
         UITextBox hostJoinCodeBox = new UITextBox(0.25, 0.515, 0.35, 0.08, hostJoinCodeOutput);
         hostJoinCodeBox.sanitize = 3;
         elements.add(hostJoinCodeBox);
@@ -54,16 +54,14 @@ public class LanMenu extends MenuScreen {
                 messageText.set("Enter a username.");
                 return;
             }
-            if (codeStr.isEmpty()) {
-                messageText.set("Enter a join code.");
-                return;
-            }
-            long code;
-            try {
-                code = Long.parseLong(codeStr);
-            } catch (NumberFormatException e) {
-                messageText.set("Join code must be a number.");
-                return;
+            long code = 0;
+            if (!codeStr.isEmpty()) {
+                try {
+                    code = Long.parseLong(codeStr);
+                } catch (NumberFormatException e) {
+                    messageText.set("Join code must be a number.");
+                    return;
+                }
             }
             pendingUsername = hostUser;
             pendingJoinCode = code;
@@ -86,7 +84,7 @@ public class LanMenu extends MenuScreen {
         elements.add(new UIText(0.75, 0.59, "Host IP (or IP:port)", 1));
         elements.add(new UITextBox(0.75, 0.515, 0.35, 0.08, joinHostIpOutput));
 
-        elements.add(new UIText(0.75, 0.44, "Join Code (numbers only)", 1));
+        elements.add(new UIText(0.75, 0.44, "Join Code (optional, numbers only)", 1));
         UITextBox joinJoinCodeBox = new UITextBox(0.75, 0.365, 0.35, 0.08, joinJoinCodeOutput);
         joinJoinCodeBox.sanitize = 3;
         elements.add(joinJoinCodeBox);
@@ -100,16 +98,14 @@ public class LanMenu extends MenuScreen {
                 messageText.set("Enter a username.");
                 return;
             }
-            if (codeStr.isEmpty()) {
-                messageText.set("Enter a join code.");
-                return;
-            }
-            long code;
-            try {
-                code = Long.parseLong(codeStr);
-            } catch (NumberFormatException e) {
-                messageText.set("Join code must be a number.");
-                return;
+            long code = 0;
+            if (!codeStr.isEmpty()) {
+                try {
+                    code = Long.parseLong(codeStr);
+                } catch (NumberFormatException e) {
+                    messageText.set("Join code must be a number.");
+                    return;
+                }
             }
 
             String ip = NetConfig.HOST;
