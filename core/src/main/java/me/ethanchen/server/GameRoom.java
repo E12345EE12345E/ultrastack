@@ -34,6 +34,7 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final Map<Integer, String> connToUuid = new HashMap<>();
     private final int hostConnId;
     private final ResultRecorder resultRecorder;
+    private final XpAwarder xpAwarder;
 
     private volatile ServerGame serverGame;
     private volatile boolean running;
@@ -44,15 +45,16 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     /** Used for LAN rooms, which never persist results. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
-        this(roomId, sender, hostConnId, hostName, hostName, null);
+        this(roomId, sender, hostConnId, hostName, hostName, null, null);
     }
 
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
-                     ResultRecorder resultRecorder) {
+                     ResultRecorder resultRecorder, XpAwarder xpAwarder) {
         this.roomId = roomId;
         this.sender = sender;
         this.hostConnId = hostConnId;
         this.resultRecorder = resultRecorder;
+        this.xpAwarder = xpAwarder;
         addMemberUnconditional(hostConnId, hostName, hostUuid);
     }
 
@@ -384,7 +386,7 @@ public class GameRoom implements Runnable, GameRoomContext {
         }
         broadcastMembersTCP(b);
 
-        if (resultRecorder != null && info.mode != null && info.mode != GameMode.NONE) {
+        if (info.mode != null && info.mode != GameMode.NONE) {
             PlayerResultInfo[] players = new PlayerResultInfo[playerCount];
             for (int i = 0; i < playerCount; i++) {
                 Integer connId = slotToConn.get(i);
@@ -392,7 +394,19 @@ public class GameRoom implements Runnable, GameRoomContext {
                 String uuid = connId != null ? connToUuid.getOrDefault(connId, "") : "";
                 players[i] = new PlayerResultInfo(name, uuid);
             }
-            resultRecorder.recordGameResult(GameResultData.from(info, players));
+            if (resultRecorder != null) {
+                resultRecorder.recordGameResult(GameResultData.from(info, players));
+            }
+            if (xpAwarder != null) {
+                long xp = XpCalculator.computeXp(info.mode, info.score);
+                if (xp > 0) {
+                    for (PlayerResultInfo player : players) {
+                        if (player.accountUuid != null && !player.accountUuid.isEmpty()) {
+                            xpAwarder.awardXp(player.accountUuid, xp);
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -35,6 +35,7 @@ public class ServerCore implements PacketSender, Runnable {
 
     private final AuthProvider authProvider; // null = LAN mode
     private final ResultRecorder resultRecorder; // null = results not persisted (e.g. LAN mode)
+    private final XpAwarder xpAwarder; // null = XP not awarded (e.g. LAN mode)
     private final long lanJoinCode;          // only relevant in LAN mode
     private final int roomIdDigits;
     private final Random rng = new Random();
@@ -45,9 +46,10 @@ public class ServerCore implements PacketSender, Runnable {
     private final PacketDispatcher<ServerPacketWrapper> dispatcher;
 
     /** Account-mode constructor. */
-    public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, int roomIdDigits) {
+    public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, XpAwarder xpAwarder, int roomIdDigits) {
         this.authProvider = authProvider;
         this.resultRecorder = resultRecorder;
+        this.xpAwarder = xpAwarder;
         this.lanJoinCode = 0;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
@@ -59,6 +61,7 @@ public class ServerCore implements PacketSender, Runnable {
     public ServerCore(long lanJoinCode, int roomIdDigits) {
         this.authProvider = null;
         this.resultRecorder = null;
+        this.xpAwarder = null;
         this.lanJoinCode = lanJoinCode;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
@@ -330,7 +333,7 @@ public class ServerCore implements PacketSender, Runnable {
         }
 
         String roomId = generateRoomId();
-        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid, resultRecorder);
+        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid, resultRecorder, xpAwarder);
         rooms.put(roomId, room);
         session.currentRoomId = roomId;
         room.start();

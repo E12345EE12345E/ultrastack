@@ -43,6 +43,9 @@ lwjgl3/build/libs/settings.json
 results.db
 results.db-wal
 results.db-shm
+accounts.db
+accounts.db-wal
+accounts.db-shm
 
 # Notes
 server host commands.txt
