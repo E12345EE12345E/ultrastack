@@ -63,6 +63,13 @@ public class Piece {
     public byte rotation;
     public boolean lastMoveWasRotation = false;
     public boolean isBlockedFromSpawning = false;
+    /**
+     * True from the moment this piece spawns until it no longer overlaps any other active
+     * player's piece. While true, collisions against this piece are ignored (from both sides),
+     * so a piece spawning inside a teammate's piece doesn't awkwardly block either piece's
+     * movement. Re-evaluated every frame by {@link Board#updateJustSpawnedFlags()}.
+     */
+    public boolean justSpawned = false;
     public float lockTime = 0f;
     public int lockedMovementCounter = 0;
     public float movementTimer = 0f;
@@ -170,6 +177,7 @@ public class Piece {
         np.doubledlocationy = (byte) Math.floor(location.y * 2);
         np.rotation = rotation;
         np.blocked = isBlockedFromSpawning;
+        np.justSpawned = justSpawned;
         return np;
     }
 
@@ -177,6 +185,7 @@ public class Piece {
         if (p.type != type) return; // only works if same type
         location.set(p.doubledlocationx*0.5f, p.doubledlocationy*0.5f);
         isBlockedFromSpawning = p.blocked;
+        justSpawned = p.justSpawned;
         if (p.rotation != rotation) {
             int a = p.rotation - rotation;
             if (a < 0) a += 4;
@@ -201,6 +210,7 @@ public class Piece {
         Piece retval = defaultPiece(p.type);
         retval.location = new Vector2(p.doubledlocationx*0.5f, p.doubledlocationy*0.5f);
         retval.isBlockedFromSpawning = p.blocked;
+        retval.justSpawned = p.justSpawned;
         switch (p.rotation) {
             case 1:
                 retval.rotateCW();

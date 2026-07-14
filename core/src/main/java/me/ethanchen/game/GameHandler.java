@@ -56,7 +56,13 @@ public class GameHandler {
             doGravity(deltaTime);
             doLockTimers(deltaTime);
             doMovementTimers(deltaTime);
+            updateJustSpawnedFlags();
         }
+    }
+
+    private void updateJustSpawnedFlags() {
+        for (Board b : boards)
+            b.updateJustSpawnedFlags();
     }
 
     private void doGravity(int deltaTime) {

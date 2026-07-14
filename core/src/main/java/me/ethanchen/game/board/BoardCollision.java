@@ -30,9 +30,11 @@ final class BoardCollision {
             if (!b.allowedTiles[iy][ix]) return false;
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;
-                for (Vector2 t : b.activePieces.get(j).tiles) {
-                    if (lx == t.x + b.activePieces.get(j).location.x
-                            && ly == t.y + b.activePieces.get(j).location.y) return false;
+                Piece other = b.activePieces.get(j);
+                if (p.justSpawned || other.justSpawned) continue;
+                for (Vector2 t : other.tiles) {
+                    if (lx == t.x + other.location.x
+                            && ly == t.y + other.location.y) return false;
                 }
             }
         }
@@ -54,9 +56,11 @@ final class BoardCollision {
             if (!b.allowedTiles[iy][ix]) return false;
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;
-                for (Vector2 t : b.activePieces.get(j).tiles) {
-                    if (lx == t.x + b.activePieces.get(j).location.x
-                            && ly == t.y + b.activePieces.get(j).location.y) return false;
+                Piece other = b.activePieces.get(j);
+                if (p.justSpawned || other.justSpawned) continue;
+                for (Vector2 t : other.tiles) {
+                    if (lx == t.x + other.location.x
+                            && ly == t.y + other.location.y) return false;
                 }
             }
         }
@@ -103,6 +107,31 @@ final class BoardCollision {
     }
 
     // -------------------------------------------------------------------------
+    // justSpawned overlap detection
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns true if piece {@code id}'s tiles currently overlap any tile of another active
+     * piece, regardless of {@code justSpawned} state. Used to decide when a piece's
+     * {@code justSpawned} grace flag should be cleared.
+     */
+    static boolean overlapsAnyOtherPiece(Board b, int id) {
+        Piece p = b.activePieces.get(id);
+        for (int i = 0; i < p.tiles.length; i++) {
+            float lx = p.location.x + p.tiles[i].x;
+            float ly = p.location.y + p.tiles[i].y;
+            for (int j = 0; j < b.activePieces.size(); j++) {
+                if (j == id) continue;
+                Piece other = b.activePieces.get(j);
+                for (Vector2 t : other.tiles) {
+                    if (lx == t.x + other.location.x && ly == t.y + other.location.y) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
     // Lateral-blocker detection (bump events)
     // -------------------------------------------------------------------------
 
@@ -127,6 +156,7 @@ final class BoardCollision {
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;
                 Piece other = b.activePieces.get(j);
+                if (p.justSpawned || other.justSpawned) continue;
                 for (Vector2 t : other.tiles) {
                     if (lx == t.x + other.location.x && ly == t.y + other.location.y) {
                         if (blockerId == -1) {
@@ -161,6 +191,7 @@ final class BoardCollision {
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;
                 Piece other = b.activePieces.get(j);
+                if (p.justSpawned || other.justSpawned) continue;
                 for (Vector2 t : other.tiles) {
                     if (mx == (int)(t.x + other.location.x) && below == (int)(t.y + other.location.y)) {
                         if (blockerId == -1) {

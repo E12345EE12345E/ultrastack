@@ -110,6 +110,7 @@ public class Board {
             Piece piece = Piece.defaultPiece(pieceQueues[i].takeNext());
             piece.location.add(spawnPositions[i]);
             piece.isBlockedFromSpawning = isSpawnBlocked(piece);
+            piece.justSpawned = true;
             activePieces.add(piece);
         }
     }
@@ -238,6 +239,7 @@ public class Board {
             Piece newPiece = Piece.defaultPiece(oldHeld);
             newPiece.location.add(spawnPositions[playerId]);
             newPiece.isBlockedFromSpawning = isSpawnBlocked(newPiece);
+            newPiece.justSpawned = true;
             activePieces.set(playerId, newPiece);
         }
         if (playerId < playerHoldUsed.length) playerHoldUsed[playerId] = true;
@@ -486,6 +488,7 @@ public class Board {
         Piece next = Piece.defaultPiece(pieceQueues[id].takeNext());
         next.location.add(spawnPositions[id]);
         next.isBlockedFromSpawning = isSpawnBlocked(next);
+        next.justSpawned = true;
         activePieces.set(id, next);
     }
 
@@ -498,7 +501,24 @@ public class Board {
         Piece next = Piece.defaultPiece(type);
         next.location.add(spawnPositions[id]);
         next.isBlockedFromSpawning = isSpawnBlocked(next);
+        next.justSpawned = true;
         activePieces.set(id, next);
+    }
+
+    /**
+     * Re-evaluates each active piece's {@code justSpawned} grace flag: once a piece no longer
+     * overlaps any other active player's piece, the flag is cleared and normal collision
+     * (including against other players' pieces) resumes for it. Called every frame so a piece
+     * spawned inside a teammate's piece stops ignoring that teammate as soon as it moves clear.
+     */
+    public void updateJustSpawnedFlags() {
+        for (int i = 0; i < activePieces.size(); i++) {
+            Piece p = activePieces.get(i);
+            if (!p.justSpawned) continue;
+            if (!BoardCollision.overlapsAnyOtherPiece(this, i)) {
+                p.justSpawned = false;
+            }
+        }
     }
 
     /**

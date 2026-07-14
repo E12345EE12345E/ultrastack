@@ -1,7 +1,5 @@
 pause menu
 
-pieces spawning inside of teammate
-
 all clear
 
 bug with pieces too early

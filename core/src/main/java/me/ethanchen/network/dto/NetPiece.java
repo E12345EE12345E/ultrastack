@@ -12,4 +12,5 @@ public class NetPiece {
     public byte doubledlocationy;
     public byte rotation;
     public boolean blocked;
+    public boolean justSpawned;
 }
