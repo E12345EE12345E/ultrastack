@@ -20,6 +20,8 @@ import com.esotericsoftware.kryonet.Client;
 
 import me.ethanchen.lwjgl3.menuscreens.MainMenu;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
+import me.ethanchen.lwjgl3.menuscreens.ShaderTestScreen;
+
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicContainer;
 import me.ethanchen.lwjgl3.music.MusicTag;
@@ -122,8 +124,9 @@ public class ClientApp extends ApplicationAdapter {
         }
         font.setUseIntegerPositions(false);
 
-        menuScreen = new MainMenu(this);
+        menuScreen = new ShaderTestScreen(this);
     }
+
 
     private void update() {
         if (menuScreen != null) menuScreen.update();

@@ -1,4 +1,4 @@
-package me.ethanchen.lwjgl3.render;
+package me.ethanchen.lwjgl3.render.shader;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
@@ -14,64 +14,65 @@ import com.badlogic.gdx.math.Vector2;
 
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.Piece;
+import me.ethanchen.lwjgl3.render.PieceTints;
 
 /**
- * Full-screen glow pipeline extracted from {@link BoardRenderer}: renders each active piece's
- * mino tiles into an offscreen FBO, then applies repeated separable Gaussian blurs in ping-pong
- * FBOs, and finally composites the result onto the screen with additive blending.
- *
- * <p>Obtain an instance via {@link BoardRenderer#getInstance()} — {@link BoardRenderer} owns the
- * {@code GlowRenderer} lifecycle and exposes it only indirectly through
- * {@link BoardRenderer#drawGlow}.
+ * Full-screen glow pipeline: renders each active piece's mino tiles into an offscreen FBO,
+ * then applies repeated separable Gaussian blurs in ping-pong FBOs, and finally composites
+ * the result onto the screen with additive blending.
  */
-public class GlowRenderer {
+public class GlowRenderer implements ShaderRenderer {
 
-    /**
-     * Blur sample radius in pixels. Increase for a wider/softer glow, decrease for a tighter one.
-     * The 5-tap Gaussian kernel extends to ~3.23 × this value in each direction.
-     */
     public static float GLOW_BLUR_RADIUS = 6f;
-
-    /**
-     * Number of full H+V blur iterations. More passes produce a smoother, rounder glow.
-     * 3–5 is a good range; beyond ~6 the improvement becomes imperceptible.
-     */
     public static int GLOW_BLUR_PASSES = 6;
 
-    private final ShaderProgram blurShader;
-    private final SpriteBatch   glowSprites;
+    private ShaderProgram blurShader;
+    private final SpriteBatch glowSprites;
     private final ShapeRenderer glowShapes;
-    private final Matrix4       glowProj = new Matrix4();
-    private FrameBuffer  glowFboA;
-    private FrameBuffer  glowFboB;
+    private final Matrix4 glowProj = new Matrix4();
+    private FrameBuffer glowFboA;
+    private FrameBuffer glowFboB;
     private TextureRegion fboARegion;
     private TextureRegion fboBRegion;
-    private int fboWidth  = 0;
+    private int fboWidth = 0;
     private int fboHeight = 0;
 
-    GlowRenderer() {
+    public GlowRenderer() {
         ShaderProgram.pedantic = false;
+        loadShader();
+        glowSprites = new SpriteBatch();
+        glowShapes = new ShapeRenderer();
+    }
+
+    private void loadShader() {
         blurShader = new ShaderProgram(
                 Gdx.files.internal("shaders/blur.vert"),
                 Gdx.files.internal("shaders/blur.frag"));
         if (!blurShader.isCompiled()) {
             Gdx.app.error("GlowRenderer", "Blur shader compile error:\n" + blurShader.getLog());
         }
-        glowSprites = new SpriteBatch();
-        glowShapes  = new ShapeRenderer();
     }
 
-    // -------------------------------------------------------------------------
-    // Public draw entry point
-    // -------------------------------------------------------------------------
+    @Override
+    public void reloadShader() {
+        ShaderProgram newShader = new ShaderProgram(
+                Gdx.files.internal("shaders/blur.vert"),
+                Gdx.files.internal("shaders/blur.frag"));
+        if (newShader.isCompiled()) {
+            if (blurShader != null) blurShader.dispose();
+            blurShader = newShader;
+            Gdx.app.log("GlowRenderer", "Glow shader successfully reloaded!");
+        } else {
+            Gdx.app.error("GlowRenderer", "Failed to compile updated blur shader:\n" + newShader.getLog());
+            newShader.dispose();
+        }
+    }
 
-    /**
-     * Renders per-piece glow halos for all active pieces with a positive strength in
-     * {@code glowStrengths}. Strength values are in [0, 2]: 0 = no glow, 1 = tinted, 2 = white.
-     *
-     * <p>Caller must NOT have an open SpriteBatch or ShapeRenderer begin/end.
-     */
-    void draw(Board board, float originX, float originY, float tileSize, float[] glowStrengths) {
+    public void draw(Board board, float originX, float originY, float tileSize, float[] glowStrengths) {
+        draw(board, originX, originY, tileSize, glowStrengths, Gdx.graphics.getDeltaTime());
+    }
+
+    public void draw(Board board, float originX, float originY, float tileSize, float[] glowStrengths, float deltaTime) {
         if (!blurShader.isCompiled() || glowStrengths == null) return;
 
         boolean anyGlow = false;
@@ -84,13 +85,12 @@ public class GlowRenderer {
         int sh = Gdx.graphics.getHeight();
         ensureFboSize(sw, sh);
 
-        // Pass 1: render solid tinted rects for each glowing mino into glowFboA
         glowFboA.begin();
         Gdx.gl.glClearColor(0f, 0f, 0f, 0f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         glowShapes.setProjectionMatrix(glowProj);
         glowShapes.begin(ShapeRenderer.ShapeType.Filled);
-        Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE); // additive: overlapping pieces accumulate
+        Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE);
         for (int i = 0; i < board.getActivePieces().size(); i++) {
             Piece piece = board.getActivePieces().get(i);
             float strength = strengthAt(glowStrengths, i);
@@ -118,22 +118,18 @@ public class GlowRenderer {
         glowShapes.end();
         glowFboA.end();
 
-        runBlurPasses(sw, sh);
+        runBlurPasses(sw, sh, deltaTime);
     }
 
-    void dispose() {
-        blurShader.dispose();
+    public void dispose() {
+        if (blurShader != null) blurShader.dispose();
         glowSprites.dispose();
         glowShapes.dispose();
         if (glowFboA != null) glowFboA.dispose();
         if (glowFboB != null) glowFboB.dispose();
     }
 
-    // -------------------------------------------------------------------------
-    // Internal blur pipeline
-    // -------------------------------------------------------------------------
-
-    private void runBlurPasses(int sw, int sh) {
+    private void runBlurPasses(int sw, int sh, float deltaTime) {
         glowSprites.setProjectionMatrix(glowProj);
         glowSprites.setShader(blurShader);
         glowSprites.setBlendFunction(GL20.GL_ONE, GL20.GL_ZERO);
@@ -141,12 +137,14 @@ public class GlowRenderer {
         for (int pass = 0; pass < GLOW_BLUR_PASSES; pass++) {
             boolean lastPass = (pass == GLOW_BLUR_PASSES - 1);
 
-            // Horizontal blur: A → B
             glowFboB.begin();
             Gdx.gl.glClearColor(0f, 0f, 0f, 0f);
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
             blurShader.bind();
             blurShader.setUniformf("u_blurDirection", GLOW_BLUR_RADIUS / sw, 0f);
+            if (blurShader.hasUniform("u_deltaTime")) {
+                blurShader.setUniformf("u_deltaTime", deltaTime);
+            }
             glowSprites.begin();
             glowSprites.setColor(Color.WHITE);
             glowSprites.draw(fboARegion, 0, 0, sw, sh);
@@ -154,10 +152,13 @@ public class GlowRenderer {
             glowFboB.end();
 
             if (lastPass) {
-                glowSprites.setBlendFunction(GL20.GL_ONE, GL20.GL_ONE); // additive → screen
+                glowSprites.setBlendFunction(GL20.GL_ONE, GL20.GL_ONE);
             }
             blurShader.bind();
             blurShader.setUniformf("u_blurDirection", 0f, GLOW_BLUR_RADIUS / sh);
+            if (blurShader.hasUniform("u_deltaTime")) {
+                blurShader.setUniformf("u_deltaTime", deltaTime);
+            }
             if (!lastPass) {
                 glowFboA.begin();
                 Gdx.gl.glClearColor(0f, 0f, 0f, 0f);
@@ -185,7 +186,7 @@ public class GlowRenderer {
         fboARegion.flip(false, true);
         fboBRegion = new TextureRegion(glowFboB.getColorBufferTexture());
         fboBRegion.flip(false, true);
-        fboWidth  = w;
+        fboWidth = w;
         fboHeight = h;
         glowProj.setToOrtho2D(0, 0, w, h);
         glowShapes.setProjectionMatrix(glowProj);
