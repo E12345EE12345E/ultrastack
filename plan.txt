@@ -1,5 +1,8 @@
 pause menu
 
+piece bumping (somehow partial impl already)
+pieces spawning inside of teammate
+
 all clear
 
 bug with pieces too early
