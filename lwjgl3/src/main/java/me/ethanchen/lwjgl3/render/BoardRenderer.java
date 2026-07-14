@@ -14,6 +14,9 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.Tile;
+import me.ethanchen.lwjgl3.render.shader.GlowRenderer;
+
+
 
 /**
  * Renders a {@link Board}: locked tiles, active pieces, grid outline, and optional per-piece glow.
@@ -44,6 +47,11 @@ public class BoardRenderer {
     private static final Color BLOCKED_WHITE = new Color(1f, 1f, 1f, 1f);
 
     private final GlowRenderer glowRenderer;
+
+    public GlowRenderer getGlowRenderer() {
+        return glowRenderer;
+    }
+
 
     public static BoardRenderer getInstance() {
         if (instance == null) instance = new BoardRenderer();
@@ -148,6 +156,12 @@ public class BoardRenderer {
                          float[] glowStrengths) {
         glowRenderer.draw(board, originX, originY, tileSize, glowStrengths);
     }
+
+    public void drawGlow(Board board, float originX, float originY, float tileSize,
+                         float[] glowStrengths, float deltaTime) {
+        glowRenderer.draw(board, originX, originY, tileSize, glowStrengths, deltaTime);
+    }
+
 
     /**
      * Draws the grid outline for every allowed cell.
