@@ -1,7 +1,17 @@
 pause menu
 
+all clear
+
+bug with pieces too early
+music too quiet
+
+3mino
+
+bg options (load own image?)
+
 sfx tspin turn
-sfx clear tetris clear spin
+sfx clear tetris
+sfx clear spin
 sfx die
 
 other gamemodes
