@@ -134,6 +134,9 @@ public class MovementBlurRenderer implements ShaderRenderer {
         }
         shapes.end();
         fboA.end();
+        if (ChromaticAberrationRenderer.ACTIVE_FBO_HANDLE != 0) {
+            Gdx.gl20.glBindFramebuffer(GL20.GL_FRAMEBUFFER, ChromaticAberrationRenderer.ACTIVE_FBO_HANDLE);
+        }
 
         sprites.setProjectionMatrix(proj);
         sprites.setShader(movementBlurShader);

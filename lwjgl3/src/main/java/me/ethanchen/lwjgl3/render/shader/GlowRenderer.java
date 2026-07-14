@@ -163,6 +163,8 @@ public class GlowRenderer implements ShaderRenderer {
                 glowFboA.begin();
                 Gdx.gl.glClearColor(0f, 0f, 0f, 0f);
                 Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            } else if (ChromaticAberrationRenderer.ACTIVE_FBO_HANDLE != 0) {
+                Gdx.gl20.glBindFramebuffer(GL20.GL_FRAMEBUFFER, ChromaticAberrationRenderer.ACTIVE_FBO_HANDLE);
             }
             glowSprites.begin();
             glowSprites.setColor(Color.WHITE);
