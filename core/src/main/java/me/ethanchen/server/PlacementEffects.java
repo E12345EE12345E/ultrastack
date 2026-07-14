@@ -116,6 +116,15 @@ class PlacementEffects {
         pendingHoldSounds.add(hsb);
     }
 
+    /** Queues a {@link BumpSoundBroadcast}. */
+    void addBumpSound(byte playerId, byte otherPlayerId, boolean blocked) {
+        BumpSoundBroadcast bsb = new BumpSoundBroadcast();
+        bsb.playerId = playerId;
+        bsb.otherPlayerId = otherPlayerId;
+        bsb.blocked = blocked;
+        pendingBumpSounds.add(bsb);
+    }
+
     // -------------------------------------------------------------------------
     // Draining (called by GameRoom.sendNetUpdates)
     // -------------------------------------------------------------------------

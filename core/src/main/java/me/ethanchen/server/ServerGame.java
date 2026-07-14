@@ -41,6 +41,8 @@ public class ServerGame {
     private int[] highestMoveId;
     private int[] piecesPlaced;
     private long[] hardDropBlockedUntilMs;
+    private int[] bumpCounts;
+    private int[] blockedCounts;
 
     private final PlacementEffects effects = new PlacementEffects();
     private final ScoreModeScorer scorer = new ScoreModeScorer();
@@ -74,6 +76,8 @@ public class ServerGame {
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
         this.hardDropBlockedUntilMs = new long[players];
+        this.bumpCounts = new int[players];
+        this.blockedCounts = new int[players];
         Arrays.fill(this.highestMoveId, -1);
 
         scorer.reset(players, game);
@@ -116,6 +120,8 @@ public class ServerGame {
                     LineClearResult result = board.hardDrop(playerId);
                     if (result != null && result.placed) {
                         processPlacement(result);
+                    } else if (result != null && result.blockedByPlayerId >= 0) {
+                        checkBlocked(board, playerId, result.blockedByPlayerId);
                     }
                 }
             } else if (move == MoveType.HOLD) {
@@ -132,7 +138,17 @@ public class ServerGame {
                     }
                 }
             } else {
-                board.applyMove(playerId, move);
+                boolean moved = board.applyMove(playerId, move);
+                if (!moved && (move == MoveType.LEFT || move == MoveType.RIGHT)) {
+                    Piece moverPiece = board.getActivePiece(playerId);
+                    if (!moverPiece.isBlockedFromSpawning) {
+                        int xdiff = (move == MoveType.LEFT) ? -1 : 1;
+                        int blockerId = board.getLateralBlocker(playerId, xdiff);
+                        if (blockerId >= 0) {
+                            checkBump(board, playerId, blockerId);
+                        }
+                    }
+                }
                 LineClearResult lockResult = board.tryMovementLock(playerId);
                 if (lockResult != null && lockResult.placed) {
                     processPlacement(lockResult);
@@ -158,6 +174,41 @@ public class ServerGame {
         }
         effects.queuePlacementSound(result, priorCombo);
         effects.queueResultParticles(result, game.getBoards().get(0).bw());
+    }
+
+    // -------------------------------------------------------------------------
+    // Bump / blocked events
+    // -------------------------------------------------------------------------
+
+    /** Below this recent-movement threshold, a player counts as having moved "recently". */
+    private static final float BUMP_TIMER_THRESHOLD_MS = 400f;
+
+    private void checkBump(Board board, int playerA, int playerB) {
+        if (board.getActivePiece(playerA).movementTimer < BUMP_TIMER_THRESHOLD_MS
+                && board.getActivePiece(playerB).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
+            bumpedEvent(playerA, playerB);
+        }
+    }
+
+    private void checkBlocked(Board board, int droppedPlayerId, int blockingPlayerId) {
+        if (board.getActivePiece(blockingPlayerId).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
+            blockedEvent(droppedPlayerId, blockingPlayerId);
+        }
+    }
+
+    /** Stub: fired when two players mutually block each other's lateral movement while
+     *  both moved/rotated/soft-dropped recently. More functionality to come later. */
+    private void bumpedEvent(int playerA, int playerB) {
+        if (playerA >= 0 && playerA < bumpCounts.length) bumpCounts[playerA]++;
+        if (playerB >= 0 && playerB < bumpCounts.length) bumpCounts[playerB]++;
+        effects.addBumpSound((byte) playerA, (byte) playerB, false);
+    }
+
+    /** Stub: fired when a hard-dropped piece rests on another player's recently-moved
+     *  piece without locking. More functionality to come later. */
+    private void blockedEvent(int droppedPlayerId, int blockingPlayerId) {
+        if (droppedPlayerId >= 0 && droppedPlayerId < blockedCounts.length) blockedCounts[droppedPlayerId]++;
+        effects.addBumpSound((byte) droppedPlayerId, (byte) blockingPlayerId, true);
     }
 
     // -------------------------------------------------------------------------
@@ -200,8 +251,8 @@ public class ServerGame {
         }
         if (game.isStarted() && !endCtrl.isGameEnded()) {
             blocked.update(deltaTime / 1000f, players, game,
-                    () -> endCtrl.beginGameEndLoss(gameMode, scorer));
-            endCtrl.checkWinCondition(gameMode, game, scorer);
+                    () -> endCtrl.beginGameEndLoss(gameMode, scorer, bumpCounts, blockedCounts));
+            endCtrl.checkWinCondition(gameMode, game, scorer, bumpCounts, blockedCounts);
         }
     }
 
@@ -288,6 +339,6 @@ public class ServerGame {
      * Called when a player disconnects mid-game.
      */
     public synchronized void handleDisconnectedPlayer(int id) {
-        endCtrl.beginGameEndDisconnect(gameMode, scorer);
+        endCtrl.beginGameEndDisconnect(gameMode, scorer, bumpCounts, blockedCounts);
     }
 }

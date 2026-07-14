@@ -53,11 +53,11 @@ class GameEndController {
      * {@link #beginGameEnd} if met. Must only be called when
      * {@code game.isStarted() && !isGameEnded()}.
      */
-    void checkWinCondition(GameMode mode, GameHandler game, ScoreModeScorer scorer) {
+    void checkWinCondition(GameMode mode, GameHandler game, ScoreModeScorer scorer, int[] bumpCounts, int[] blockedCounts) {
         if (mode == GameMode.NONE) return;
         GameModeRules rules = mode.rules();
         if (rules.isWinConditionMet(game, gameEndTargetMs)) {
-            beginGameEnd(true, false, mode, scorer);
+            beginGameEnd(true, false, mode, scorer, bumpCounts, blockedCounts);
         }
     }
 
@@ -66,16 +66,17 @@ class GameEndController {
     // -------------------------------------------------------------------------
 
     /** Called by {@link BlockedSpawnController} when the explode countdown expires. */
-    void beginGameEndLoss(GameMode mode, ScoreModeScorer scorer) {
-        beginGameEnd(false, false, mode, scorer);
+    void beginGameEndLoss(GameMode mode, ScoreModeScorer scorer, int[] bumpCounts, int[] blockedCounts) {
+        beginGameEnd(false, false, mode, scorer, bumpCounts, blockedCounts);
     }
 
     /** Called when a player disconnects mid-game. */
-    void beginGameEndDisconnect(GameMode mode, ScoreModeScorer scorer) {
-        beginGameEnd(false, true, mode, scorer);
+    void beginGameEndDisconnect(GameMode mode, ScoreModeScorer scorer, int[] bumpCounts, int[] blockedCounts) {
+        beginGameEnd(false, true, mode, scorer, bumpCounts, blockedCounts);
     }
 
-    private void beginGameEnd(boolean win, boolean disconnected, GameMode mode, ScoreModeScorer scorer) {
+    private void beginGameEnd(boolean win, boolean disconnected, GameMode mode, ScoreModeScorer scorer,
+                               int[] bumpCounts, int[] blockedCounts) {
         if (gameEnded) return;
         gameEnded = true;
         pendingWin = win;
@@ -89,12 +90,20 @@ class GameEndController {
             frozenScoreEnd = new ScoreModeEndData();
             frozenScoreEnd.finalScore = scorer != null ? scorer.getTotalScore() : 0;
             frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
+            frozenScoreEnd.bumpCounts = copyOf(bumpCounts);
+            frozenScoreEnd.blockedCounts = copyOf(blockedCounts);
         } else if (mode == GameMode.MULTIPLAYER_PUZZLE) {
             frozenPuzzleElapsedMs = System.currentTimeMillis() - gameStartMs;
             frozenPuzzleEnd = new PuzzleModeEndData();
             frozenPuzzleEnd.timeMs = frozenPuzzleElapsedMs;
             frozenPuzzleEnd.score = (int)(Integer.MAX_VALUE - Math.min(frozenPuzzleElapsedMs, Integer.MAX_VALUE));
+            frozenPuzzleEnd.bumpCounts = copyOf(bumpCounts);
+            frozenPuzzleEnd.blockedCounts = copyOf(blockedCounts);
         }
+    }
+
+    private static int[] copyOf(int[] arr) {
+        return arr != null ? java.util.Arrays.copyOf(arr, arr.length) : null;
     }
 
     /**

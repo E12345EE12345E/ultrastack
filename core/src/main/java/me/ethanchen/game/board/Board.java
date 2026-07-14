@@ -130,10 +130,20 @@ public class Board {
         return BoardCollision.canMovePiece(this, id, xdiff, ydiff);
     }
 
+    /**
+     * Returns the id of another player whose active piece is the sole reason piece {@code id}
+     * cannot move laterally by {@code xdiff} columns, or -1 if the block involves a wall/solid
+     * tile or more than one other player. See {@link BoardCollision#getLateralBlocker}.
+     */
+    public int getLateralBlocker(int id, int xdiff) {
+        return BoardCollision.getLateralBlocker(this, id, xdiff);
+    }
+
     public boolean moveLeft(int id) {
         if (canMovePiece(id, -1, 0)) {
             Piece p = activePieces.get(id);
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.location.add(-1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -145,6 +155,7 @@ public class Board {
         if (canMovePiece(id, 1, 0)) {
             Piece p = activePieces.get(id);
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.location.add(1, 0);
             p.lastMoveWasRotation = false;
             return true;
@@ -169,6 +180,7 @@ public class Board {
         p.rotateCW();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -176,6 +188,7 @@ public class Board {
         Vector2[] kicks = BoardCollision.kickTableFor(p.type);
         if (kicks != null && BoardCollision.tryKicks(this, id, fromRotation * 2, kicks)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -190,6 +203,7 @@ public class Board {
         p.rotateCCW();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -198,6 +212,7 @@ public class Board {
         int row = (fromRotation == 0) ? 7 : fromRotation * 2 - 1;
         if (kicks != null && BoardCollision.tryKicks(this, id, row, kicks)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -235,6 +250,7 @@ public class Board {
         p.rotate180();
         if (canMovePiece(id, 0, 0)) {
             if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+            p.movementTimer = 0f;
             p.rotateTexCW(); p.rotateTexCW();
             p.lastMoveWasRotation = true;
             return true;
@@ -244,6 +260,7 @@ public class Board {
             int stride = (p.type == Piece.I) ? 1 : 5;
             if (BoardCollision.tryKicks180(this, id, fromRotation, kicks180, stride)) {
                 if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
+                p.movementTimer = 0f;
                 p.rotateTexCW(); p.rotateTexCW();
                 p.lastMoveWasRotation = true;
                 return true;
@@ -261,8 +278,11 @@ public class Board {
         switch (t) {
             case LEFT: return moveLeft(pieceId);
             case RIGHT: return moveRight(pieceId);
-            case SOFT_DROP:
-                return moveDown(pieceId);
+            case SOFT_DROP: {
+                boolean moved = moveDown(pieceId);
+                if (moved) activePieces.get(pieceId).movementTimer = 0f;
+                return moved;
+            }
             case ROTATE_CW: return rotateCW(pieceId);
             case ROTATE_CCW: return rotateCCW(pieceId);
             case ROTATE_180: return rotate180(pieceId);
@@ -419,6 +439,16 @@ public class Board {
                 && BoardCollision.hasSolidSupportNow(this, id))
             return lockDrop(id);
         return null;
+    }
+
+    /**
+     * Advances movement timers for all active pieces by {@code deltaMs} milliseconds.
+     * The timer counts up each tick; it is reset to 0 on manual move, rotate, or soft-drop.
+     */
+    public void updateMovementTimers(int deltaMs) {
+        for (int i = 0; i < activePieces.size(); i++) {
+            activePieces.get(i).movementTimer += deltaMs;
+        }
     }
 
     /**

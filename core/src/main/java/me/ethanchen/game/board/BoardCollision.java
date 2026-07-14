@@ -103,6 +103,45 @@ final class BoardCollision {
     }
 
     // -------------------------------------------------------------------------
+    // Lateral-blocker detection (bump events)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns the id of the single other player whose active piece is the sole reason piece
+     * {@code id} cannot move laterally by {@code xdiff} columns.  Returns -1 if the move is
+     * blocked by a wall, the board floor/ceiling, any locked tile, a disallowed cell, or if
+     * more than one other player contributes to the blockage.
+     */
+    static int getLateralBlocker(Board b, int id, int xdiff) {
+        if (id < 0 || id >= b.activePieces.size()) return -1;
+        Piece p = b.activePieces.get(id);
+        int blockerId = -1;
+        for (int i = 0; i < p.tiles.length; i++) {
+            float lx = p.location.x + p.tiles[i].x + xdiff;
+            float ly = p.location.y + p.tiles[i].y;
+            // Any wall/floor/ceiling/locked-tile involvement means it is NOT a pure player bump
+            if (lx < 0 || lx >= b.width || ly < 0 || ly >= b.height) return -1;
+            int ix = (int) lx, iy = (int) ly;
+            if (!b.allowedTiles[iy][ix]) return -1;
+            if (b.board[iy][ix] != null && b.board[iy][ix].get() != 0) return -1;
+            for (int j = 0; j < b.activePieces.size(); j++) {
+                if (j == id) continue;
+                Piece other = b.activePieces.get(j);
+                for (Vector2 t : other.tiles) {
+                    if (lx == t.x + other.location.x && ly == t.y + other.location.y) {
+                        if (blockerId == -1) {
+                            blockerId = j;
+                        } else if (blockerId != j) {
+                            return -1; // two different players involved
+                        }
+                    }
+                }
+            }
+        }
+        return blockerId;
+    }
+
+    // -------------------------------------------------------------------------
     // Resting-blocker detection
     // -------------------------------------------------------------------------
 

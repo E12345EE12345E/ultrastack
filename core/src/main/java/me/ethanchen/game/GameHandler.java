@@ -55,6 +55,7 @@ public class GameHandler {
         if (mode != GameMode.NONE) {
             doGravity(deltaTime);
             doLockTimers(deltaTime);
+            doMovementTimers(deltaTime);
         }
     }
 
@@ -77,6 +78,12 @@ public class GameHandler {
         if (!started) return;
         for (Board b : boards)
             pendingLockResults.addAll(b.updateLockTimers(deltaTime));
+    }
+
+    private void doMovementTimers(int deltaTime) {
+        if (!started) return;
+        for (Board b : boards)
+            b.updateMovementTimers(deltaTime);
     }
 
     /**
