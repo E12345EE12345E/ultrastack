@@ -16,8 +16,12 @@ public class AudioManager {
     // -------------------------------------------------------------------------
     private static final float MOVE_BASE        = 0.5f;
     private static final float ROTATE_BASE      = 0.5f;
+    private static final float SPIN_TURN_BASE   = 0.5f;
     private static final float PLACE_SELF_BASE  = 1.0f;
     private static final float PLACE_OTHER_BASE = 0.5f;
+    private static final float CLEAR_TETRIS_BASE = 1.0f;
+    private static final float SPIN_CLEAR_BASE  = 1.0f;
+    private static final float DIE_BASE         = 1.0f;
     private static final float HOLD_BASE        = 1.0f;
     private static final float BUMP_SELF_BASE   = 1.0f;
     private static final float BUMP_OTHER_BASE  = 0.5f;
@@ -28,8 +32,12 @@ public class AudioManager {
     // -------------------------------------------------------------------------
     private Sound moveSound;
     private Sound rotateSound;
+    private Sound spinTurnSound;
     private Sound placeSound;
     private Sound[] clearSound;
+    private Sound clearTetrisSound;
+    private Sound spinClearSound;
+    private Sound dieSound;
     private Sound[] holdSound;
     private Sound bumpSound;
 
@@ -47,6 +55,7 @@ public class AudioManager {
     private AudioManager() {
         moveSound   = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_move.wav"));
         rotateSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_rotate_updated.wav"));
+        spinTurnSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_spinturn.wav"));
         placeSound  = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_place.wav"));
         clearSound  = new Sound[]{
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_combo1.wav")),
@@ -61,6 +70,9 @@ public class AudioManager {
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_combo10.wav")),
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_comboplus.wav")),
         };
+        clearTetrisSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_cleartetris.wav"));
+        spinClearSound   = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_spinclear.wav"));
+        dieSound         = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_die.wav"));
         holdSound   = new Sound[]{
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_extra.wav")),
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_hold.wav")),
@@ -130,6 +142,10 @@ public class AudioManager {
         rotateSound.play(sfxVol(ROTATE_BASE));
     }
 
+    public void playSpinTurnSound() {
+        spinTurnSound.play(sfxVol(SPIN_TURN_BASE));
+    }
+
     public void playPlaceSound(boolean self) {
         placeSound.play(sfxVol(self ? PLACE_SELF_BASE : PLACE_OTHER_BASE));
     }
@@ -139,6 +155,18 @@ public class AudioManager {
         if (combo > clearSound.length - 1) combo = clearSound.length - 1;
         float base = Math.min(combo * 0.25f + 0.25f, 1f);
         clearSound[combo].play(sfxVol(base));
+    }
+
+    public void playClearTetrisSound() {
+        clearTetrisSound.play(sfxVol(CLEAR_TETRIS_BASE));
+    }
+
+    public void playSpinClearSound() {
+        spinClearSound.play(sfxVol(SPIN_CLEAR_BASE));
+    }
+
+    public void playDieSound() {
+        dieSound.play(sfxVol(DIE_BASE));
     }
 
     public void playHoldSound(boolean self) {
@@ -193,8 +221,12 @@ public class AudioManager {
         stopMusic();
         moveSound.dispose();
         rotateSound.dispose();
+        spinTurnSound.dispose();
         placeSound.dispose();
         for (Sound s : clearSound) s.dispose();
+        clearTetrisSound.dispose();
+        spinClearSound.dispose();
+        dieSound.dispose();
         for (Sound s : holdSound) s.dispose();
         bumpSound.dispose();
         for (MusicContainer c : registeredMusic) {

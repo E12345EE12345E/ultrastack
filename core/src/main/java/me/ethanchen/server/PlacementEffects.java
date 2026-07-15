@@ -54,6 +54,7 @@ class PlacementEffects {
         }
 
         psb.combo = (lines > 0) ? (byte) priorCombo : (byte) -1;
+        psb.lines = (byte) lines;
         pendingPlacementSounds.add(psb);
     }
 

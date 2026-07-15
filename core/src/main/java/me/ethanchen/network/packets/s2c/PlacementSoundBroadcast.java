@@ -16,6 +16,8 @@ public class PlacementSoundBroadcast extends NetworkPacket {
     public byte playerId;
     /** Clear type; one of the {@code SPIN_*} constants above. */
     public byte spinType;
+    /** Number of lines cleared by this placement (0 if none). */
+    public byte lines;
     /**
      * Combo count at time of placement:
      *   -1 = no lines were cleared

@@ -377,33 +377,8 @@ public class Board {
         if (playerHoldUsed != null && id < playerHoldUsed.length) playerHoldUsed[id] = false;
 
         // Spin detection: only applies when the piece was spun directly into place
-        SpinType spinType = SpinType.NONE;
-        if (dropDistance == 0 && p.lastMoveWasRotation) {
-            int px = (int) Math.floor(p.location.x);
-            int py = (int) Math.floor(p.location.y);
-            if (p.type == Piece.T) {
-                // Corner offsets are defined at rotation 0, then rotated by p.rotation.
-                // Back corners (behind the T stem): (-1,-1) and (1,-1)
-                // Front corners (in front of the T stem): (-1,1) and (1,1)
-                int[] b1 = rotateOffset(-1, -1, p.rotation), b2 = rotateOffset(1, -1, p.rotation);
-                int[] f1 = rotateOffset(-1,  1, p.rotation), f2 = rotateOffset(1,  1, p.rotation);
-                int back  = (BoardCollision.isSolid(this, px + b1[0], py + b1[1]) ? 1 : 0) + (BoardCollision.isSolid(this, px + b2[0], py + b2[1]) ? 1 : 0);
-                int front = (BoardCollision.isSolid(this, px + f1[0], py + f1[1]) ? 1 : 0) + (BoardCollision.isSolid(this, px + f2[0], py + f2[1]) ? 1 : 0);
-                if (front == 2 && back >= 1) {
-                    spinType = SpinType.T_SPIN;
-                } else if (back == 2 && front == 1) {
-                    spinType = SpinType.T_SPIN_MINI;
-                } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
-                        && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
-                    spinType = SpinType.T_SPIN_MINI;
-                }
-            } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
-                    && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
-                spinType = (p.type == Piece.I3 || p.type == Piece.L3)
-                        ? SpinType.SMALL_SPIN : SpinType.ALL_SPIN;
-            }
-        }
-        result.spinType = spinType;
+        result.spinType = (dropDistance == 0 && p.lastMoveWasRotation)
+                ? detectSpinType(id) : SpinType.NONE;
 
         for (int i = 0; i < p.tiles.length; i++) {
             int mx = (int) Math.floor(p.location.x + p.tiles[i].x);
@@ -426,6 +401,42 @@ public class Board {
         BoardLineClear.clearAndSettle(this, result);
 
         return result;
+    }
+
+    /**
+     * Classifies whether the active piece at {@code id} would count as a spin if locked
+     * at its current position (T-spin corner rules, or all-spin / small-spin immobility).
+     * Does not check {@code lastMoveWasRotation} or drop distance — callers must gate those.
+     */
+    public SpinType detectSpinType(int id) {
+        if (id < 0 || id >= activePieces.size()) return SpinType.NONE;
+        Piece p = activePieces.get(id);
+        int px = (int) Math.floor(p.location.x);
+        int py = (int) Math.floor(p.location.y);
+        if (p.type == Piece.T) {
+            // Corner offsets are defined at rotation 0, then rotated by p.rotation.
+            // Back corners (behind the T stem): (-1,-1) and (1,-1)
+            // Front corners (in front of the T stem): (-1,1) and (1,1)
+            int[] b1 = rotateOffset(-1, -1, p.rotation), b2 = rotateOffset(1, -1, p.rotation);
+            int[] f1 = rotateOffset(-1,  1, p.rotation), f2 = rotateOffset(1,  1, p.rotation);
+            int back  = (BoardCollision.isSolid(this, px + b1[0], py + b1[1]) ? 1 : 0)
+                    + (BoardCollision.isSolid(this, px + b2[0], py + b2[1]) ? 1 : 0);
+            int front = (BoardCollision.isSolid(this, px + f1[0], py + f1[1]) ? 1 : 0)
+                    + (BoardCollision.isSolid(this, px + f2[0], py + f2[1]) ? 1 : 0);
+            if (front == 2 && back >= 1) {
+                return SpinType.T_SPIN;
+            } else if (back == 2 && front == 1) {
+                return SpinType.T_SPIN_MINI;
+            } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
+                    && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
+                return SpinType.T_SPIN_MINI;
+            }
+        } else if (!canMovePiece(id, -1, 0) && !canMovePiece(id, 1, 0)
+                && !canMovePiece(id, 0, 1) && !canMovePiece(id, 0, -1)) {
+            return (p.type == Piece.I3 || p.type == Piece.L3)
+                    ? SpinType.SMALL_SPIN : SpinType.ALL_SPIN;
+        }
+        return SpinType.NONE;
     }
 
     /**

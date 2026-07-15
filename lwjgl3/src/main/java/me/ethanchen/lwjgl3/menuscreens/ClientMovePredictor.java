@@ -6,6 +6,7 @@ import java.util.Iterator;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.MoveType;
+import me.ethanchen.game.board.SpinType;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
@@ -70,7 +71,11 @@ class ClientMovePredictor {
                     AudioManager.getInstance().playMoveSound();
                 } else if (type == MoveType.ROTATE_CW || type == MoveType.ROTATE_CCW
                         || type == MoveType.ROTATE_180) {
-                    AudioManager.getInstance().playRotateSound();
+                    if (board.detectSpinType(playerId) != SpinType.NONE) {
+                        AudioManager.getInstance().playSpinTurnSound();
+                    } else {
+                        AudioManager.getInstance().playRotateSound();
+                    }
                 }
             }
         }

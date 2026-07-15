@@ -392,7 +392,11 @@ public class GameScreen extends MenuScreen {
         predictor.ackMovesUpTo(p.ackMoveId, game.getBoards().get(0));
 
         holdAvailable = p.holdAvailable;
+        float prevExplodeProgress = latestExplodeProgress;
         latestExplodeProgress = p.explodeProgress;
+        if (prevExplodeProgress < 0f && latestExplodeProgress >= 0f) {
+            AudioManager.getInstance().playDieSound();
+        }
         ownPieceHoldGlow = p.ownPieceHoldGlow;
         if (p.scoreMode  != null) latestScoreMode  = p.scoreMode;
         if (p.puzzleMode != null) latestPuzzleMode = p.puzzleMode;
@@ -447,7 +451,14 @@ public class GameScreen extends MenuScreen {
 
     private void handlePlacementSound(PlacementSoundBroadcast p) {
         AudioManager.getInstance().playPlaceSound(p.playerId == playerId);
-        if (p.combo >= 0) AudioManager.getInstance().playClearSound(p.combo);
+        if (p.combo >= 0) {
+            AudioManager.getInstance().playClearSound(p.combo);
+            if (p.lines == 4) AudioManager.getInstance().playClearTetrisSound();
+            if (p.spinType == PlacementSoundBroadcast.SPIN_TSPIN
+                    || p.spinType == PlacementSoundBroadcast.SPIN_ALL_SPIN) {
+                AudioManager.getInstance().playSpinClearSound();
+            }
+        }
     }
 
     private void handleHoldSound(HoldSoundBroadcast p) {
