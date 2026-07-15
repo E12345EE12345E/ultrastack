@@ -4,10 +4,20 @@ import me.ethanchen.game.GameMode;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
+import me.ethanchen.network.ClientPacketWrapper;
+import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.s2c.EndGameBroadcast;
+import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
+import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
 public class EndGameScreen extends MenuScreen {
-    private final boolean isHost;
+    private boolean isHost;
+
+    private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
+            // A host who returns to the lobby first can start a new game while other players
+            // are still viewing results, so pull them straight into the GameScreen too.
+            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, isHost)))
+            .on(RoomClosedBroadcast.class, w -> handleRoomClosed());
 
     public EndGameScreen(ClientApp app, EndGameBroadcast pkt, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -63,6 +73,21 @@ public class EndGameScreen extends MenuScreen {
 
     @Override
     public void update() {
+    }
+
+    @Override
+    public void passClientPacket(ClientPacketWrapper w) {
+        dispatcher.dispatch(w);
+    }
+
+    private void handleRoomClosed() {
+        // Host left the lobby — return to the room browser (stay connected online).
+        if (app.isLanMode()) {
+            app.disconnect();
+            app.switchMenu(new LanMenu(app));
+        } else {
+            app.switchMenu(new RoomBrowserMenu(app));
+        }
     }
 
 }

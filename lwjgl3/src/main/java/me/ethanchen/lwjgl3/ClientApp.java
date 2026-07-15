@@ -124,7 +124,7 @@ public class ClientApp extends ApplicationAdapter {
         }
         font.setUseIntegerPositions(false);
 
-        menuScreen = new ShaderTestScreen(this);
+        menuScreen = new MainMenu(this);
     }
 
 

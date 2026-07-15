@@ -9,9 +9,4 @@ music too quiet
 
 bg options (load own image?)
 
-sfx tspin turn
-sfx clear tetris
-sfx clear spin
-sfx die
-
 other gamemodes
