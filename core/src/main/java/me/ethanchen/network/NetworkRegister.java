@@ -21,7 +21,7 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class NetworkRegister {
     // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
-    public static final byte PROTOCOL_VERSION = 11;
+    public static final byte PROTOCOL_VERSION = 12;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -88,6 +88,7 @@ public class NetworkRegister {
         kryo.register(ParticleSpawner[].class);
         // Room lifecycle
         kryo.register(RoomClosedBroadcast.class);
+        kryo.register(HostChangedBroadcast.class);
         kryo.register(RoomInfo.class);
         kryo.register(RoomInfo[].class);
     }

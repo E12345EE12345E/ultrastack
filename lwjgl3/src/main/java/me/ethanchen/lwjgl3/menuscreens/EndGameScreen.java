@@ -16,12 +16,13 @@ public class EndGameScreen extends MenuScreen {
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             // A host who returns to the lobby first can start a new game while other players
             // are still viewing results, so pull them straight into the GameScreen too.
-            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, isHost)))
+            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, app.isRoomHost())))
             .on(RoomClosedBroadcast.class, w -> handleRoomClosed());
 
     public EndGameScreen(ClientApp app, EndGameBroadcast pkt, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
-        this.isHost = isHost;
+        // Prefer live host flag (may have transferred mid-game via HostChangedBroadcast).
+        this.isHost = app.isRoomHost() || isHost;
 
         String title = pkt.win ? "VICTORY" : "DEFEAT";
         elements.add(new UIText(0.5, 0.85, title, 5));
@@ -63,7 +64,7 @@ public class EndGameScreen extends MenuScreen {
     private void backToRoom() {
         // Still a member of the same room (game end doesn't remove anyone from the room), so
         // just return to its lobby rather than leaving and going back to the room browser/LAN menu.
-        app.switchMenu(new MultiplayerLobby(app, isHost));
+        app.switchMenu(new MultiplayerLobby(app, app.isRoomHost()));
     }
 
     @Override

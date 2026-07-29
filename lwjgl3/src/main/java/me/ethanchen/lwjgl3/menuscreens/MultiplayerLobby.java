@@ -8,6 +8,7 @@ import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
+import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
 import me.ethanchen.network.packets.s2c.LobbyPlayerListBroadcast;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
@@ -22,18 +23,21 @@ public class MultiplayerLobby extends MenuScreen {
     private TextInput playerNameList;
     private ArrayDeque<String> chatLines;
     private boolean isHost;
+    private boolean hostButtonsAdded;
     private final LocalPlayerSidebar sidebar;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(TextMessageBroadcast.class, w -> handleTextMessage((TextMessageBroadcast) w.packet))
-            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, isHost)))
+            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, app.isRoomHost())))
             .on(LobbyPlayerListBroadcast.class, w -> handlePlayerList((LobbyPlayerListBroadcast) w.packet))
-            .on(RoomClosedBroadcast.class, w -> handleRoomClosed());
+            .on(RoomClosedBroadcast.class, w -> handleRoomClosed())
+            .on(HostChangedBroadcast.class, w -> handleHostChanged((HostChangedBroadcast) w.packet));
 
     public MultiplayerLobby(ClientApp app, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
 
         this.isHost = isHost;
+        app.setRoomHost(isHost);
         chatLines = new ArrayDeque<String>();
 
         elements.add(new UIText(0.5, 0.8, "Lobby", 4));
@@ -58,21 +62,36 @@ public class MultiplayerLobby extends MenuScreen {
         chatInput.sanitize = 1;
         elements.add(chatInput);
         if (isHost) {
-            elements.add(new UIButton(0.18, 0.125, 0.28, 0.1, "Settings",
-                    () -> app.switchMenu(new LobbySettingsScreen(app, this))));
-
-            elements.add(new UIButton(0.5, 0.125, 0.3, 0.1, "Start Game", () -> {
-                StartGameRequest p = new StartGameRequest();
-                p.gamemode = app.getLobbySettings().gamemode;
-                app.sendTCP(p);
-            }));
+            addHostButtons();
         }
 
         sidebar = new LocalPlayerSidebar(app, elements, app::sendLocalPlayerCount);
         app.sendLocalPlayerCount();
     }
 
+    private void addHostButtons() {
+        if (hostButtonsAdded) return;
+        hostButtonsAdded = true;
+        elements.add(new UIButton(0.18, 0.125, 0.28, 0.1, "Settings",
+                () -> app.switchMenu(new LobbySettingsScreen(app, this))));
+
+        elements.add(new UIButton(0.5, 0.125, 0.3, 0.1, "Start Game", () -> {
+            StartGameRequest p = new StartGameRequest();
+            p.gamemode = app.getLobbySettings().gamemode;
+            app.sendTCP(p);
+        }));
+    }
+
+    private void handleHostChanged(HostChangedBroadcast p) {
+        isHost = p.youAreHost;
+        app.setRoomHost(p.youAreHost);
+        if (p.youAreHost) {
+            addHostButtons();
+        }
+    }
+
     private void leaveRoom() {
+        app.setRoomHost(false);
         app.sendLeaveRoomRequest();
         if (app.isLanMode()) {
             app.stopLanServer();
@@ -122,6 +141,7 @@ public class MultiplayerLobby extends MenuScreen {
     }
 
     private void handleRoomClosed() {
+        app.setRoomHost(false);
         // Host left the lobby — return to the room browser (stay connected online).
         if (app.isLanMode()) {
             app.disconnect();

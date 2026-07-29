@@ -127,4 +127,40 @@ class GameRoomSeatingTest {
 
         room.stop();
     }
+
+    @Test
+    void hostLeaveTransfersToEarliestRemainingMember() {
+        RecordingSender sender = new RecordingSender();
+        GameRoom room = new GameRoom("t5", sender, 1, "Host", "uh", 1, null, null);
+        room.tryAddMember(2, "Alex", "ua", 1, GameConstants.MAX_PLAYERS);
+        room.tryAddMember(3, "Bob", "ub", 1, GameConstants.MAX_PLAYERS);
+        assertEquals(1, room.getHostConnId());
+
+        room.handleDisconnect(1); // original host leaves
+        assertEquals(2, room.getHostConnId()); // Alex (earliest remaining) is host
+        assertFalse(room.isEmpty());
+        assertEquals(2, room.getPlayerCount());
+
+        boolean sawAlexHost = false;
+        boolean sawBobNotHost = false;
+        for (NetworkPacket p : sender.sent) {
+            if (p instanceof me.ethanchen.network.packets.s2c.HostChangedBroadcast) {
+                me.ethanchen.network.packets.s2c.HostChangedBroadcast h =
+                        (me.ethanchen.network.packets.s2c.HostChangedBroadcast) p;
+                if ("Alex".equals(h.hostName) && h.youAreHost) sawAlexHost = true;
+                if ("Alex".equals(h.hostName) && !h.youAreHost) sawBobNotHost = true;
+            }
+        }
+        assertTrue(sawAlexHost);
+        assertTrue(sawBobNotHost);
+    }
+
+    @Test
+    void hostLeaveAloneEmptiesRoom() {
+        RecordingSender sender = new RecordingSender();
+        GameRoom room = new GameRoom("t6", sender, 1, "Host", "uh", 1, null, null);
+        room.handleDisconnect(1);
+        assertTrue(room.isEmpty());
+        assertEquals(-1, room.getHostConnId());
+    }
 }

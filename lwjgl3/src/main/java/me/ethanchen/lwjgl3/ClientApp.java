@@ -48,6 +48,7 @@ import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.RoomListRequest;
 import me.ethanchen.network.packets.other.ConnectFailedPacket;
 import me.ethanchen.network.packets.other.DisconnectPacket;
+import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
 import me.ethanchen.server.ServerCore;
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
@@ -92,6 +93,8 @@ public class ClientApp extends ApplicationAdapter {
     // Session-only local-player input mode (not persisted)
     private final ControllerRoster controllerRoster = new ControllerRoster();
     private LocalPlayerMode localPlayerMode = LocalPlayerMode.KEYBOARD_OR_CONTROLLER;
+    /** Whether this client is currently the host of its room (session-only). */
+    private boolean roomHost;
 
     @Override
     public void create() {
@@ -152,6 +155,11 @@ public class ClientApp extends ApplicationAdapter {
                     switchMenu(new MainMenu(this));
                 }
                 intentionalDisconnect = false;
+                roomHost = false;
+            }
+
+            if (wrapper.packet instanceof HostChangedBroadcast) {
+                roomHost = ((HostChangedBroadcast) wrapper.packet).youAreHost;
             }
 
             menuScreen.passClientPacket(wrapper);
@@ -506,6 +514,14 @@ public class ClientApp extends ApplicationAdapter {
 
     public int getLocalPlayerCount() {
         return computeLocalPlayerRoster().size();
+    }
+
+    public boolean isRoomHost() {
+        return roomHost;
+    }
+
+    public void setRoomHost(boolean host) {
+        this.roomHost = host;
     }
 
     public SpriteBatch getSprites() {

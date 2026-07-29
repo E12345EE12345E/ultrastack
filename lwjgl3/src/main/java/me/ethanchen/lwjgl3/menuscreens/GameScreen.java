@@ -167,7 +167,7 @@ public class GameScreen extends MenuScreen {
             if (fadeTimerMs >= 1000 && endGamePacket != null) {
                 EndGameBroadcast pkt = endGamePacket;
                 endGamePacket = null;
-                app.switchMenu(new EndGameScreen(app, pkt, isHost));
+                app.switchMenu(new EndGameScreen(app, pkt, app.isRoomHost()));
                 return;
             }
         }

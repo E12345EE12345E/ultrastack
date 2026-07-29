@@ -11,7 +11,6 @@ import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
-import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.*;
 import me.ethanchen.util.TextSanitizer;
 
@@ -99,7 +98,7 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final Map<Integer, int[]> connToSlots = new HashMap<>();
     private final Map<Integer, RoomMember> connToMember = new HashMap<>();
 
-    private final int hostConnId;
+    private int hostConnId;
     private final ResultRecorder resultRecorder;
     private final XpAwarder xpAwarder;
 
@@ -244,34 +243,18 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     /**
      * Called when a client disconnects or sends LeaveRoomRequest.
-     * Removes the member from this room. If the host leaves while no game is in progress,
-     * broadcasts {@link RoomClosedBroadcast} to all remaining members and evicts them.
+     * Removes the member from this room. If the departing member was the host and others
+     * remain, host duties transfer to the earliest-joined remaining member. The room is
+     * marked empty (and torn down by {@link ServerCore}) only when no members remain.
      *
-     * @return list of connection IDs that were evicted as a side-effect (non-empty only when
-     *         the host leaves in lobby state); callers must clear these sessions' currentRoomId.
+     * @return list of connection IDs that were evicted as a side-effect (currently always
+     *         empty; retained for API compatibility with {@link ServerCore#evictFromRoom})
      */
     public synchronized List<Integer> handleDisconnect(int connId) {
         List<Integer> evicted = new ArrayList<>();
         if (!connToMember.containsKey(connId)) return evicted;
 
-        // If the host leaves while no game is in progress, kick everyone else first.
-        if (connId == hostConnId && (serverGame == null || !serverGame.isInProgress())) {
-            RoomClosedBroadcast b = new RoomClosedBroadcast();
-            b.reason = "host_left";
-            for (RoomMember m : members) {
-                if (m.connId != connId) {
-                    sender.sendTCP(m.connId, b);
-                    evicted.add(m.connId);
-                }
-            }
-            members.clear();
-            connToMember.clear();
-            slotToConn.clear();
-            slotToLocalIndex.clear();
-            connToSlots.clear();
-            roomEmpty = true;
-            return evicted;
-        }
+        boolean wasHost = (connId == hostConnId);
 
         RoomMember removed = connToMember.remove(connId);
         members.remove(removed);
@@ -290,8 +273,25 @@ public class GameRoom implements Runnable, GameRoomContext {
 
         if (members.isEmpty()) {
             roomEmpty = true;
+            hostConnId = -1;
+        } else if (wasHost) {
+            // Earliest-joined remaining member becomes host (members is join-ordered).
+            hostConnId = members.get(0).connId;
+            broadcastHostChanged();
         }
+
         return evicted;
+    }
+
+    private void broadcastHostChanged() {
+        RoomMember host = connToMember.get(hostConnId);
+        String hostName = host != null ? host.baseName : "";
+        for (RoomMember m : members) {
+            HostChangedBroadcast b = new HostChangedBroadcast();
+            b.youAreHost = (m.connId == hostConnId);
+            b.hostName = hostName;
+            sender.sendTCP(m.connId, b);
+        }
     }
 
     public boolean isEmpty() {
@@ -692,6 +692,11 @@ public class GameRoom implements Runnable, GameRoomContext {
             }
         }
         return n;
+    }
+
+    /** Package-visible for tests: current host connection id, or -1 if empty. */
+    synchronized int getHostConnId() {
+        return hostConnId;
     }
 
     /** Package-visible for tests: slot assigned to (connId, localIndex), or -1. */
