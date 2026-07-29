@@ -1,6 +1,7 @@
 package me.ethanchen.server;
 
 import com.badlogic.gdx.utils.Json;
+import com.badlogic.gdx.utils.JsonWriter;
 
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
@@ -132,10 +133,12 @@ class GameEndController {
         info.puzzleModeEnd = frozenPuzzleEnd;
         info.score = score;
         info.displayScore = computeFinalDisplayScore(mode, score);
-        if (frozenScoreEnd != null) {
-            info.extraJson = new Json().toJson(frozenScoreEnd);
-        } else if (frozenPuzzleEnd != null) {
-            info.extraJson = new Json().toJson(frozenPuzzleEnd);
+        if (frozenScoreEnd != null || frozenPuzzleEnd != null) {
+            // Must use OutputType.json — default (minimal) is not valid JSON and breaks
+            // SQLite/web consumers that parse extra_json with JSON.parse.
+            Json json = new Json();
+            json.setOutputType(JsonWriter.OutputType.json);
+            info.extraJson = json.toJson(frozenScoreEnd != null ? frozenScoreEnd : frozenPuzzleEnd);
         }
 
         room.sendEndGame(info);
