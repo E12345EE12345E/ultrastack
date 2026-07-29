@@ -8,7 +8,10 @@ public class StartGameBroadcast extends NetworkPacket {
     public GameMode mode;
     public NetBoardFull[] boards;
     public byte totalPlayers;
-    public byte playerId; // id is resent since it might have changed
+    /** Board slots this connection controls, in local-player order. Empty = spectating. */
+    public byte[] localPlayerIds = new byte[0];
     public long startTimeMS;
     public String[] playerNames;
+    /** True when this packet is a late join into an already-running game (spectator). */
+    public boolean spectatorJoin;
 }

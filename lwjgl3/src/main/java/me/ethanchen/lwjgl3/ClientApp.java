@@ -8,6 +8,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.controllers.Controllers;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -18,9 +19,11 @@ import com.badlogic.gdx.utils.Queue;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.esotericsoftware.kryonet.Client;
 
+import me.ethanchen.lwjgl3.input.ControllerRoster;
+import me.ethanchen.lwjgl3.input.LocalPlayerMode;
+import me.ethanchen.lwjgl3.input.LocalPlayerRoster;
 import me.ethanchen.lwjgl3.menuscreens.MainMenu;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
-import me.ethanchen.lwjgl3.menuscreens.ShaderTestScreen;
 
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicContainer;
@@ -39,6 +42,7 @@ import me.ethanchen.network.packets.c2s.CreateRoomRequest;
 import me.ethanchen.network.packets.c2s.JoinRequest;
 import me.ethanchen.network.packets.c2s.JoinRoomRequest;
 import me.ethanchen.network.packets.c2s.LeaveRoomRequest;
+import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.LoginRequest;
 import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.RoomListRequest;
@@ -85,9 +89,15 @@ public class ClientApp extends ApplicationAdapter {
     private GameSettings settings;
     private final LobbySettings lobbySettings = new LobbySettings();
 
+    // Session-only local-player input mode (not persisted)
+    private final ControllerRoster controllerRoster = new ControllerRoster();
+    private LocalPlayerMode localPlayerMode = LocalPlayerMode.KEYBOARD_OR_CONTROLLER;
+
     @Override
     public void create() {
         settings = SettingsManager.load();
+        Controllers.addListener(controllerRoster);
+        controllerRoster.seedFromConnected();
         PieceTints.applyColorOffsets(settings.colors);
         AudioManager.getInstance().setVolumeSettings(settings.volume);
         AudioManager.getInstance().registerMusic(new MusicContainer(
@@ -179,18 +189,46 @@ public class ClientApp extends ApplicationAdapter {
     @Override
     public void dispose() {
         shuttingDown = true;
-        stopLanServer();
-        netLock.lock();
-        try {
-            netClient.close();
-        } finally {
-            netLock.unlock();
+
+        // Screen cleanup must run on quit too (render() only disposes on screen switch).
+        if (menuScreen != null) {
+            menuScreen.dispose();
+            menuScreen = null;
         }
+        if (switchToMenu != null) {
+            switchToMenu.dispose();
+            switchToMenu = null;
+        }
+
+        stopLanServer();
+
+        Controllers.removeListener(controllerRoster);
+
+        // Never block the GL/dispose thread on netLock or KryoNet close — connect can hold
+        // the lock for the full connect timeout (and longer), which froze the window on quit.
+        // Match disconnect(): close on a daemon thread so the window can exit immediately.
+        closeNetClientAsync();
+
         batch.dispose();
         font.dispose();
         shapes.dispose();
         BoardRenderer.disposeInstance();
         AudioManager.getInstance().dispose();
+    }
+
+    /** Close the KryoNet client without blocking the caller (dispose / UI thread). */
+    private void closeNetClientAsync() {
+        if (netClient == null) return;
+        Thread t = new Thread(() -> {
+            netLock.lock();
+            try {
+                netClient.close();
+            } finally {
+                netLock.unlock();
+            }
+        }, "net-dispose-close");
+        t.setDaemon(true);
+        t.start();
     }
 
     // -------------------------------------------------------------------------
@@ -213,16 +251,7 @@ public class ClientApp extends ApplicationAdapter {
     public void disconnect() {
         if (netClient == null || !netClient.isConnected()) return;
         intentionalDisconnect = true;
-        Thread t = new Thread(() -> {
-            netLock.lock();
-            try {
-                netClient.close();
-            } finally {
-                netLock.unlock();
-            }
-        }, "net-disconnect");
-        t.setDaemon(true);
-        t.start();
+        closeNetClientAsync();
     }
 
     public void setConnectDestination(String newIP, int newPort) {
@@ -307,6 +336,7 @@ public class ClientApp extends ApplicationAdapter {
         JoinRequest req = new JoinRequest();
         req.playerName = username;
         req.credential = credential;
+        req.localPlayers = (byte) getLocalPlayerCount();
         return sendTCP(req);
     }
 
@@ -329,17 +359,26 @@ public class ClientApp extends ApplicationAdapter {
     }
 
     public boolean sendCreateRoomRequest() {
-        return sendTCP(new CreateRoomRequest());
+        CreateRoomRequest req = new CreateRoomRequest();
+        req.localPlayers = (byte) getLocalPlayerCount();
+        return sendTCP(req);
     }
 
     public boolean sendJoinRoomRequest(String roomId) {
         JoinRoomRequest req = new JoinRoomRequest();
         req.roomId = roomId;
+        req.localPlayers = (byte) getLocalPlayerCount();
         return sendTCP(req);
     }
 
     public boolean sendLeaveRoomRequest() {
         return sendTCP(new LeaveRoomRequest());
+    }
+
+    public boolean sendLocalPlayerCount() {
+        LocalPlayerCountRequest req = new LocalPlayerCountRequest();
+        req.count = (byte) getLocalPlayerCount();
+        return sendTCP(req);
     }
 
     // -------------------------------------------------------------------------
@@ -401,7 +440,12 @@ public class ClientApp extends ApplicationAdapter {
                     : NetConfig.CONNECT_TIMEOUT_MS;
             netLock.lock();
             try {
+                if (shuttingDown) return;
                 netClient.connect(timeout, resolvedHost, connectPort, connectPort);
+                // If quit started during connect, drop the new connection immediately.
+                if (shuttingDown) {
+                    netClient.close();
+                }
             } finally {
                 netLock.unlock();
             }
@@ -442,6 +486,26 @@ public class ClientApp extends ApplicationAdapter {
 
     public LobbySettings getLobbySettings() {
         return lobbySettings;
+    }
+
+    public ControllerRoster getControllerRoster() {
+        return controllerRoster;
+    }
+
+    public LocalPlayerMode getLocalPlayerMode() {
+        return localPlayerMode;
+    }
+
+    public void setLocalPlayerMode(LocalPlayerMode mode) {
+        this.localPlayerMode = mode != null ? mode : LocalPlayerMode.KEYBOARD_OR_CONTROLLER;
+    }
+
+    public LocalPlayerRoster computeLocalPlayerRoster() {
+        return LocalPlayerRoster.compute(localPlayerMode, controllerRoster);
+    }
+
+    public int getLocalPlayerCount() {
+        return computeLocalPlayerRoster().size();
     }
 
     public SpriteBatch getSprites() {

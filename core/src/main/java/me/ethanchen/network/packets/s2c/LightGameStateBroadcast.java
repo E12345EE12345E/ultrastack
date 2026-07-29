@@ -7,15 +7,17 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 public class LightGameStateBroadcast extends NetworkPacket {
     public NetBoardLight[] boards;
-    public int ackMoveId = -1; // highest move id the server has processed for the receiving player
+    /** Highest move id processed per local player of the receiving connection. */
+    public int[] ackMoveIds = new int[0];
     public int[] piecesPlaced;
-    public boolean holdAvailable; // whether the receiving player can currently use hold
+    /** Whether each local player of the receiving connection can currently use hold. */
+    public boolean[] holdAvailable = new boolean[0];
 
     // Blocked-spawn / explode countdown state
     /** Seconds into the explode countdown [0, 2]; -1 when inactive. */
     public float explodeProgress = -1f;
-    /** True when this player's own blocked piece has reached min interval and may be held. */
-    public boolean ownPieceHoldGlow = false;
+    /** Per local player: true when that player's blocked piece may be held. */
+    public boolean[] ownPieceHoldGlow = new boolean[0];
 
     // Gravity sync (used for client-side prediction accuracy)
     /** Current gravity interval in ms (server-authoritative). */

@@ -93,6 +93,7 @@ public class ServerGame {
         this.players = 0;
         this.highestMoveId = null;
         inProgress = false;
+        room.onGameStopped();
     }
 
     public int getHighestMoveId(int playerId) {
@@ -329,6 +330,14 @@ public class ServerGame {
 
     public GameHandler getGame() {
         return game;
+    }
+
+    public GameMode getGameMode() {
+        return gameMode;
+    }
+
+    public long getGameStartMs() {
+        return endCtrl.getGameStartMs();
     }
 
     public int[] getPiecesPlaced() {

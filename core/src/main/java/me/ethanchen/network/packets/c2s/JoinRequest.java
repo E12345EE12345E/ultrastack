@@ -7,4 +7,6 @@ public class JoinRequest extends NetworkPacket {
     public String playerName;
     public long credential;
     public byte protocolVersion = NetworkRegister.PROTOCOL_VERSION;
+    /** Number of local players this client wants seated (keyboard/controllers). */
+    public byte localPlayers = 1;
 }

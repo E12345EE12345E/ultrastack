@@ -23,8 +23,8 @@ public final class PieceTints {
     private static final float DEFAULT_V = 1f;
 
     // Value used when tinting tilebg.png behind tiles
-    public static final float TILE_BG_V     = 0.75f;
-    public static final float TILE_BG_V_ADD = 0.3f;
+    public static final float TILE_BG_V     = 0.8f;
+    public static final float TILE_BG_V_ADD = 0.2f;
 
     /** Max additive RGB scale for glow at the farthest perceptual hue from {@link #PERCEPTUAL_REF_HUE}. */
     public static final float GLOW_BRIGHTNESS_ADD = 0.3f;

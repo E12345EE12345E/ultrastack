@@ -6,6 +6,7 @@ import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.s2c.RoomJoinResponse;
 import me.ethanchen.network.packets.s2c.RoomListBroadcast;
+import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
 public class RoomBrowserMenu extends MenuScreen {
     private static final int ROOM_LIST_INTERVAL = 120;
@@ -13,10 +14,12 @@ public class RoomBrowserMenu extends MenuScreen {
     private int tickCount;
     private TextInput roomListText;
     private TextInput messageText;
+    private final LocalPlayerSidebar sidebar;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(RoomListBroadcast.class, w -> handleRoomList((RoomListBroadcast) w.packet))
-            .on(RoomJoinResponse.class, w -> handleRoomJoinResponse((RoomJoinResponse) w.packet));
+            .on(RoomJoinResponse.class, w -> handleRoomJoinResponse((RoomJoinResponse) w.packet))
+            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, false)));
 
     public RoomBrowserMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -56,6 +59,8 @@ public class RoomBrowserMenu extends MenuScreen {
             app.disconnect();
             app.switchMenu(new MainMenu(app));
         }));
+
+        sidebar = new LocalPlayerSidebar(app, elements, () -> {});
     }
 
     @Override
@@ -71,6 +76,7 @@ public class RoomBrowserMenu extends MenuScreen {
         if (tickCount % ROOM_LIST_INTERVAL == 0) {
             app.sendRoomListRequest();
         }
+        sidebar.tick();
     }
 
 
@@ -86,20 +92,27 @@ public class RoomBrowserMenu extends MenuScreen {
         }
         StringBuilder sb = new StringBuilder();
         for (me.ethanchen.network.dto.RoomInfo r : p.rooms) {
+            sb.append(r.roomId);
             if (r.inProgress) {
-                sb.append(r.roomId).append(" | [IN PROGRESS]\n");
-            } else {
-                sb.append(r.roomId)
-                  .append(" | host: ").append(r.hostName != null ? r.hostName : "?")
-                  .append(" | players: ").append(r.playerCount)
-                  .append("\n");
+                sb.append(" | [IN PROGRESS]");
             }
+            sb.append(" | host: ").append(r.hostName != null ? r.hostName : "?")
+              .append(" | players: ").append(r.playerCount);
+            if (r.spectatorCount > 0) {
+                sb.append(" | spectators: ").append(r.spectatorCount);
+            }
+            sb.append("\n");
         }
         roomListText.set(sb.toString().trim());
     }
 
     private void handleRoomJoinResponse(RoomJoinResponse res) {
         if (res.success) {
+            if (res.gameInProgress) {
+                // Stay on this screen briefly; StartGameBroadcast (spectator) will pull us in.
+                // Also open the lobby so chat/list work if the game ends before the broadcast.
+                messageText.set(res.spectatorOnly ? "Joining as spectator..." : "Joining...");
+            }
             app.switchMenu(new MultiplayerLobby(app, res.isHost));
         } else {
             messageText.set(res.reason != null && !res.reason.isEmpty() ? res.reason : "Could not join room.");

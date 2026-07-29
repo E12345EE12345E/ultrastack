@@ -22,6 +22,7 @@ public class MultiplayerLobby extends MenuScreen {
     private TextInput playerNameList;
     private ArrayDeque<String> chatLines;
     private boolean isHost;
+    private final LocalPlayerSidebar sidebar;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(TextMessageBroadcast.class, w -> handleTextMessage((TextMessageBroadcast) w.packet))
@@ -44,7 +45,7 @@ public class MultiplayerLobby extends MenuScreen {
         chat = new TextInput();
         playerNameList = new TextInput();
         elements.add(new UIText(0.2, 0.35, chat, 2, UIText.TextAlign.BOTTOM_LEFT));
-        elements.add(new UIText(0.75, 0.6, playerNameList, 1, UIText.TextAlign.TOP_LEFT));
+        elements.add(new UIText(0.68, 0.6, playerNameList, 1, UIText.TextAlign.TOP_LEFT));
         UITextBox chatInput = new UITextBox(0.5, 0.25, 0.6, 0.08, chatoutput, null, null);
         chatInput.runOnEnter = () -> {
             TextMessageRequest t = new TextMessageRequest();
@@ -66,6 +67,9 @@ public class MultiplayerLobby extends MenuScreen {
                 app.sendTCP(p);
             }));
         }
+
+        sidebar = new LocalPlayerSidebar(app, elements, app::sendLocalPlayerCount);
+        app.sendLocalPlayerCount();
     }
 
     private void leaveRoom() {
@@ -86,6 +90,7 @@ public class MultiplayerLobby extends MenuScreen {
 
     @Override
     public void update() {
+        sidebar.tick();
     }
 
     @Override
@@ -102,11 +107,18 @@ public class MultiplayerLobby extends MenuScreen {
     }
 
     private void handlePlayerList(LobbyPlayerListBroadcast p) {
-        String playerListing = "";
-        for (int i=0; i<p.playerNames.length; i++) {
-            playerListing += "p" + (i+1) + ": " + p.playerNames[i] + "\n";
+        StringBuilder sb = new StringBuilder();
+        if (p.playerNames != null) {
+            for (int i = 0; i < p.playerNames.length; i++) {
+                sb.append("p").append(i + 1).append(": ").append(p.playerNames[i]).append("\n");
+            }
         }
-        playerNameList.set(playerListing);
+        if (p.spectatorNames != null) {
+            for (String name : p.spectatorNames) {
+                sb.append("(Spectator) ").append(name).append("\n");
+            }
+        }
+        playerNameList.set(sb.toString());
     }
 
     private void handleRoomClosed() {

@@ -35,14 +35,12 @@ class GameInputHandler {
     private final int playerId;
     private final GameHandler game;
     private final ClientMovePredictor predictor;
-    private final boolean holdAvailableSupplier; // unused here; see note below
 
     GameInputHandler(ClientApp app, int playerId, GameHandler game, ClientMovePredictor predictor) {
         this.app = app;
         this.playerId = playerId;
         this.game = game;
         this.predictor = predictor;
-        this.holdAvailableSupplier = true; // actual value comes from server state passed at call sites
     }
 
     // -------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import me.ethanchen.network.ServerPacketWrapper;
 import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
+import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
@@ -27,11 +28,77 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final PacketSender sender;
     private final ConcurrentLinkedQueue<ServerPacketWrapper> inbound = new ConcurrentLinkedQueue<>();
 
-    // Members: slot index (0..n-1) → connId; connId → slot
+    /** Result of {@link #tryAddMember}. */
+    public static final class AddMemberResult {
+        public final boolean success;
+        public final boolean spectatorOnly;
+        public final boolean gameInProgress;
+        public final int firstActiveSlot; // -1 if none / rejected
+
+        public AddMemberResult(boolean success, boolean spectatorOnly, boolean gameInProgress, int firstActiveSlot) {
+            this.success = success;
+            this.spectatorOnly = spectatorOnly;
+            this.gameInProgress = gameInProgress;
+            this.firstActiveSlot = firstActiveSlot;
+        }
+    }
+
+    private static final class Seat {
+        int slot = -1; // -1 = spectating
+        String displayName;
+        String accountUuid; // empty for extra local players
+
+        Seat(String displayName, String accountUuid) {
+            this.displayName = displayName;
+            this.accountUuid = accountUuid != null ? accountUuid : "";
+        }
+    }
+
+    private static final class RoomMember {
+        final int connId;
+        String baseName;
+        String accountUuid;
+        final List<Seat> seats = new ArrayList<>();
+
+        RoomMember(int connId, String baseName, String accountUuid, int localPlayers) {
+            this.connId = connId;
+            this.baseName = baseName;
+            this.accountUuid = accountUuid != null ? accountUuid : "";
+            rebuildSeats(localPlayers);
+        }
+
+        void rebuildSeats(int localPlayers) {
+            seats.clear();
+            int n = Math.max(0, Math.min(localPlayers, GameConstants.MAX_PLAYERS));
+            for (int i = 0; i < n; i++) {
+                String name = (i == 0) ? baseName : (baseName + " - " + (i + 1));
+                String uuid = (i == 0) ? accountUuid : "";
+                seats.add(new Seat(name, uuid));
+            }
+        }
+
+        boolean hasActiveSeat() {
+            for (Seat s : seats) {
+                if (s.slot >= 0) return true;
+            }
+            return false;
+        }
+
+        int firstActiveSlot() {
+            for (Seat s : seats) {
+                if (s.slot >= 0) return s.slot;
+            }
+            return -1;
+        }
+    }
+
+    private final List<RoomMember> members = new ArrayList<>();
+    // Derived lookups rebuilt by reseat()
     private final List<Integer> slotToConn = new ArrayList<>();
-    private final Map<Integer, Integer> connToSlot = new HashMap<>();
-    private final Map<Integer, String> connToName = new HashMap<>();
-    private final Map<Integer, String> connToUuid = new HashMap<>();
+    private final List<Integer> slotToLocalIndex = new ArrayList<>();
+    private final Map<Integer, int[]> connToSlots = new HashMap<>();
+    private final Map<Integer, RoomMember> connToMember = new HashMap<>();
+
     private final int hostConnId;
     private final ResultRecorder resultRecorder;
     private final XpAwarder xpAwarder;
@@ -45,24 +112,31 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     /** Used for LAN rooms, which never persist results. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
-        this(roomId, sender, hostConnId, hostName, hostName, null, null);
+        this(roomId, sender, hostConnId, hostName, hostName, 1, null, null);
     }
 
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
-                     ResultRecorder resultRecorder, XpAwarder xpAwarder) {
+                    int hostLocalPlayers, ResultRecorder resultRecorder, XpAwarder xpAwarder) {
         this.roomId = roomId;
         this.sender = sender;
         this.hostConnId = hostConnId;
         this.resultRecorder = resultRecorder;
         this.xpAwarder = xpAwarder;
-        addMemberUnconditional(hostConnId, hostName, hostUuid);
+        addMemberUnconditional(hostConnId, hostName, hostUuid, hostLocalPlayers);
+    }
+
+    /** Convenience for account-mode create where localPlayers defaults to 1. */
+    public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
+                    ResultRecorder resultRecorder, XpAwarder xpAwarder) {
+        this(roomId, sender, hostConnId, hostName, hostUuid, 1, resultRecorder, xpAwarder);
     }
 
     private PacketDispatcher<ServerPacketWrapper> buildDispatcher() {
         return new PacketDispatcher<ServerPacketWrapper>()
                 .on(TextMessageRequest.class, this::handleTextMessage)
                 .on(StartGameRequest.class, this::handleStartGameRequest)
-                .on(MoveListRequest.class, this::handleMoveListRequest);
+                .on(MoveListRequest.class, this::handleMoveListRequest)
+                .on(LocalPlayerCountRequest.class, this::handleLocalPlayerCountRequest);
     }
 
     // -------------------------------------------------------------------------
@@ -70,35 +144,97 @@ public class GameRoom implements Runnable, GameRoomContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Attempts to add {@code connId} to this room. Slot assignment, the in-progress check,
-     * and the capacity check all happen atomically under this room's monitor, so concurrent
-     * joins can never race each other into the same slot or overfill the room.
-     *
-     * @return the connection's slot index (a newly assigned slot, or the existing one if this
-     *         connection is already a member), or {@code -1} if the join was rejected because
-     *         a game is already in progress or the room is at {@code maxPlayers} capacity
+     * Attempts to add {@code connId} to this room. Always succeeds unless the connection is
+     * already a member (in which case the existing seating is returned). Overflow local players
+     * become spectators. Mid-game joins are allowed as spectators.
      */
-    public synchronized int tryAddMember(int connId, String name, String uuid, int maxPlayers) {
-        Integer existing = connToSlot.get(connId);
-        if (existing != null) return existing;
-        if (serverGame != null && serverGame.isInProgress()) return -1;
-        if (slotToConn.size() >= maxPlayers) return -1;
-        return addMemberUnconditional(connId, name, uuid);
+    public synchronized AddMemberResult tryAddMember(int connId, String name, String uuid,
+                                                     int requestedLocalPlayers, int maxPlayers) {
+        RoomMember existing = connToMember.get(connId);
+        if (existing != null) {
+            boolean inProgress = serverGame != null && serverGame.isInProgress();
+            return new AddMemberResult(true, !existing.hasActiveSeat(), inProgress, existing.firstActiveSlot());
+        }
+        boolean inProgress = serverGame != null && serverGame.isInProgress();
+        addMemberUnconditional(connId, name, uuid, requestedLocalPlayers);
+        RoomMember m = connToMember.get(connId);
+        if (inProgress) {
+            sendSpectatorStartGame(connId);
+        }
+        return new AddMemberResult(true, !m.hasActiveSeat(), inProgress, m.firstActiveSlot());
+    }
+
+    private int addMemberUnconditional(int connId, String name, String uuid, int localPlayers) {
+        RoomMember m = new RoomMember(connId, name, uuid, localPlayers);
+        members.add(m);
+        connToMember.put(connId, m);
+        reseat();
+        return m.firstActiveSlot();
+    }
+
+    public synchronized void setLocalPlayerCount(int connId, int count) {
+        if (serverGame != null && serverGame.isInProgress()) return; // frozen during game
+        RoomMember m = connToMember.get(connId);
+        if (m == null) return;
+        m.rebuildSeats(count);
+        reseat();
     }
 
     /**
-     * Unconditionally adds a member and broadcasts the updated player list. Only safe to call
-     * either before the room is published to other threads (the constructor), or from within a
-     * method already synchronized on {@code this} (see {@link #tryAddMember}).
+     * Assigns active slots 0..MAX_PLAYERS-1 in join order; remaining seats become spectators.
+     * No-op while a game is in progress (frozen roster).
      */
-    private int addMemberUnconditional(int connId, String name, String uuid) {
-        int slot = slotToConn.size();
-        slotToConn.add(connId);
-        connToSlot.put(connId, slot);
-        connToName.put(connId, name);
-        connToUuid.put(connId, uuid);
+    private void reseat() {
+        if (serverGame != null && serverGame.isInProgress()) {
+            rebuildLookups();
+            broadcastPlayerList();
+            return;
+        }
+        int nextSlot = 0;
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (nextSlot < GameConstants.MAX_PLAYERS) {
+                    s.slot = nextSlot++;
+                } else {
+                    s.slot = -1;
+                }
+            }
+        }
+        rebuildLookups();
         broadcastPlayerList();
-        return slot;
+    }
+
+    private void rebuildLookups() {
+        slotToConn.clear();
+        slotToLocalIndex.clear();
+        connToSlots.clear();
+        // Determine max active slot + 1
+        int maxSlot = -1;
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.slot > maxSlot) maxSlot = s.slot;
+            }
+        }
+        for (int i = 0; i <= maxSlot; i++) {
+            slotToConn.add(null);
+            slotToLocalIndex.add(null);
+        }
+        for (RoomMember m : members) {
+            int[] slots = new int[m.seats.size()];
+            for (int i = 0; i < m.seats.size(); i++) {
+                Seat s = m.seats.get(i);
+                slots[i] = s.slot;
+                if (s.slot >= 0) {
+                    while (slotToConn.size() <= s.slot) {
+                        slotToConn.add(null);
+                        slotToLocalIndex.add(null);
+                    }
+                    slotToConn.set(s.slot, m.connId);
+                    slotToLocalIndex.set(s.slot, i);
+                }
+            }
+            connToSlots.put(m.connId, slots);
+        }
     }
 
     /** Enqueue an inbound packet for processing on the room thread. */
@@ -116,50 +252,50 @@ public class GameRoom implements Runnable, GameRoomContext {
      */
     public synchronized List<Integer> handleDisconnect(int connId) {
         List<Integer> evicted = new ArrayList<>();
-        if (!connToSlot.containsKey(connId)) return evicted;
+        if (!connToMember.containsKey(connId)) return evicted;
 
         // If the host leaves while no game is in progress, kick everyone else first.
         if (connId == hostConnId && (serverGame == null || !serverGame.isInProgress())) {
             RoomClosedBroadcast b = new RoomClosedBroadcast();
             b.reason = "host_left";
-            for (int otherConnId : slotToConn) {
-                if (otherConnId != connId) {
-                    sender.sendTCP(otherConnId, b);
-                    evicted.add(otherConnId);
+            for (RoomMember m : members) {
+                if (m.connId != connId) {
+                    sender.sendTCP(m.connId, b);
+                    evicted.add(m.connId);
                 }
             }
+            members.clear();
+            connToMember.clear();
             slotToConn.clear();
-            connToSlot.clear();
-            connToName.clear();
-            connToUuid.clear();
+            slotToLocalIndex.clear();
+            connToSlots.clear();
             roomEmpty = true;
             return evicted;
         }
 
-        // Normal removal: compact slot list.
-        int slot = connToSlot.remove(connId);
-        slotToConn.remove(slot);
-        connToSlot.clear();
-        for (int i = 0; i < slotToConn.size(); i++) {
-            connToSlot.put(slotToConn.get(i), i);
-        }
-        connToName.remove(connId);
-        connToUuid.remove(connId);
+        RoomMember removed = connToMember.remove(connId);
+        members.remove(removed);
+        boolean hadActive = removed != null && removed.hasActiveSeat();
+        int firstSlot = removed != null ? removed.firstActiveSlot() : -1;
 
         if (serverGame != null && serverGame.isInProgress()) {
-            serverGame.handleDisconnectedPlayer(slot);
+            if (hadActive) {
+                serverGame.handleDisconnectedPlayer(firstSlot);
+            }
+            rebuildLookups();
+            broadcastPlayerList();
+        } else {
+            reseat(); // promotes waiting spectators
         }
 
-        broadcastPlayerList();
-
-        if (slotToConn.isEmpty()) {
+        if (members.isEmpty()) {
             roomEmpty = true;
         }
         return evicted;
     }
 
     public boolean isEmpty() {
-        return roomEmpty || slotToConn.isEmpty();
+        return roomEmpty || members.isEmpty();
     }
 
     // -------------------------------------------------------------------------
@@ -218,21 +354,16 @@ public class GameRoom implements Runnable, GameRoomContext {
         }
     }
 
-    /**
-     * Synchronized because it reads {@code connToName}/{@code connToSlot}, which are mutated
-     * (under the same monitor) by {@link #tryAddMember} and {@link #handleDisconnect} on the
-     * {@code ServerCore} thread while this runs on the room thread.
-     */
     private synchronized void handleInboundPacket(ServerPacketWrapper w) {
         dispatcher.dispatch(w);
     }
 
     private void handleTextMessage(ServerPacketWrapper w) {
         TextMessageRequest req = (TextMessageRequest) w.packet;
-        String name = connToName.get(w.connectionID);
-        if (name == null) return;
+        RoomMember m = connToMember.get(w.connectionID);
+        if (m == null) return;
         TextMessageBroadcast b = new TextMessageBroadcast();
-        b.sender = name;
+        b.sender = m.baseName;
         b.message = TextSanitizer.sanitizeChat(req.message);
         broadcastMembersTCP(b);
     }
@@ -246,69 +377,133 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     private void handleMoveListRequest(ServerPacketWrapper w) {
         MoveListRequest req = (MoveListRequest) w.packet;
-        Integer slot = connToSlot.get(w.connectionID);
-        if (slot == null) return;
+        int[] slots = connToSlots.get(w.connectionID);
+        if (slots == null) return;
+        int localIndex = req.localIndex & 0xFF;
+        if (localIndex < 0 || localIndex >= slots.length) return;
+        int slot = slots[localIndex];
+        if (slot < 0) return;
         if (serverGame != null && serverGame.isInProgress()) {
             serverGame.applyMoves(slot, req.ids, req.types);
         }
     }
 
+    private void handleLocalPlayerCountRequest(ServerPacketWrapper w) {
+        LocalPlayerCountRequest req = (LocalPlayerCountRequest) w.packet;
+        setLocalPlayerCount(w.connectionID, req.count & 0xFF);
+    }
+
     // -------------------------------------------------------------------------
-    // Game start
+    // Game start / spectate sync
     // -------------------------------------------------------------------------
 
     private synchronized void startGame(GameMode gameMode) {
-        int playerCount = slotToConn.size();
+        // Promote any pending reseat before freezing
+        if (serverGame == null || !serverGame.isInProgress()) {
+            // Force a full reseat in case we were frozen somehow
+            int nextSlot = 0;
+            for (RoomMember m : members) {
+                for (Seat s : m.seats) {
+                    if (nextSlot < GameConstants.MAX_PLAYERS) {
+                        s.slot = nextSlot++;
+                    } else {
+                        s.slot = -1;
+                    }
+                }
+            }
+            rebuildLookups();
+        }
+
+        int playerCount = getActiveSeatCount();
         if (playerCount == 0) return;
 
         serverGame = new ServerGame(this);
         serverGame.startGame(gameMode, playerCount, GameConstants.GAME_START_DELAY_MS);
 
         long startTimeMs = System.currentTimeMillis() + GameConstants.GAME_START_DELAY_MS;
+        String[] playerNames = buildActivePlayerNames();
 
-        // Build per-player name array (slot order)
-        String[] playerNames = new String[playerCount];
-        for (int i = 0; i < playerCount; i++) {
-            Integer connId = slotToConn.get(i);
-            playerNames[i] = connId != null ? connToName.getOrDefault(connId, "") : "";
-        }
-
-        // Send per-player StartGameBroadcast
-        for (int i = 0; i < playerCount; i++) {
-            Integer connId = slotToConn.get(i);
-            if (connId == null) continue;
-
-            StartGameBroadcast b = new StartGameBroadcast();
-            b.mode = gameMode;
-            b.boards = new NetBoardFull[serverGame.getGame().getBoards().size()];
-            for (int a = 0; a < b.boards.length; a++) {
-                b.boards[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardFull();
-            }
-            b.totalPlayers = (byte) playerCount;
-            b.playerId = (byte) i;
-            b.startTimeMS = startTimeMs;
-            b.playerNames = playerNames;
-            sender.sendTCP(connId, b);
+        for (RoomMember m : members) {
+            StartGameBroadcast b = buildStartGameBroadcast(gameMode, playerCount, playerNames, startTimeMs, m, false);
+            sender.sendTCP(m.connId, b);
         }
 
         System.out.println("[GameRoom " + roomId + "] Game started: mode=" + gameMode
                 + " players=" + playerCount);
     }
 
+    private void sendSpectatorStartGame(int connId) {
+        if (serverGame == null || !serverGame.isInProgress() || serverGame.getGame() == null) return;
+        RoomMember m = connToMember.get(connId);
+        if (m == null) return;
+        String[] playerNames = buildActivePlayerNames();
+        StartGameBroadcast b = buildStartGameBroadcast(
+                serverGame.getGameMode(),
+                getActiveSeatCount(),
+                playerNames,
+                serverGame.getGameStartMs(),
+                m,
+                true);
+        sender.sendTCP(connId, b);
+    }
+
+    private StartGameBroadcast buildStartGameBroadcast(GameMode mode, int playerCount,
+                                                       String[] playerNames, long startTimeMs,
+                                                       RoomMember m, boolean spectatorJoin) {
+        StartGameBroadcast b = new StartGameBroadcast();
+        b.mode = mode;
+        b.boards = new NetBoardFull[serverGame.getGame().getBoards().size()];
+        for (int a = 0; a < b.boards.length; a++) {
+            b.boards[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardFull();
+        }
+        b.totalPlayers = (byte) playerCount;
+        b.startTimeMS = startTimeMs;
+        b.playerNames = playerNames;
+        b.spectatorJoin = spectatorJoin;
+        // Active slots for this member, in local-player order
+        List<Byte> ids = new ArrayList<>();
+        for (Seat s : m.seats) {
+            if (s.slot >= 0) ids.add((byte) s.slot);
+        }
+        b.localPlayerIds = new byte[ids.size()];
+        for (int i = 0; i < ids.size(); i++) b.localPlayerIds[i] = ids.get(i);
+        return b;
+    }
+
+    private String[] buildActivePlayerNames() {
+        int playerCount = getActiveSeatCount();
+        String[] playerNames = new String[playerCount];
+        for (int i = 0; i < playerCount; i++) {
+            playerNames[i] = "";
+        }
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.slot >= 0 && s.slot < playerNames.length) {
+                    playerNames[s.slot] = s.displayName;
+                }
+            }
+        }
+        return playerNames;
+    }
+
+    private int getActiveSeatCount() {
+        int n = 0;
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.slot >= 0) n++;
+            }
+        }
+        return n;
+    }
+
     // -------------------------------------------------------------------------
     // GameRoomContext implementation (called by ServerGame)
     // -------------------------------------------------------------------------
 
-    /**
-     * Synchronized because it reads {@code slotToConn}/{@code connToName}, which are mutated
-     * (under the same monitor) by {@link #tryAddMember} and {@link #handleDisconnect} on the
-     * {@code ServerCore} thread while this runs on the room thread.
-     */
     @Override
     public synchronized void sendNetUpdates() {
         if (serverGame == null || serverGame.getGame() == null) return;
 
-        // Collect particles and spawners
         ArrayList<NetParticle> particles = serverGame.getAndClearPendingParticles();
         ArrayList<ParticleSpawner> spawners = serverGame.getAndClearPendingSpawners();
         ParticleBroadcast pb = null;
@@ -320,7 +515,6 @@ public class GameRoom implements Runnable, GameRoomContext {
             if (hasSpawners) pb.spawners = spawners.toArray(new ParticleSpawner[0]);
         }
 
-        // Sound broadcasts via TCP
         ArrayList<PlacementSoundBroadcast> placementSounds = serverGame.getAndClearPendingPlacementSounds();
         if (placementSounds != null) {
             for (PlacementSoundBroadcast psb : placementSounds) {
@@ -340,32 +534,40 @@ public class GameRoom implements Runnable, GameRoomContext {
             }
         }
 
-        // Pre-build board snapshots
         NetBoardLight[] boardSnapshots =
                 new NetBoardLight[serverGame.getGame().getBoards().size()];
         for (int a = 0; a < boardSnapshots.length; a++) {
             boardSnapshots[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardLight();
         }
 
-        int playerCount = slotToConn.size();
-        for (int i = 0; i < playerCount; i++) {
-            Integer connId = slotToConn.get(i);
-            if (connId == null) continue;
-
+        for (RoomMember m : members) {
+            // Count active seats for this member
+            int activeCount = 0;
+            for (Seat s : m.seats) {
+                if (s.slot >= 0) activeCount++;
+            }
             LightGameStateBroadcast b = new LightGameStateBroadcast();
             b.boards = boardSnapshots;
-            b.ackMoveId = serverGame.getHighestMoveId(i);
+            b.ackMoveIds = new int[activeCount];
+            b.holdAvailable = new boolean[activeCount];
+            b.ownPieceHoldGlow = new boolean[activeCount];
+            int ai = 0;
+            for (Seat s : m.seats) {
+                if (s.slot < 0) continue;
+                b.ackMoveIds[ai] = serverGame.getHighestMoveId(s.slot);
+                b.holdAvailable[ai] = serverGame.computeHoldAvailable(s.slot);
+                b.ownPieceHoldGlow[ai] = serverGame.computeOwnPieceHoldGlow(s.slot);
+                ai++;
+            }
             b.piecesPlaced = serverGame.getPiecesPlaced();
-            b.holdAvailable = serverGame.computeHoldAvailable(i);
             b.explodeProgress = serverGame.getExplodeProgress();
-            b.ownPieceHoldGlow = serverGame.computeOwnPieceHoldGlow(i);
             b.gravity = serverGame.getGame().getGravity();
             b.gravityTickCounter = serverGame.getGame().getGravityTickCounter();
             b.gameEnded = serverGame.isGameEnded();
             serverGame.populateModeData(b);
-            sender.sendUDP(connId, b);
+            sender.sendUDP(m.connId, b);
             if (pb != null) {
-                sender.sendUDP(connId, pb);
+                sender.sendUDP(m.connId, pb);
             }
         }
     }
@@ -378,22 +580,25 @@ public class GameRoom implements Runnable, GameRoomContext {
         b.scoreModeEnd = info.scoreModeEnd;
         b.puzzleModeEnd = info.puzzleModeEnd;
         b.mode = info.mode != null ? info.mode : GameMode.NONE;
-        int playerCount = slotToConn.size();
-        b.playerNames = new String[playerCount];
-        for (int i = 0; i < playerCount; i++) {
-            Integer connId = slotToConn.get(i);
-            b.playerNames[i] = connId != null ? connToName.getOrDefault(connId, "") : "";
-        }
+        b.playerNames = buildActivePlayerNames();
         broadcastMembersTCP(b);
 
         if (info.mode != null && info.mode != GameMode.NONE) {
-            PlayerResultInfo[] players = new PlayerResultInfo[playerCount];
-            for (int i = 0; i < playerCount; i++) {
-                Integer connId = slotToConn.get(i);
-                String name = connId != null ? connToName.getOrDefault(connId, "") : "";
-                String uuid = connId != null ? connToUuid.getOrDefault(connId, "") : "";
-                players[i] = new PlayerResultInfo(name, uuid);
+            // Build PlayerResultInfo from active seats (extras have empty UUID)
+            List<PlayerResultInfo> playerList = new ArrayList<>();
+            int playerCount = getActiveSeatCount();
+            PlayerResultInfo[] bySlot = new PlayerResultInfo[playerCount];
+            for (RoomMember m : members) {
+                for (Seat s : m.seats) {
+                    if (s.slot >= 0 && s.slot < bySlot.length) {
+                        bySlot[s.slot] = new PlayerResultInfo(s.displayName, s.accountUuid);
+                    }
+                }
             }
+            for (int i = 0; i < bySlot.length; i++) {
+                playerList.add(bySlot[i] != null ? bySlot[i] : new PlayerResultInfo("", ""));
+            }
+            PlayerResultInfo[] players = playerList.toArray(new PlayerResultInfo[0]);
             if (resultRecorder != null) {
                 resultRecorder.recordGameResult(GameResultData.from(info, players));
             }
@@ -408,6 +613,13 @@ public class GameRoom implements Runnable, GameRoomContext {
                 }
             }
         }
+
+        // Game ended — allow reseating for next round (triggered via onGameStopped after stopGame)
+    }
+
+    @Override
+    public synchronized void onGameStopped() {
+        reseat();
     }
 
     // -------------------------------------------------------------------------
@@ -426,11 +638,14 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     private LobbyPlayerListBroadcast buildPlayerListBroadcast() {
         LobbyPlayerListBroadcast b = new LobbyPlayerListBroadcast();
-        b.playerNames = new String[slotToConn.size()];
-        for (int i = 0; i < slotToConn.size(); i++) {
-            Integer connId = slotToConn.get(i);
-            b.playerNames[i] = connId != null ? connToName.getOrDefault(connId, "") : "";
+        b.playerNames = buildActivePlayerNames();
+        List<String> specs = new ArrayList<>();
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.slot < 0) specs.add(s.displayName);
+            }
         }
+        b.spectatorNames = specs.toArray(new String[0]);
         return b;
     }
 
@@ -451,19 +666,39 @@ public class GameRoom implements Runnable, GameRoomContext {
     }
 
     private synchronized List<Integer> getMemberConnIds() {
-        return Collections.unmodifiableList(new ArrayList<>(slotToConn));
+        List<Integer> ids = new ArrayList<>(members.size());
+        for (RoomMember m : members) ids.add(m.connId);
+        return Collections.unmodifiableList(ids);
     }
 
     // -------------------------------------------------------------------------
-    // Metadata accessors (used by ServerCore for RoomListBroadcast)
+    // Metadata accessors (used by ServerCore for RoomListBroadcast / tests)
     // -------------------------------------------------------------------------
 
     public synchronized String getHostName() {
-        return connToName.getOrDefault(hostConnId, "");
+        RoomMember host = connToMember.get(hostConnId);
+        return host != null ? host.baseName : "";
     }
 
     public synchronized int getPlayerCount() {
-        return slotToConn.size();
+        return getActiveSeatCount();
+    }
+
+    public synchronized int getSpectatorCount() {
+        int n = 0;
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.slot < 0) n++;
+            }
+        }
+        return n;
+    }
+
+    /** Package-visible for tests: slot assigned to (connId, localIndex), or -1. */
+    synchronized int getSlotFor(int connId, int localIndex) {
+        int[] slots = connToSlots.get(connId);
+        if (slots == null || localIndex < 0 || localIndex >= slots.length) return -1;
+        return slots[localIndex];
     }
 
     public boolean isInProgress() {

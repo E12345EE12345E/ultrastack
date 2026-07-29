@@ -95,6 +95,7 @@ public class ServerCore implements PacketSender, Runnable {
         d.on(TextMessageRequest.class, forward);
         d.on(StartGameRequest.class, forward);
         d.on(MoveListRequest.class, forward);
+        d.on(LocalPlayerCountRequest.class, forward);
         return d;
     }
 
@@ -209,23 +210,27 @@ public class ServerCore implements PacketSender, Runnable {
 
         // Get-or-create the single LAN room. The host (first joiner to create the room) is
         // added inside the GameRoom constructor; tryAddMember below is a no-op for them that
-        // simply returns their existing slot (always 0), so both host and later joiners get
-        // their slot assigned/read through the same atomic path.
+        // simply returns their existing slot.
+        int localPlayers = req.localPlayers & 0xFF;
         GameRoom lanRoom = rooms.computeIfAbsent("LAN", id ->
-                new GameRoom("LAN", this, w.connectionID, req.playerName));
+                new GameRoom("LAN", this, w.connectionID, req.playerName, req.playerName,
+                        localPlayers, null, null));
 
-        int slotId = lanRoom.tryAddMember(w.connectionID, req.playerName, session.accountUuid, GameConstants.MAX_PLAYERS);
-        if (slotId < 0) {
+        GameRoom.AddMemberResult add = lanRoom.tryAddMember(
+                w.connectionID, req.playerName, session.accountUuid, localPlayers, GameConstants.MAX_PLAYERS);
+        if (!add.success) {
             res.accepted = false;
             res.playerId = -1;
-            res.reason = lanRoom.isInProgress() ? "game already in progress" : "room full";
+            res.reason = "could not join";
             sendTCP(w.connectionID, res);
             return;
         }
 
         res.accepted = true;
-        res.playerId = slotId;
+        res.playerId = add.firstActiveSlot;
         res.reason = "";
+        res.gameInProgress = add.gameInProgress;
+        res.spectatorOnly = add.spectatorOnly;
         sendTCP(w.connectionID, res);
         session.currentRoomId = "LAN";
 
@@ -333,7 +338,10 @@ public class ServerCore implements PacketSender, Runnable {
         }
 
         String roomId = generateRoomId();
-        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid, resultRecorder, xpAwarder);
+        CreateRoomRequest createReq = (CreateRoomRequest) w.packet;
+        int localPlayers = createReq.localPlayers & 0xFF;
+        GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid,
+                localPlayers, resultRecorder, xpAwarder);
         rooms.put(roomId, room);
         session.currentRoomId = roomId;
         room.start();
@@ -343,6 +351,8 @@ public class ServerCore implements PacketSender, Runnable {
         res.reason = "";
         res.roomId = roomId;
         res.isHost = true;
+        res.gameInProgress = false;
+        res.spectatorOnly = false;
         sendTCP(w.connectionID, res);
     }
 
@@ -372,12 +382,14 @@ public class ServerCore implements PacketSender, Runnable {
             sendTCP(w.connectionID, res);
             return;
         }
-        int slotId = room.tryAddMember(w.connectionID, session.username, session.accountUuid, GameConstants.MAX_PLAYERS);
-        if (slotId < 0) {
+        int localPlayers = req.localPlayers & 0xFF;
+        GameRoom.AddMemberResult add = room.tryAddMember(
+                w.connectionID, session.username, session.accountUuid, localPlayers, GameConstants.MAX_PLAYERS);
+        if (!add.success) {
             releaseAccountRoomSlot(session);
             RoomJoinResponse res = new RoomJoinResponse();
             res.success = false;
-            res.reason = room.isInProgress() ? "game already in progress" : "room full";
+            res.reason = "could not join";
             sendTCP(w.connectionID, res);
             return;
         }
@@ -388,6 +400,8 @@ public class ServerCore implements PacketSender, Runnable {
         res.reason = "";
         res.roomId = req.roomId;
         res.isHost = false;
+        res.gameInProgress = add.gameInProgress;
+        res.spectatorOnly = add.spectatorOnly;
         sendTCP(w.connectionID, res);
     }
 
@@ -492,6 +506,7 @@ public class ServerCore implements PacketSender, Runnable {
             info.roomId = r.roomId;
             info.hostName = r.getHostName();
             info.playerCount = r.getPlayerCount();
+            info.spectatorCount = r.getSpectatorCount();
             info.inProgress = r.isInProgress();
             b.rooms[i] = info;
         }

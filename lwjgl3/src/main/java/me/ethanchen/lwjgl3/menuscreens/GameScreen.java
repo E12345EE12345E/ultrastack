@@ -3,6 +3,7 @@ package me.ethanchen.lwjgl3.menuscreens;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Random;
 
 import com.badlogic.gdx.math.Vector2;
@@ -14,7 +15,9 @@ import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
+import me.ethanchen.game.board.Piece;
 import me.ethanchen.lwjgl3.ClientApp;
+import me.ethanchen.lwjgl3.input.LocalPlayerRoster;
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
@@ -34,30 +37,23 @@ import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 /**
- * Thin coordinator for the in-progress game screen. Delegates to:
- * <ul>
- *   <li>{@link GameInputHandler}  — DAS/ARR, keyboard + controller dispatch
- *   <li>{@link ClientMovePredictor} — pending-move queue and client-side prediction replay
- *   <li>{@link ParticleFactory}   — server-event → local {@link Particle} conversion
- * </ul>
- * The rendering body ({@link #renderSingleBoard}) remains here for now and is a candidate
- * for further extraction into a dedicated {@code SingleBoardView} class.
+ * Thin coordinator for the in-progress game screen. Supports zero or more local players
+ * controlled by this client (keyboard and/or controllers).
  */
 public class GameScreen extends MenuScreen {
     private GameHandler game;
     private GameDrawMode drawMode;
     private long lastUpdateMs;
     private int deltaTime;
-    private int playerId;
     private final boolean isHost;
+    private final List<LocalPlayer> localPlayers = new ArrayList<>();
+    private final boolean[] isLocalSlot;
 
     private final ArrayList<Particle> particles = new ArrayList<>();
     private final Random particleRng = new Random();
 
-    // Server-authoritative state
-    private boolean holdAvailable = true;
+    // Server-authoritative shared state
     private float latestExplodeProgress = -1f;
-    private boolean ownPieceHoldGlow = false;
 
     // End-game explosion state
     private boolean exploded = false;
@@ -70,10 +66,6 @@ public class GameScreen extends MenuScreen {
     private long gameEndTargetMs;
     private long startTimeMS;
     private String[] playerNames;
-
-    // Collaborators
-    private final ClientMovePredictor predictor;
-    private final GameInputHandler inputHandler;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = buildDispatcher();
 
@@ -92,7 +84,6 @@ public class GameScreen extends MenuScreen {
         this.isHost = isHost;
         lastUpdateMs = System.currentTimeMillis();
         long startGameTimer = b.startTimeMS - System.currentTimeMillis();
-        playerId = b.playerId;
         startTimeMS = b.startTimeMS;
         playerNames = b.playerNames;
         game = new GameHandler(b.totalPlayers);
@@ -107,11 +98,48 @@ public class GameScreen extends MenuScreen {
         }
         drawMode = (b.mode != GameMode.NONE) ? GameDrawMode.SINGLE_BOARD : GameDrawMode.NONE;
 
-        predictor = new ClientMovePredictor(app, playerId);
-        inputHandler = new GameInputHandler(app, playerId, game, predictor);
+        isLocalSlot = new boolean[Math.max(1, b.totalPlayers & 0xFF)];
+        LocalPlayerRoster roster = app.computeLocalPlayerRoster();
+        byte[] ids = b.localPlayerIds != null ? b.localPlayerIds : new byte[0];
+        int n = Math.min(ids.length, roster.size());
+        for (int i = 0; i < n; i++) {
+            int slot = ids[i] & 0xFF;
+            LocalPlayerRoster.Entry entry = roster.getEntries().get(i);
+            ClientMovePredictor predictor = new ClientMovePredictor(app, slot, i);
+            GameInputHandler input = new GameInputHandler(app, slot, game, predictor);
+            localPlayers.add(new LocalPlayer(slot, i, entry.source, entry.controllerSlot, input, predictor));
+            if (slot >= 0 && slot < isLocalSlot.length) isLocalSlot[slot] = true;
+        }
 
         Controllers.addListener(controllerAdapter);
         AudioManager.getInstance().playMusic(MusicTag.MULTIPLAYER_GAME);
+    }
+
+    private boolean isLocalSlot(int slot) {
+        return slot >= 0 && slot < isLocalSlot.length && isLocalSlot[slot];
+    }
+
+    private LocalPlayer keyboardPlayer() {
+        for (LocalPlayer lp : localPlayers) {
+            if (lp.source == LocalPlayerRoster.InputSource.KEYBOARD
+                    || lp.source == LocalPlayerRoster.InputSource.KEYBOARD_AND_ANY_CONTROLLER) {
+                return lp;
+            }
+        }
+        return null;
+    }
+
+    private LocalPlayer playerForControllerSlot(int controllerSlot) {
+        for (LocalPlayer lp : localPlayers) {
+            if (lp.source == LocalPlayerRoster.InputSource.KEYBOARD_AND_ANY_CONTROLLER) {
+                return lp;
+            }
+            if (lp.source == LocalPlayerRoster.InputSource.CONTROLLER
+                    && lp.controllerSlot == controllerSlot) {
+                return lp;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -122,10 +150,11 @@ public class GameScreen extends MenuScreen {
 
         Board board = game.getBoards().isEmpty() ? null : game.getBoards().get(0);
         if (board != null) {
-            inputHandler.tick(deltaTime, board, holdAvailable);
+            for (LocalPlayer lp : localPlayers) {
+                lp.input.tick(deltaTime, board, lp.holdAvailable);
+            }
         }
 
-        // Advance and prune dead particles
         Iterator<Particle> pit = particles.iterator();
         while (pit.hasNext()) {
             Particle p = pit.next();
@@ -133,28 +162,26 @@ public class GameScreen extends MenuScreen {
             if (p.isDead()) pit.remove();
         }
 
-        // End-game fade-to-black
         if (exploded) {
             fadeTimerMs += deltaTime;
             if (fadeTimerMs >= 1000 && endGamePacket != null) {
                 EndGameBroadcast pkt = endGamePacket;
                 endGamePacket = null;
-                // Players remain members of the same room server-side after a game ends (the
-                // room only stops being "in progress"), so stay connected here and let
-                // EndGameScreen return straight to that room's lobby.
                 app.switchMenu(new EndGameScreen(app, pkt, isHost));
                 return;
             }
         }
 
-        if (predictor.hasTooManyPending()) {
-            System.out.println("Too many unacknowledged moves (" + ClientMovePredictor.MAX_PENDING_MOVES
-                    + "+); disconnecting.");
-            app.disconnect();
-            app.switchMenu(new MainMenu(app));
-            return;
+        for (LocalPlayer lp : localPlayers) {
+            if (lp.predictor.hasTooManyPending()) {
+                System.out.println("Too many unacknowledged moves (" + ClientMovePredictor.MAX_PENDING_MOVES
+                        + "+); disconnecting.");
+                app.disconnect();
+                app.switchMenu(new MainMenu(app));
+                return;
+            }
+            lp.predictor.sendIfNeeded();
         }
-        predictor.sendIfNeeded();
     }
 
     @Override
@@ -167,7 +194,6 @@ public class GameScreen extends MenuScreen {
                 break;
         }
 
-        // Fade-to-black overlay after explosion
         if (exploded) {
             float alpha = Math.min(1f, fadeTimerMs / 1000f);
             com.badlogic.gdx.Gdx.gl.glEnable(com.badlogic.gdx.graphics.GL20.GL_BLEND);
@@ -183,17 +209,12 @@ public class GameScreen extends MenuScreen {
         elements.forEach(element -> element.render(shapes, sprites, font));
     }
 
-    // -------------------------------------------------------------------------
-    // Single-board rendering
-    // -------------------------------------------------------------------------
-
     private void renderSingleBoard() {
         Board board = game.getBoards().get(0);
         float tileSize = BoardRenderer.computeTileSize(board, 0.85f);
         float originX  = BoardRenderer.centeredOriginX(board, tileSize);
         float originY  = BoardRenderer.centeredOriginY(board, tileSize);
 
-        // Build glow values from latest server data; default 0.5f until first packet
         float[] glowValues = new float[board.getActivePieces().size()];
         if (latestScoreMode != null && latestScoreMode.glowingValues != null
                 && latestScoreMode.glowingValues.length == glowValues.length) {
@@ -202,21 +223,23 @@ public class GameScreen extends MenuScreen {
             Arrays.fill(glowValues, 0.5f);
         }
 
-        // Override glow for blocked pieces
         for (int i = 0; i < board.getActivePieces().size(); i++) {
             if (board.getActivePieces().get(i).isBlockedFromSpawning) glowValues[i] = 0f;
         }
-        if (ownPieceHoldGlow && playerId >= 0 && playerId < glowValues.length
-                && board.getActivePieces().size() > playerId
-                && board.getActivePieces().get(playerId).isBlockedFromSpawning) {
-            glowValues[playerId] = 2f;
+        for (LocalPlayer lp : localPlayers) {
+            if (lp.ownPieceHoldGlow && lp.slot >= 0 && lp.slot < glowValues.length
+                    && board.getActivePieces().size() > lp.slot
+                    && board.getActivePieces().get(lp.slot).isBlockedFromSpawning) {
+                glowValues[lp.slot] = 2f;
+            }
         }
 
         float blockedWhiteAmt = (latestExplodeProgress >= 0f)
                 ? Math.min(1f, latestExplodeProgress / 1f) : 0f;
 
+        // Spectators (no local players): keep full colour. Otherwise ramp grayscale for remotes.
         float otherPlayerGrayscaleAmt = 0f;
-        if (game.isStarted()) {
+        if (!localPlayers.isEmpty() && game.isStarted()) {
             long elapsedSinceStart = System.currentTimeMillis() - startTimeMS;
             otherPlayerGrayscaleAmt = Math.min(1f, Math.max(0f, elapsedSinceStart / 4000f));
         }
@@ -226,11 +249,16 @@ public class GameScreen extends MenuScreen {
             for (int i = 0; i < shadows.length; i++) shadows[i] = board.getShadow(i);
         }
 
+        boolean[] localFlags = new boolean[board.getActivePieces().size()];
+        for (int i = 0; i < localFlags.length; i++) {
+            localFlags[i] = isLocalSlot(i);
+        }
+
         BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
-                glowValues, shadows, blockedWhiteAmt, !exploded, playerId, otherPlayerGrayscaleAmt);
+                glowValues, shadows, blockedWhiteAmt, !exploded,
+                localPlayers.isEmpty() ? null : localFlags, otherPlayerGrayscaleAmt);
         BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
 
-        // Repeat-column highlights
         if (latestScoreMode != null) {
             if (latestScoreMode.repeatColumn != -1) {
                 BoardRenderer.getInstance().drawColumnHighlight(board, originX, originY, tileSize,
@@ -245,14 +273,13 @@ public class GameScreen extends MenuScreen {
         BoardRenderer.getInstance().drawParticles(particles, originX, originY, tileSize, shapes);
         BoardRenderer.getInstance().drawTextParticles(particles, originX, originY, tileSize, sprites, font);
 
-        // Hold box
         float holdBoxSize = tileSize * 4f;
         float holdBoxX = originX - holdBoxSize - tileSize * 0.5f;
         float holdBoxY = originY + (board.bh() - 4) * tileSize;
-        BoardRenderer.getInstance().drawHoldBox(board.getHeldPieceType(), holdAvailable,
+        boolean holdAvail = localPlayers.isEmpty() || localPlayers.get(0).holdAvailable;
+        BoardRenderer.getInstance().drawHoldBox(board.getHeldPieceType(), holdAvail,
                 holdBoxX, holdBoxY, holdBoxSize, tileSize, shapes, sprites, font);
 
-        // Timer / score box
         float timerBoxSize = tileSize * 5f;
         float timerBoxX = originX - timerBoxSize - tileSize * 0.5f;
         float timerBoxY = originY;
@@ -267,10 +294,7 @@ public class GameScreen extends MenuScreen {
                     shapes, sprites, font);
         }
 
-        // Pre-start countdown
         renderCountdown(board, originX, originY, tileSize);
-
-        // Spawn-position username labels before game start
         renderPlayerNames(board, originX, originY, tileSize);
     }
 
@@ -318,23 +342,43 @@ public class GameScreen extends MenuScreen {
     }
 
     private void renderPlayerNames(Board board, float originX, float originY, float tileSize) {
-        if (game.isStarted() || playerNames == null) return;
+        if (playerNames == null) return;
+
         long msUntilStart = startTimeMS - System.currentTimeMillis();
-        float nameAlpha = msUntilStart > 500 ? 1f : Math.max(0f, msUntilStart / 500f);
-        if (nameAlpha <= 0f) return;
+        float preStartAlpha = 1f;
+        if (!game.isStarted()) {
+            preStartAlpha = msUntilStart > 500 ? 1f : Math.max(0f, msUntilStart / 500f);
+            if (preStartAlpha <= 0f) return;
+        }
 
         com.badlogic.gdx.graphics.g2d.GlyphLayout nameLayout = new com.badlogic.gdx.graphics.g2d.GlyphLayout();
         float savedX = font.getScaleX(), savedY = font.getScaleY();
         font.getData().setScale(1f);
-        float nmFs = 0.9f * (tileSize / font.getData().lineHeight);
+        float nmFs = (game.isStarted() ? 0.55f : 0.9f) * (tileSize / font.getData().lineHeight);
         font.getData().setScale(nmFs);
         sprites.begin();
-        font.setColor(1f, 1f, 1f, nameAlpha);
+
         for (int i = 0; i < playerNames.length; i++) {
             if (playerNames[i] == null || playerNames[i].isEmpty()) continue;
-            Vector2 spawn = board.getSpawnPos(i);
-            float nameScreenX = originX + (spawn.x + 1.5f) * tileSize;
-            float nameScreenY = originY + spawn.y * tileSize;
+            boolean local = isLocalSlot(i);
+            // After start: only keep labels for local players (piece identity).
+            if (game.isStarted() && !local) continue;
+
+            float alpha = game.isStarted() ? 0.55f : preStartAlpha;
+            font.setColor(1f, 1f, 1f, alpha);
+
+            float nameScreenX;
+            float nameScreenY;
+            if (game.isStarted() && board.getActivePieces().size() > i) {
+                Piece piece = board.getActivePieces().get(i);
+                if (piece == null || piece.location == null) continue;
+                nameScreenX = originX + (piece.location.x + 1.5f) * tileSize;
+                nameScreenY = originY + (piece.location.y + 4f) * tileSize;
+            } else {
+                Vector2 spawn = board.getSpawnPos(i);
+                nameScreenX = originX + (spawn.x + 1.5f) * tileSize;
+                nameScreenY = originY + spawn.y * tileSize;
+            }
             nameLayout.setText(font, playerNames[i]);
             font.draw(sprites, playerNames[i], nameScreenX - nameLayout.width * 0.5f, nameScreenY);
         }
@@ -343,21 +387,21 @@ public class GameScreen extends MenuScreen {
         font.getData().setScale(savedX, savedY);
     }
 
-    // -------------------------------------------------------------------------
-    // Input processing (delegate to GameInputHandler)
-    // -------------------------------------------------------------------------
-
     @Override
     public boolean keyDown(int keycode) {
         if (game.getBoards().isEmpty()) return super.keyDown(keycode);
+        LocalPlayer kb = keyboardPlayer();
+        if (kb == null) return super.keyDown(keycode);
         Board board = game.getBoards().get(0);
-        boolean handled = inputHandler.keyDown(keycode, board, holdAvailable);
+        boolean handled = kb.input.keyDown(keycode, board, kb.holdAvailable);
         return handled ? true : super.keyDown(keycode);
     }
 
     @Override
     public boolean keyUp(int keycode) {
-        boolean handled = inputHandler.keyUp(keycode);
+        LocalPlayer kb = keyboardPlayer();
+        if (kb == null) return super.keyUp(keycode);
+        boolean handled = kb.input.keyUp(keycode);
         return handled ? true : super.keyUp(keycode);
     }
 
@@ -365,17 +409,19 @@ public class GameScreen extends MenuScreen {
         @Override
         public boolean buttonDown(Controller controller, int buttonIndex) {
             if (game.getBoards().isEmpty()) return false;
-            return inputHandler.controllerButtonDown(buttonIndex, game.getBoards().get(0), holdAvailable);
+            int slot = app.getControllerRoster().slotOf(controller);
+            LocalPlayer lp = playerForControllerSlot(slot);
+            if (lp == null) return false;
+            return lp.input.controllerButtonDown(buttonIndex, game.getBoards().get(0), lp.holdAvailable);
         }
         @Override
         public boolean buttonUp(Controller controller, int buttonIndex) {
-            return inputHandler.controllerButtonUp(buttonIndex);
+            int slot = app.getControllerRoster().slotOf(controller);
+            LocalPlayer lp = playerForControllerSlot(slot);
+            if (lp == null) return false;
+            return lp.input.controllerButtonUp(buttonIndex);
         }
     };
-
-    // -------------------------------------------------------------------------
-    // Packet handlers (delegate to appropriate collaborators)
-    // -------------------------------------------------------------------------
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
@@ -389,15 +435,25 @@ public class GameScreen extends MenuScreen {
                 game.getBoards().get(i).updateFromNetBoardLight(p.boards[i]);
             }
         }
-        predictor.ackMovesUpTo(p.ackMoveId, game.getBoards().get(0));
+        Board board = game.getBoards().isEmpty() ? null : game.getBoards().get(0);
+        for (int i = 0; i < localPlayers.size(); i++) {
+            LocalPlayer lp = localPlayers.get(i);
+            if (p.ackMoveIds != null && i < p.ackMoveIds.length && board != null) {
+                lp.predictor.ackMovesUpTo(p.ackMoveIds[i], board);
+            }
+            if (p.holdAvailable != null && i < p.holdAvailable.length) {
+                lp.holdAvailable = p.holdAvailable[i];
+            }
+            if (p.ownPieceHoldGlow != null && i < p.ownPieceHoldGlow.length) {
+                lp.ownPieceHoldGlow = p.ownPieceHoldGlow[i];
+            }
+        }
 
-        holdAvailable = p.holdAvailable;
         float prevExplodeProgress = latestExplodeProgress;
         latestExplodeProgress = p.explodeProgress;
         if (prevExplodeProgress < 0f && latestExplodeProgress >= 0f) {
             AudioManager.getInstance().playDieSound();
         }
-        ownPieceHoldGlow = p.ownPieceHoldGlow;
         if (p.scoreMode  != null) latestScoreMode  = p.scoreMode;
         if (p.puzzleMode != null) latestPuzzleMode = p.puzzleMode;
 
@@ -450,7 +506,7 @@ public class GameScreen extends MenuScreen {
     }
 
     private void handlePlacementSound(PlacementSoundBroadcast p) {
-        AudioManager.getInstance().playPlaceSound(p.playerId == playerId);
+        AudioManager.getInstance().playPlaceSound(isLocalSlot(p.playerId));
         if (p.combo >= 0) {
             AudioManager.getInstance().playClearSound(p.combo);
             if (p.lines == 4) AudioManager.getInstance().playClearTetrisSound();
@@ -463,18 +519,16 @@ public class GameScreen extends MenuScreen {
 
     private void handleHoldSound(HoldSoundBroadcast p) {
         if (p.success) {
-            AudioManager.getInstance().playHoldSound(p.playerId == playerId, true);
-        } else if (p.playerId == playerId) {
+            AudioManager.getInstance().playHoldSound(isLocalSlot(p.playerId), true);
+        } else if (isLocalSlot(p.playerId)) {
             AudioManager.getInstance().playHoldSound(true, false);
         }
     }
 
     private void handleBumpSound(BumpSoundBroadcast p) {
-        boolean self = p.playerId == playerId || p.otherPlayerId == playerId;
+        boolean self = isLocalSlot(p.playerId) || isLocalSlot(p.otherPlayerId);
         AudioManager.getInstance().playBumpSound(self);
     }
-
-    // -------------------------------------------------------------------------
 
     @Override
     public void dispose() {

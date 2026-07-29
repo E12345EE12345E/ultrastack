@@ -12,17 +12,8 @@ import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 
 /**
- * Manages the client-side pending-move queue and client-side prediction replay. Extracted from
- * {@link GameScreen} to separate network-reliability plumbing from input handling and rendering.
- *
- * <p>Lifecycle:
- * <ol>
- *   <li>Call {@link #queueMove} when a move should be sent to the server (also applies
- *       immediately to the local board for non-authority moves).
- *   <li>Call {@link #sendIfNeeded} each tick to re-send unacknowledged moves.
- *   <li>Call {@link #ackMovesUpTo} on every {@code LightGameStateBroadcast} to prune
- *       acknowledged moves and replay the remainder on top of the server state.
- * </ol>
+ * Manages the client-side pending-move queue and client-side prediction replay for a single
+ * local player.
  */
 class ClientMovePredictor {
 
@@ -34,28 +25,17 @@ class ClientMovePredictor {
     private long lastMoveSendMs = 0;
     private final ClientApp app;
     private final int playerId;
+    private final byte localIndex;
 
-    ClientMovePredictor(ClientApp app, int playerId) {
+    ClientMovePredictor(ClientApp app, int playerId, int localIndex) {
         this.app = app;
         this.playerId = playerId;
+        this.localIndex = (byte) localIndex;
     }
 
     boolean hasTooManyPending() { return pendingMoves.size() > MAX_PENDING_MOVES; }
     boolean hasAny() { return !pendingMoves.isEmpty(); }
 
-    // -------------------------------------------------------------------------
-    // Queueing
-    // -------------------------------------------------------------------------
-
-    /**
-     * Adds a move to the pending queue, applies it optimistically to the local board (for
-     * movement/rotation; hard-drop and hold are server-authoritative), and sends it immediately.
-     *
-     * @param type          the move to perform
-     * @param board         the local board (used for optimistic application + audio feedback)
-     * @param game          the local game handler (used for gravity reset on soft-drop)
-     * @param holdAvailable whether hold is currently available (gates hold moves)
-     */
     void queueMove(MoveType type, Board board, GameHandler game, boolean holdAvailable) {
         if (type == MoveType.HOLD && !holdAvailable) {
             AudioManager.getInstance().playHoldSound(true, false);
@@ -82,10 +62,6 @@ class ClientMovePredictor {
         send();
     }
 
-    // -------------------------------------------------------------------------
-    // Periodic resend
-    // -------------------------------------------------------------------------
-
     /** Resends all pending moves if the resend interval has elapsed. */
     void sendIfNeeded() {
         if (!pendingMoves.isEmpty()
@@ -94,18 +70,6 @@ class ClientMovePredictor {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Ack + prediction replay (called on LightGameStateBroadcast)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Removes moves acknowledged by the server (id <= {@code ackMoveId}), then replays all
-     * remaining pending moves on top of the server's board state. Hard-drop and hold are
-     * excluded from replay since the server result arrives in a subsequent broadcast.
-     *
-     * @param ackMoveId the highest move id the server has processed
-     * @param board     the local board, already updated to the server state
-     */
     void ackMovesUpTo(int ackMoveId, Board board) {
         Iterator<PendingMove> it = pendingMoves.iterator();
         while (it.hasNext()) {
@@ -118,13 +82,10 @@ class ClientMovePredictor {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Internal helpers
-    // -------------------------------------------------------------------------
-
     private void send() {
         if (pendingMoves.isEmpty()) return;
         MoveListRequest req = new MoveListRequest();
+        req.localIndex = localIndex;
         req.ids = new int[pendingMoves.size()];
         req.types = new byte[pendingMoves.size()];
         for (int i = 0; i < pendingMoves.size(); i++) {

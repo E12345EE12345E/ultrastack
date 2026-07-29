@@ -9,6 +9,9 @@ package me.ethanchen.network.dto;
 public class RoomInfo {
     public String roomId;
     public String hostName;
+    /** Number of active (playing) seats. */
     public int playerCount;
+    /** Number of spectator seats. */
+    public int spectatorCount;
     public boolean inProgress;
 }

@@ -8,6 +8,7 @@ import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.s2c.JoinResponse;
+import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
 public class LanMenu extends MenuScreen {
     private boolean isHosting;
@@ -17,7 +18,8 @@ public class LanMenu extends MenuScreen {
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(ConnectionEstablishedPacket.class, w -> app.sendJoinRequest(pendingUsername, pendingJoinCode))
-            .on(JoinResponse.class, w -> handleJoinResponse((JoinResponse) w.packet));
+            .on(JoinResponse.class, w -> handleJoinResponse((JoinResponse) w.packet))
+            .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, isHosting)));
 
     public LanMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());

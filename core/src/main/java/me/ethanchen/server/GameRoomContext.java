@@ -4,4 +4,6 @@ package me.ethanchen.server;
 public interface GameRoomContext {
     void sendNetUpdates();
     void sendEndGame(GameEndInfo info);
+    /** Called after the in-progress game has been torn down so the room can reseat spectators. */
+    void onGameStopped();
 }

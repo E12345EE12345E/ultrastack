@@ -4,6 +4,8 @@ import me.ethanchen.network.packets.NetworkPacket;
 
 public class JoinResponse extends NetworkPacket {
     public boolean accepted;
-    public int playerId;      // -1 if rejected
+    public int playerId;      // -1 if rejected; first active slot if accepted (legacy)
     public String reason;     // null or "" if ok
+    public boolean gameInProgress;
+    public boolean spectatorOnly;
 }

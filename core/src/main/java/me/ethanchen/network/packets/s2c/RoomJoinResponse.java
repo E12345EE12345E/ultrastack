@@ -7,4 +7,6 @@ public class RoomJoinResponse extends NetworkPacket {
     public String reason;
     public String roomId;
     public boolean isHost;
+    public boolean gameInProgress;
+    public boolean spectatorOnly;
 }

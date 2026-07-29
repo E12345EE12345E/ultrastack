@@ -111,7 +111,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f, true, -1, 0f);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f, true, null, 0f);
     }
 
     /**
@@ -120,7 +120,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f, true, -1, 0f);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f, true, null, 0f);
     }
 
     /**
@@ -128,19 +128,21 @@ public class BoardRenderer {
      *
      * @param blockedWhiteAmt         0 = full gray for blocked pieces; 1 = full white.
      * @param drawActivePieces        When false, active pieces and glow are not drawn.
-     * @param localPlayerId           Index of the local player; {@code -1} disables other-player grayscale.
+     * @param isLocalPlayer           Per-piece flags; {@code null} or shorter arrays treat missing
+     *                                indices as non-local. When null and grayscaleAmt &gt; 0, all
+     *                                pieces stay full colour (spectator / disabled).
      * @param otherPlayerGrayscaleAmt 0 = full color for other players; 1 = fully grayscale.
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows,
                           float blockedWhiteAmt, boolean drawActivePieces,
-                          int localPlayerId, float otherPlayerGrayscaleAmt) {
+                          boolean[] isLocalPlayer, float otherPlayerGrayscaleAmt) {
         if (drawActivePieces) drawGlow(board, originX, originY, tileSize, glowStrengths);
         sprites.begin();
         drawLockedTiles(board, originX, originY, tileSize, sprites);
         if (drawActivePieces) {
             drawShadowPieces(board, shadows, originX, originY, tileSize, sprites,
-                    localPlayerId, otherPlayerGrayscaleAmt);
+                    isLocalPlayer, otherPlayerGrayscaleAmt);
             drawActivePiecesWithBlocked(board, originX, originY, tileSize, sprites, blockedWhiteAmt);
         }
         sprites.setColor(Color.WHITE);
@@ -350,7 +352,7 @@ public class BoardRenderer {
     private void drawShadowPieces(Board board, Board.ShadowInfo[] shadows,
                                   float originX, float originY, float tileSize,
                                   SpriteBatch sprites,
-                                  int localPlayerId, float otherPlayerGrayscaleAmt) {
+                                  boolean[] isLocalPlayer, float otherPlayerGrayscaleAmt) {
         if (shadows == null) return;
         float grayscaleAmt = Math.max(0f, Math.min(1f, otherPlayerGrayscaleAmt));
         for (int i = 0; i < shadows.length && i < board.getActivePieces().size(); i++) {
@@ -365,7 +367,9 @@ public class BoardRenderer {
 
             Color baseColor;
             if (shadow.wouldPlace) {
-                float colorAmt = (localPlayerId >= 0 && i != localPlayerId) ? 1f - grayscaleAmt : 1f;
+                boolean local = isLocalPlayer != null && i < isLocalPlayer.length && isLocalPlayer[i];
+                // When isLocalPlayer is null, treat as "no grayscale" (legacy / spectator).
+                float colorAmt = (isLocalPlayer != null && !local) ? 1f - grayscaleAmt : 1f;
                 Color c = PieceTints.blendGrayscale(piece.type, colorAmt, false);
                 baseColor = new Color(c.r, c.g, c.b, 0.75f);
             } else {

@@ -2,8 +2,7 @@ pause menu
 
 all clear
 
-bug with pieces too early
-music too quiet
+dying sound should play faster
 
 3mino
 
