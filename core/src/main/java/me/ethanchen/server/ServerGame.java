@@ -182,7 +182,7 @@ public class ServerGame {
     // -------------------------------------------------------------------------
 
     /** Below this recent-movement threshold, a player counts as having moved "recently". */
-    private static final float BUMP_TIMER_THRESHOLD_MS = 400f;
+    private static final float BUMP_TIMER_THRESHOLD_MS = 800f;
 
     private void checkBump(Board board, int playerA, int playerB) {
         if (board.getActivePiece(playerA).movementTimer < BUMP_TIMER_THRESHOLD_MS
