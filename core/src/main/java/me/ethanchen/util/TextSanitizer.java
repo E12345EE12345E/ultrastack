@@ -1,8 +1,12 @@
 package me.ethanchen.util;
 
+import java.util.Locale;
+
 public final class TextSanitizer {
     private static final int MAX_CHAT_LENGTH = 256;
     private static final int MAX_NAME_LENGTH = 16;
+    /** Minimum length for newly registered account usernames. Shorter existing accounts may still log in. */
+    public static final int MIN_REGISTER_USERNAME_LENGTH = 3;
 
     public static String sanitizeChat(String input) {
         if (input == null) return "";
@@ -59,7 +63,8 @@ public final class TextSanitizer {
             }
         });
 
-        return out.toString().strip().replaceAll(" +", " ");
+        // Accounts are stored lowercase; convert while typing so the visible name matches what is saved.
+        return out.toString().strip().replaceAll(" +", " ").toLowerCase(Locale.ROOT);
     }
 
     public static boolean isAllowedNameCodePoint(int cp) {

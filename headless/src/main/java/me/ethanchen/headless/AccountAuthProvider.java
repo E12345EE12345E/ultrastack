@@ -2,6 +2,7 @@ package me.ethanchen.headless;
 
 import me.ethanchen.server.AuthProvider;
 import me.ethanchen.server.Session;
+import me.ethanchen.util.TextSanitizer;
 
 public class AccountAuthProvider implements AuthProvider {
     private final AccountStore store;
@@ -14,7 +15,11 @@ public class AccountAuthProvider implements AuthProvider {
     public String register(String username, String passcode) {
         if (username == null || username.isBlank()) return "username cannot be blank";
         if (passcode == null || passcode.isBlank()) return "passcode cannot be blank";
-        return store.createAccount(username, passcode);
+        String key = username.trim().toLowerCase();
+        if (key.length() < TextSanitizer.MIN_REGISTER_USERNAME_LENGTH) {
+            return "username must be at least " + TextSanitizer.MIN_REGISTER_USERNAME_LENGTH + " characters";
+        }
+        return store.createAccount(key, passcode);
     }
 
     @Override

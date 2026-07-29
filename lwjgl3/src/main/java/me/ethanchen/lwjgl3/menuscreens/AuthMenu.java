@@ -6,6 +6,7 @@ import me.ethanchen.lwjgl3.settings.SettingsManager;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.s2c.AuthResponse;
+import me.ethanchen.util.TextSanitizer;
 
 public class AuthMenu extends MenuScreen {
     private TextInput messageText;
@@ -27,8 +28,9 @@ public class AuthMenu extends MenuScreen {
         usernameBox.sanitize = 2;
         String savedUsername = app.getSettings().lastUsername;
         if (savedUsername != null && !savedUsername.isEmpty()) {
-            usernameBox.text = savedUsername;
-            usernameOutput.set(savedUsername);
+            String normalized = TextSanitizer.sanitizeName(savedUsername);
+            usernameBox.text = normalized;
+            usernameOutput.set(normalized);
         }
         elements.add(usernameBox);
 
@@ -55,6 +57,11 @@ public class AuthMenu extends MenuScreen {
             String pass = passcodeOutput.get();
             if (user.isEmpty()) {
                 messageText.set("Username cannot be empty.");
+                return;
+            }
+            if (user.length() < TextSanitizer.MIN_REGISTER_USERNAME_LENGTH) {
+                messageText.set("Username must be at least "
+                        + TextSanitizer.MIN_REGISTER_USERNAME_LENGTH + " characters.");
                 return;
             }
             app.getSettings().lastUsername = user;
