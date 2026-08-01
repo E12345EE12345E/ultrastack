@@ -25,6 +25,7 @@ import me.ethanchen.lwjgl3.input.LocalPlayerMode;
 import me.ethanchen.lwjgl3.input.LocalPlayerRoster;
 import me.ethanchen.lwjgl3.menuscreens.MainMenu;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
+import me.ethanchen.lwjgl3.menuscreens.ShaderTestScreen;
 
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicContainer;
@@ -142,7 +143,8 @@ public class ClientApp extends ApplicationAdapter {
         }
         font.setUseIntegerPositions(false);
 
-        menuScreen = new MainMenu(this);
+        //menuScreen = new MainMenu(this);
+        menuScreen = new ShaderTestScreen(this);
     }
 
 

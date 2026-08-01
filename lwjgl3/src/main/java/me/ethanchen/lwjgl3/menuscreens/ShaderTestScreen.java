@@ -2,39 +2,32 @@ package me.ethanchen.lwjgl3.menuscreens;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.math.Vector2;
 
 import me.ethanchen.game.board.Board;
-import me.ethanchen.game.board.Piece;
+import me.ethanchen.game.board.Tile;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
-import me.ethanchen.lwjgl3.render.shader.ChromaticAberrationRenderer;
-import me.ethanchen.lwjgl3.render.shader.MovementBlurRenderer;
+import me.ethanchen.lwjgl3.render.shader.RippleCircleRenderer;
 
 public class ShaderTestScreen extends MenuScreen {
     private final Board board;
-    private final Piece piece;
-    private final MovementBlurRenderer movementBlurRenderer;
-    private final ChromaticAberrationRenderer chromaticAberrationRenderer;
-
+    private final RippleCircleRenderer rippleCircleRenderer;
+    private float elapsedTime = 0f;
 
     public ShaderTestScreen(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
         board = new Board(Board.Presets.STANDARD_SINGLE);
-        piece = Piece.T();
-        piece.location = new Vector2(5, 0);
-        board.getActivePieces().add(piece);
-        movementBlurRenderer = new MovementBlurRenderer();
-        chromaticAberrationRenderer = new ChromaticAberrationRenderer();
+        // Set tile at (5,10) to a mino (T-mino) to mark the center
+        board.getBoard()[10][5] = Tile.T();
+        rippleCircleRenderer = new RippleCircleRenderer();
     }
-
 
     @Override
     public void update() {
+        elapsedTime += Gdx.graphics.getDeltaTime();
         if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
             BoardRenderer.getInstance().getGlowRenderer().reloadShader();
-            movementBlurRenderer.reloadShader();
-            chromaticAberrationRenderer.reloadShader();
+            rippleCircleRenderer.reloadShader();
             Gdx.app.log("ShaderTestScreen", "All shaders reloaded via F5.");
         }
     }
@@ -47,30 +40,24 @@ public class ShaderTestScreen extends MenuScreen {
     @Override
     public void dispose() {
         super.dispose();
-        movementBlurRenderer.dispose();
-        chromaticAberrationRenderer.dispose();
+        rippleCircleRenderer.dispose();
     }
-
 
     @Override
     public void render() {
-        float deltaTime = Gdx.graphics.getDeltaTime();
         float tileSize = BoardRenderer.computeTileSize(board, 0.85f);
         float originX = BoardRenderer.centeredOriginX(board, tileSize);
         float originY = BoardRenderer.centeredOriginY(board, tileSize);
 
-        float[] glowStrengths = new float[] { 1.0f };
-
-        chromaticAberrationRenderer.begin();
-
-        // Render movement blur from (5,10) to (5,0)
-        movementBlurRenderer.draw(originX, originY, tileSize, piece, 5, 10, 5, 0, 0.25f);
-
-        // Render board with active piece at (5,0) and glow
+        // Render board grid and tiles
         BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
-        BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, glowStrengths);
+        BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, null);
 
-        chromaticAberrationRenderer.end(0f, 0.1f);
+        // Calculate dynamic width multiplier: 1 + sin(elapsedTime * 0.1)
+        float widthMult = 1.0f + (float) Math.sin(elapsedTime * 0.1f);
+
+        // Render rippling white circle/ellipse displayed at (5,10) with radius 4, dynamic widthMult, heightMult 1.0, average thickness 1.6 tiles, max ripple 0.2 tiles
+        rippleCircleRenderer.draw(originX, originY, tileSize, 5f, 10f, 4f, widthMult, 1.0f, 1.6f, 0.2f);
 
         super.render();
     }
