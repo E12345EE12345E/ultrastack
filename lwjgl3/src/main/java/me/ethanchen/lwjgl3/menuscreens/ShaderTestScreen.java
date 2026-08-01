@@ -67,8 +67,8 @@ public class ShaderTestScreen extends MenuScreen {
         movementBlurRenderer.draw(originX, originY, tileSize, piece, 5, 10, 5, 0, 0.25f);
 
         // Render board with active piece at (5,0) and glow
-        BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, glowStrengths);
         BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
+        BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, glowStrengths);
 
         chromaticAberrationRenderer.end(0f, 0.1f);
 

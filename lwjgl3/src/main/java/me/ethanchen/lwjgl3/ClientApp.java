@@ -2,6 +2,7 @@ package me.ethanchen.lwjgl3;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
@@ -47,6 +48,7 @@ import me.ethanchen.network.packets.c2s.LoginRequest;
 import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.RoomListRequest;
 import me.ethanchen.network.packets.other.ConnectFailedPacket;
+import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.other.DisconnectPacket;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
 import me.ethanchen.server.ServerCore;
@@ -57,7 +59,10 @@ public class ClientApp extends ApplicationAdapter {
     private static final int MAX_RECONNECT_ATTEMPTS = 3;
 
     // Network
-    private Client netClient;
+    // volatile: reassigned by ensureClientAlive() on the connect thread when the KryoNet
+    // update thread has died and needs recreating; read from the render thread (sendTCP/
+    // sendUDP/disconnect) and other background threads.
+    private volatile Client netClient;
     private ClientNetworkListener clientNetworkListener;
     private volatile boolean shuttingDown;
     private volatile boolean intentionalDisconnect;
@@ -427,9 +432,6 @@ public class ClientApp extends ApplicationAdapter {
         try {
             if (delayBeforeConnectMs > 0) Thread.sleep(delayBeforeConnectMs);
             if (shuttingDown) return;
-            if (netClient.isConnected()) {
-                return;
-            }
             String resolvedHost;
             try {
                 resolvedHost = resolveHost(connectIP);
@@ -443,12 +445,40 @@ public class ClientApp extends ApplicationAdapter {
                 }
                 return;
             }
-            int timeout = wasAutoConnect
-                    ? NetConfig.AUTO_CONNECT_TIMEOUT_MS
-                    : NetConfig.CONNECT_TIMEOUT_MS;
             netLock.lock();
             try {
                 if (shuttingDown) return;
+
+                // KryoNet's Client update thread can die permanently (e.g. an uncaught
+                // KryoNetException from a bad/oversized packet) without anyone noticing.
+                // Once that happens nothing services the selector anymore, so a later
+                // connect() call just hangs forever with no error ("Connecting..." stuck
+                // indefinitely). Detect that and recreate the client before connecting.
+                ensureClientAlive();
+
+                if (netClient.isConnected()) {
+                    InetSocketAddress remote = netClient.getRemoteAddressTCP();
+                    boolean sameDestination = remote != null
+                            && remote.getAddress().getHostAddress().equals(resolvedHost)
+                            && remote.getPort() == connectPort;
+                    if (sameDestination) {
+                        // Already connected to the requested destination (e.g. re-entering a
+                        // menu that expects a fresh ConnectionEstablishedPacket). Don't
+                        // reconnect, but still notify the current screen so it doesn't sit on
+                        // "Connecting..." forever waiting for a packet that will never come.
+                        Client connected = netClient;
+                        Gdx.app.postRunnable(() -> rpackets.addLast(
+                                new ClientPacketWrapper(new ConnectionEstablishedPacket(), connected)));
+                        return;
+                    }
+                    // Connected elsewhere (e.g. switched from the online server to a LAN
+                    // server, or vice versa): fall through and reconnect to the new
+                    // destination. Client#connect() closes the old connection first.
+                }
+
+                int timeout = wasAutoConnect
+                        ? NetConfig.AUTO_CONNECT_TIMEOUT_MS
+                        : NetConfig.CONNECT_TIMEOUT_MS;
                 netClient.connect(timeout, resolvedHost, connectPort, connectPort);
                 // If quit started during connect, drop the new connection immediately.
                 if (shuttingDown) {
@@ -471,6 +501,25 @@ public class ClientApp extends ApplicationAdapter {
             connectInProgress.set(false);
         }
         if (shouldReconnect) scheduleReconnect();
+    }
+
+    /**
+     * Recreates {@link #netClient} if its background update thread has died (see caller for
+     * why that can happen). Must be called while holding {@link #netLock}.
+     */
+    private void ensureClientAlive() {
+        Thread updateThread = netClient.getUpdateThread();
+        if (updateThread != null && updateThread.isAlive()) return;
+        System.err.println("[ClientApp] Net client update thread is dead; recreating client.");
+        Client dead = netClient;
+        try {
+            dead.close();
+        } catch (Exception ignored) {
+        }
+        Client fresh = NetEndpoints.createClient();
+        fresh.addListener(clientNetworkListener);
+        fresh.start();
+        netClient = fresh;
     }
 
     private static String resolveHost(String host) throws UnknownHostException {

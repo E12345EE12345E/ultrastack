@@ -254,10 +254,10 @@ public class GameScreen extends MenuScreen {
             localFlags[i] = isLocalSlot(i);
         }
 
+        BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
         BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
                 glowValues, shadows, blockedWhiteAmt, !exploded,
                 localPlayers.isEmpty() ? null : localFlags, otherPlayerGrayscaleAmt);
-        BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
 
         if (latestScoreMode != null) {
             if (latestScoreMode.repeatColumn != -1) {

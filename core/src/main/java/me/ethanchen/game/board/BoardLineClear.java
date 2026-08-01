@@ -58,6 +58,11 @@ final class BoardLineClear {
             }
         }
 
+        // Push other players' active pieces out of the way of descending overhangs before the
+        // locked-tile grid itself is compacted (see BoardPiecePush for why this must happen
+        // per-row rather than as a single bulk shift).
+        BoardPiecePush.pushPiecesUnderOverhangs(b, fullRows);
+
         // Row-based compaction: walk bottom-to-top, skip cleared rows, shift remaining down
         int writeY = 0;
         for (int readY = 0; readY < b.height; readY++) {

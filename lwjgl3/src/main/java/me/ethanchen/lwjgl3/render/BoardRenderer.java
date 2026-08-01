@@ -172,8 +172,10 @@ public class BoardRenderer {
     public void drawBoardGrid(Board board, float originX, float originY, float tileSize,
                               ShapeRenderer shapes) {
         boolean[][] allowed = board.getAllowedTiles();
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         shapes.begin(ShapeRenderer.ShapeType.Line);
-        shapes.setColor(Color.WHITE.r * 0.5f, Color.WHITE.g * 0.5f, Color.WHITE.b * 0.5f, Color.WHITE.a * 0.5f);
+        shapes.setColor(Color.GRAY.r, Color.GRAY.g, Color.GRAY.b, 0.5f);
         for (int y = 0; y < board.bh(); y++) {
             for (int x = 0; x < board.bw(); x++) {
                 if (!allowed[y][x]) continue;

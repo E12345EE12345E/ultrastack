@@ -83,6 +83,7 @@ public class ServerConnectMenu extends MenuScreen {
 
     @Override
     protected void onEscPressed() {
+        app.disconnect();
         app.switchMenu(new MainMenu(app));
     }
 

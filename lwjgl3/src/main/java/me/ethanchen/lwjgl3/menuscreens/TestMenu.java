@@ -49,8 +49,8 @@ public class TestMenu extends MenuScreen {
         float originX = BoardRenderer.centeredOriginX(board, tileSize);
         float originY = BoardRenderer.centeredOriginY(board, tileSize);
 
-        BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, TEST_GLOW);
         BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
+        BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites, TEST_GLOW);
 
         elements.forEach(element -> element.render(shapes, sprites, font));
     }
