@@ -10,8 +10,8 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 
 /**
- * Renderer for drawing a rippling white circle or ellipse in board-relative coordinates.
- * Allows custom average thickness and ripple intensity parameters.
+ * Renderer for drawing a rippling white or custom colored circle/ellipse in board-relative coordinates.
+ * Supports customizable average thickness, ripple intensity, and optional {@link RippleShaderColor} configuration.
  */
 public class RippleCircleRenderer implements ShaderRenderer {
 
@@ -60,21 +60,37 @@ public class RippleCircleRenderer implements ShaderRenderer {
     public void draw(float originX, float originY, float tileSize,
                      float boardX, float boardY, float radius,
                      float thickness, float rippleIntensity) {
-        draw(originX, originY, tileSize, boardX, boardY, radius, 1.0f, 1.0f, thickness, rippleIntensity);
+        draw(originX, originY, tileSize, boardX, boardY, radius, 1.0f, 1.0f, thickness, rippleIntensity, null);
+    }
+
+    public void draw(float originX, float originY, float tileSize,
+                     float boardX, float boardY, float radius,
+                     float thickness, float rippleIntensity,
+                     RippleShaderColor colorData) {
+        draw(originX, originY, tileSize, boardX, boardY, radius, 1.0f, 1.0f, thickness, rippleIntensity, colorData);
     }
 
     public void draw(float originX, float originY, float tileSize,
                      float boardX, float boardY, float radius,
                      float widthMult, float heightMult,
                      float thickness, float rippleIntensity) {
-        elapsedTime += Gdx.graphics.getDeltaTime();
-        draw(originX, originY, tileSize, boardX, boardY, radius, widthMult, heightMult, thickness, rippleIntensity, elapsedTime);
+        draw(originX, originY, tileSize, boardX, boardY, radius, widthMult, heightMult, thickness, rippleIntensity, null);
     }
 
     public void draw(float originX, float originY, float tileSize,
                      float boardX, float boardY, float radius,
                      float widthMult, float heightMult,
-                     float thickness, float rippleIntensity, float time) {
+                     float thickness, float rippleIntensity,
+                     RippleShaderColor colorData) {
+        elapsedTime += Gdx.graphics.getDeltaTime();
+        draw(originX, originY, tileSize, boardX, boardY, radius, widthMult, heightMult, thickness, rippleIntensity, colorData, elapsedTime);
+    }
+
+    public void draw(float originX, float originY, float tileSize,
+                     float boardX, float boardY, float radius,
+                     float widthMult, float heightMult,
+                     float thickness, float rippleIntensity,
+                     RippleShaderColor colorData, float time) {
         if (shader == null || !shader.isCompiled()) return;
 
         int sw = Gdx.graphics.getWidth();
@@ -87,6 +103,19 @@ public class RippleCircleRenderer implements ShaderRenderer {
 
         float centerPxX = originX + (boardX + 0.5f) * tileSize;
         float centerPxY = originY + (boardY + 0.5f) * tileSize;
+
+        RippleShaderColor activeColor = (colorData != null) ? colorData : RippleShaderColor.DEFAULT;
+        Color[] colors = activeColor.getColors();
+        int numColors = Math.min(colors.length, 16);
+
+        float[] colorArray = new float[numColors * 4];
+        for (int i = 0; i < numColors; i++) {
+            Color c = colors[i];
+            colorArray[i * 4]     = c.r;
+            colorArray[i * 4 + 1] = c.g;
+            colorArray[i * 4 + 2] = c.b;
+            colorArray[i * 4 + 3] = c.a;
+        }
 
         shader.bind();
         if (shader.hasUniform("u_resolution")) {
@@ -115,6 +144,24 @@ public class RippleCircleRenderer implements ShaderRenderer {
         }
         if (shader.hasUniform("u_time")) {
             shader.setUniformf("u_time", time);
+        }
+        if (shader.hasUniform("u_colorCount")) {
+            shader.setUniformi("u_colorCount", numColors);
+        }
+        if (shader.hasUniform("u_colors[0]")) {
+            shader.setUniform4fv("u_colors[0]", colorArray, 0, numColors * 4);
+        }
+        if (shader.hasUniform("u_minOpacity")) {
+            shader.setUniformf("u_minOpacity", activeColor.getMinOpacity());
+        }
+        if (shader.hasUniform("u_maxOpacity")) {
+            shader.setUniformf("u_maxOpacity", activeColor.getMaxOpacity());
+        }
+        if (shader.hasUniform("u_colorMode")) {
+            shader.setUniformi("u_colorMode", activeColor.getColorMode().getId());
+        }
+        if (shader.hasUniform("u_colorShiftSpeed")) {
+            shader.setUniformf("u_colorShiftSpeed", activeColor.getColorShiftSpeed());
         }
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
