@@ -10,11 +10,11 @@ import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.LineClearResult;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.Piece;
+import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
-import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
@@ -173,7 +173,7 @@ public class ServerGame {
         } else {
             game.applyClearToCounters(result);
         }
-        effects.queuePlacementSound(result, priorCombo);
+        effects.queueHardDropEffect(result, priorCombo);
         effects.queueResultParticles(result, game.getBoards().get(0).bw());
     }
 
@@ -269,8 +269,8 @@ public class ServerGame {
         return effects.getAndClearPendingSpawners();
     }
 
-    public ArrayList<PlacementSoundBroadcast> getAndClearPendingPlacementSounds() {
-        return effects.getAndClearPendingPlacementSounds();
+    public ArrayList<HardDropEffect> getAndClearPendingHardDropEffects() {
+        return effects.getAndClearPendingHardDropEffects();
     }
 
     public ArrayList<HoldSoundBroadcast> getAndClearPendingHoldSounds() {

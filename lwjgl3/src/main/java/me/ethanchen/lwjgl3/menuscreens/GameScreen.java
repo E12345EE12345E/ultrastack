@@ -22,16 +22,18 @@ import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
 import me.ethanchen.lwjgl3.render.Particle;
+import me.ethanchen.lwjgl3.render.shader.PlayerRipples;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
+import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.EndGameBroadcast;
+import me.ethanchen.network.packets.s2c.HardDropEffectsBroadcast;
 import me.ethanchen.network.packets.s2c.LightGameStateBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
-import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
@@ -48,6 +50,7 @@ public class GameScreen extends MenuScreen {
     private final boolean isHost;
     private final List<LocalPlayer> localPlayers = new ArrayList<>();
     private final boolean[] isLocalSlot;
+    private PlayerRipples ripples;
 
     private final ArrayList<Particle> particles = new ArrayList<>();
     private final Random particleRng = new Random();
@@ -74,7 +77,7 @@ public class GameScreen extends MenuScreen {
                 .on(LightGameStateBroadcast.class, w -> handleLightGameState((LightGameStateBroadcast) w.packet))
                 .on(EndGameBroadcast.class,         w -> handleEndGame((EndGameBroadcast) w.packet))
                 .on(ParticleBroadcast.class,        w -> handleParticleBroadcast((ParticleBroadcast) w.packet))
-                .on(PlacementSoundBroadcast.class,  w -> handlePlacementSound((PlacementSoundBroadcast) w.packet))
+                .on(HardDropEffectsBroadcast.class, w -> handleHardDropEffects((HardDropEffectsBroadcast) w.packet))
                 .on(HoldSoundBroadcast.class,       w -> handleHoldSound((HoldSoundBroadcast) w.packet))
                 .on(BumpSoundBroadcast.class,       w -> handleBumpSound((BumpSoundBroadcast) w.packet));
     }
@@ -109,6 +112,10 @@ public class GameScreen extends MenuScreen {
             GameInputHandler input = new GameInputHandler(app, slot, game, predictor);
             localPlayers.add(new LocalPlayer(slot, i, entry.source, entry.controllerSlot, input, predictor));
             if (slot >= 0 && slot < isLocalSlot.length) isLocalSlot[slot] = true;
+        }
+
+        if (!game.getBoards().isEmpty()) {
+            ripples = new PlayerRipples(game.getBoards().get(0), isLocalSlot);
         }
 
         Controllers.addListener(controllerAdapter);
@@ -152,6 +159,9 @@ public class GameScreen extends MenuScreen {
         if (board != null) {
             for (LocalPlayer lp : localPlayers) {
                 lp.input.tick(deltaTime, board, lp.holdAvailable);
+            }
+            if (ripples != null) {
+                ripples.update(board, deltaTime / 1000f, game.isStarted());
             }
         }
 
@@ -255,6 +265,9 @@ public class GameScreen extends MenuScreen {
         }
 
         BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
+        if (ripples != null && !exploded) {
+            ripples.draw(originX, originY, tileSize);
+        }
         BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
                 glowValues, shadows, blockedWhiteAmt, !exploded,
                 localPlayers.isEmpty() ? null : localFlags, otherPlayerGrayscaleAmt);
@@ -505,15 +518,21 @@ public class GameScreen extends MenuScreen {
         }
     }
 
-    private void handlePlacementSound(PlacementSoundBroadcast p) {
-        AudioManager.getInstance().playPlaceSound(isLocalSlot(p.playerId));
-        if (p.combo >= 0) {
-            AudioManager.getInstance().playClearSound(p.combo);
-            if (p.lines == 4) AudioManager.getInstance().playClearTetrisSound();
-            if (p.spinType == PlacementSoundBroadcast.SPIN_TSPIN
-                    || p.spinType == PlacementSoundBroadcast.SPIN_ALL_SPIN) {
-                AudioManager.getInstance().playSpinClearSound();
+    private void handleHardDropEffects(HardDropEffectsBroadcast p) {
+        if (p.effects == null) return;
+        for (HardDropEffect e : p.effects) {
+            AudioManager.getInstance().playPlaceSound(isLocalSlot(e.playerId));
+            if (e.combo >= 0) {
+                AudioManager.getInstance().playClearSound(e.combo);
+                if (e.lines == 4) AudioManager.getInstance().playClearTetrisSound();
+                if (e.spinType == HardDropEffect.SPIN_TSPIN
+                        || e.spinType == HardDropEffect.SPIN_ALL_SPIN) {
+                    AudioManager.getInstance().playSpinClearSound();
+                }
             }
+            ParticleFactory.expandHardDropFlash(e.pieceType, e.doubledX, e.doubledY, e.pieceRotation,
+                    particles, particleRng);
+            if (ripples != null) ripples.poof(e.playerId);
         }
     }
 
@@ -534,6 +553,7 @@ public class GameScreen extends MenuScreen {
     public void dispose() {
         Controllers.removeListener(controllerAdapter);
         AudioManager.getInstance().stopMusic();
+        if (ripples != null) ripples.dispose();
     }
 
     private enum GameDrawMode { NONE, SINGLE_BOARD }

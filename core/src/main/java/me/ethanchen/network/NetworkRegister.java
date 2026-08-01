@@ -5,6 +5,7 @@ import com.esotericsoftware.kryo.Kryo;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.PieceQueue;
+import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.dto.NetPiece;
@@ -21,7 +22,7 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class NetworkRegister {
     // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
-    public static final byte PROTOCOL_VERSION = 12;
+    public static final byte PROTOCOL_VERSION = 13;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -37,7 +38,7 @@ public class NetworkRegister {
         kryo.register(StartGameBroadcast.class);
         kryo.register(LightGameStateBroadcast.class);
         kryo.register(ParticleBroadcast.class);
-        kryo.register(PlacementSoundBroadcast.class);
+        kryo.register(HardDropEffectsBroadcast.class);
         kryo.register(HoldSoundBroadcast.class);
         kryo.register(BumpSoundBroadcast.class);
         kryo.register(LobbyPlayerListBroadcast.class);
@@ -86,6 +87,8 @@ public class NetworkRegister {
         kryo.register(NetParticle[].class);
         kryo.register(ParticleSpawner.class);
         kryo.register(ParticleSpawner[].class);
+        kryo.register(HardDropEffect.class);
+        kryo.register(HardDropEffect[].class);
         // Room lifecycle
         kryo.register(RoomClosedBroadcast.class);
         kryo.register(HostChangedBroadcast.class);

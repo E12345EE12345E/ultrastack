@@ -4,6 +4,7 @@ import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.ServerPacketWrapper;
+import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
@@ -515,11 +516,11 @@ public class GameRoom implements Runnable, GameRoomContext {
             if (hasSpawners) pb.spawners = spawners.toArray(new ParticleSpawner[0]);
         }
 
-        ArrayList<PlacementSoundBroadcast> placementSounds = serverGame.getAndClearPendingPlacementSounds();
-        if (placementSounds != null) {
-            for (PlacementSoundBroadcast psb : placementSounds) {
-                broadcastMembersTCP(psb);
-            }
+        ArrayList<HardDropEffect> hardDropEffects = serverGame.getAndClearPendingHardDropEffects();
+        HardDropEffectsBroadcast hdeb = null;
+        if (hardDropEffects != null && !hardDropEffects.isEmpty()) {
+            hdeb = new HardDropEffectsBroadcast();
+            hdeb.effects = hardDropEffects.toArray(new HardDropEffect[0]);
         }
         ArrayList<HoldSoundBroadcast> holdSounds = serverGame.getAndClearPendingHoldSounds();
         if (holdSounds != null) {
@@ -568,6 +569,9 @@ public class GameRoom implements Runnable, GameRoomContext {
             sender.sendUDP(m.connId, b);
             if (pb != null) {
                 sender.sendUDP(m.connId, pb);
+            }
+            if (hdeb != null) {
+                sender.sendUDP(m.connId, hdeb);
             }
         }
     }

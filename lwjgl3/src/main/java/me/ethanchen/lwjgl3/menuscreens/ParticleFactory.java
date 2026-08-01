@@ -30,33 +30,11 @@ final class ParticleFactory {
      * Expands a compact {@link ParticleSpawner} into one or more local {@link Particle} objects
      * and appends them to {@code out}.
      *
-     * <ul>
-     *   <li>TYPE_HARD_DROP — reconstructs mino positions from the piece shape, emits one FLASH
-     *       particle per mino cell.
-     *   <li>TYPE_LINE_CLEAR — emits one TILE_BREAK burst per non-(-1) entry in
-     *       {@link ParticleSpawner#tileIds}.
-     * </ul>
+     * <p>TYPE_LINE_CLEAR — emits one TILE_BREAK burst per non-(-1) entry in
+     * {@link ParticleSpawner#tileIds}.
      */
     static void expandSpawner(ParticleSpawner ps, List<Particle> out, Random rng) {
-        if (ps.spawnerType == ParticleSpawner.TYPE_HARD_DROP) {
-            NetPiece netPiece = new NetPiece();
-            netPiece.type = ps.pieceType;
-            netPiece.doubledlocationx = ps.doubledX;
-            netPiece.doubledlocationy = ps.doubledY;
-            netPiece.rotation = ps.pieceRotation;
-            Piece piece = Piece.createFromNetPiece(netPiece);
-            for (Vector2 tile : piece.tiles) {
-                int cx = (int) Math.floor(piece.location.x + tile.x);
-                int cy = (int) Math.floor(piece.location.y + tile.y);
-                NetParticle flash = new NetParticle();
-                flash.boardIndex = ps.boardIndex;
-                flash.kind = NetParticle.KIND_FLASH;
-                flash.tileType = ps.pieceType;
-                flash.x = cx;
-                flash.y = cy;
-                expandNetParticle(flash, out, rng);
-            }
-        } else if (ps.spawnerType == ParticleSpawner.TYPE_LINE_CLEAR) {
+        if (ps.spawnerType == ParticleSpawner.TYPE_LINE_CLEAR) {
             if (ps.tileIds == null) return;
             for (int x = 0; x < ps.tileIds.length; x++) {
                 if (ps.tileIds[x] == -1) continue;
@@ -68,6 +46,32 @@ final class ParticleFactory {
                 tileBreak.y = ps.lineY;
                 expandNetParticle(tileBreak, out, rng);
             }
+        }
+    }
+
+    /**
+     * Reconstructs the placed piece from its compact placement fields and emits one FLASH
+     * particle per mino cell. Used for the hard-drop flash effect carried by
+     * {@link me.ethanchen.network.dto.HardDropEffect}.
+     */
+    static void expandHardDropFlash(byte pieceType, byte doubledX, byte doubledY, byte rotation,
+                                     List<Particle> out, Random rng) {
+        NetPiece netPiece = new NetPiece();
+        netPiece.type = pieceType;
+        netPiece.doubledlocationx = doubledX;
+        netPiece.doubledlocationy = doubledY;
+        netPiece.rotation = rotation;
+        Piece piece = Piece.createFromNetPiece(netPiece);
+        for (Vector2 tile : piece.tiles) {
+            int cx = (int) Math.floor(piece.location.x + tile.x);
+            int cy = (int) Math.floor(piece.location.y + tile.y);
+            NetParticle flash = new NetParticle();
+            flash.boardIndex = 0;
+            flash.kind = NetParticle.KIND_FLASH;
+            flash.tileType = pieceType;
+            flash.x = cx;
+            flash.y = cy;
+            expandNetParticle(flash, out, rng);
         }
     }
 

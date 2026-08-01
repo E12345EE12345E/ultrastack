@@ -91,6 +91,20 @@ public class RippleCircleRenderer implements ShaderRenderer {
                      float widthMult, float heightMult,
                      float thickness, float rippleIntensity,
                      RippleShaderColor colorData, float time) {
+        draw(originX, originY, tileSize, boardX, boardY, radius, widthMult, heightMult, thickness, rippleIntensity, colorData, time, 1f);
+    }
+
+    /**
+     * Core draw call with an explicit animation {@code time} (caller-controlled clock, does not
+     * auto-advance) and a global {@code alpha} multiplier applied on top of the shader's own
+     * opacity pulse and per-color alpha. Useful for callers drawing multiple independently
+     * time-driven ripples (e.g. one per player) that also need to fade in/out.
+     */
+    public void draw(float originX, float originY, float tileSize,
+                     float boardX, float boardY, float radius,
+                     float widthMult, float heightMult,
+                     float thickness, float rippleIntensity,
+                     RippleShaderColor colorData, float time, float alpha) {
         if (shader == null || !shader.isCompiled()) return;
 
         int sw = Gdx.graphics.getWidth();
@@ -168,7 +182,7 @@ public class RippleCircleRenderer implements ShaderRenderer {
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
 
         batch.begin();
-        batch.setColor(Color.WHITE);
+        batch.setColor(1f, 1f, 1f, alpha);
         batch.draw(blankTexture, 0, 0, sw, sh);
         batch.end();
 

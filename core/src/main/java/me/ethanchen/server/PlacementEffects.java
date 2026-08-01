@@ -4,12 +4,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 import me.ethanchen.game.board.LineClearResult;
-import me.ethanchen.game.board.SpinType;
+import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
-import me.ethanchen.network.packets.s2c.PlacementSoundBroadcast;
 
 /**
  * Accumulates per-tick particle events and sound broadcasts for delivery during the next
@@ -20,7 +19,7 @@ class PlacementEffects {
 
     final ArrayList<NetParticle> pendingParticles = new ArrayList<>();
     final ArrayList<ParticleSpawner> pendingSpawners = new ArrayList<>();
-    final ArrayList<PlacementSoundBroadcast> pendingPlacementSounds = new ArrayList<>();
+    final ArrayList<HardDropEffect> pendingHardDropEffects = new ArrayList<>();
     final ArrayList<HoldSoundBroadcast> pendingHoldSounds = new ArrayList<>();
     final ArrayList<BumpSoundBroadcast> pendingBumpSounds = new ArrayList<>();
 
@@ -29,55 +28,51 @@ class PlacementEffects {
     // -------------------------------------------------------------------------
 
     /**
-     * Builds and queues a {@link PlacementSoundBroadcast} for the given placement result.
+     * Builds and queues a {@link HardDropEffect} for the given placement result. Carries both
+     * the placement-sound data (spin/lines/combo) and the hard-drop flash data (piece
+     * type/anchor/rotation) that used to be split across {@code PlacementSoundBroadcast} and a
+     * {@code TYPE_HARD_DROP} {@link ParticleSpawner}.
      *
      * @param result     the placement that just occurred
      * @param priorCombo the combo counter captured <em>before</em> applyClearToCounters ran
      */
-    void queuePlacementSound(LineClearResult result, int priorCombo) {
-        PlacementSoundBroadcast psb = new PlacementSoundBroadcast();
-        psb.playerId = (byte) result.playerId;
+    void queueHardDropEffect(LineClearResult result, int priorCombo) {
+        HardDropEffect hde = new HardDropEffect();
+        hde.playerId = (byte) result.playerId;
+        hde.pieceType = result.pieceType;
+        hde.doubledX = (byte) Math.floor(result.restingCenterX * 2);
+        hde.doubledY = (byte) Math.floor(result.restingCenterY * 2);
+        hde.pieceRotation = result.pieceRotation;
 
         int lines = result.numClearedRows();
         switch (result.spinType) {
             case T_SPIN:
             case T_SPIN_MINI:
-                psb.spinType = PlacementSoundBroadcast.SPIN_TSPIN;
+                hde.spinType = HardDropEffect.SPIN_TSPIN;
                 break;
             case ALL_SPIN:
             case SMALL_SPIN:
-                psb.spinType = PlacementSoundBroadcast.SPIN_ALL_SPIN;
+                hde.spinType = HardDropEffect.SPIN_ALL_SPIN;
                 break;
             default:
-                psb.spinType = (lines == 4) ? PlacementSoundBroadcast.SPIN_TETRIS : PlacementSoundBroadcast.SPIN_NONE;
+                hde.spinType = (lines == 4) ? HardDropEffect.SPIN_TETRIS : HardDropEffect.SPIN_NONE;
                 break;
         }
 
-        psb.combo = (lines > 0) ? (byte) priorCombo : (byte) -1;
-        psb.lines = (byte) lines;
-        pendingPlacementSounds.add(psb);
+        hde.combo = (lines > 0) ? (byte) priorCombo : (byte) -1;
+        hde.lines = (byte) lines;
+        pendingHardDropEffects.add(hde);
     }
 
     /**
      * Translates a {@link LineClearResult} into compact {@link ParticleSpawner} events and any
-     * remaining individual {@link NetParticle} events.
+     * remaining individual {@link NetParticle} events. The hard-drop flash is no longer built
+     * here — see {@link #queueHardDropEffect}.
      *
      * @param result     the placement result to expand
      * @param boardWidth column count of the board (used for tile-break spawner arrays)
      */
     void queueResultParticles(LineClearResult result, int boardWidth) {
-        // Hard-drop flash: one spawner encodes the whole piece
-        if (!result.placedCells.isEmpty()) {
-            ParticleSpawner ps = new ParticleSpawner();
-            ps.spawnerType = ParticleSpawner.TYPE_HARD_DROP;
-            ps.boardIndex = 0;
-            ps.pieceType = result.pieceType;
-            ps.doubledX = (byte) Math.floor(result.restingCenterX * 2);
-            ps.doubledY = (byte) Math.floor(result.restingCenterY * 2);
-            ps.pieceRotation = result.pieceRotation;
-            pendingSpawners.add(ps);
-        }
-
         // Line-clear tile-break: one spawner per cleared row
         if (result.clearedRows != null && result.clearedRows.length > 0) {
             for (int row : result.clearedRows) {
@@ -144,10 +139,10 @@ class PlacementEffects {
         return copy;
     }
 
-    ArrayList<PlacementSoundBroadcast> getAndClearPendingPlacementSounds() {
-        if (pendingPlacementSounds.isEmpty()) return null;
-        ArrayList<PlacementSoundBroadcast> copy = new ArrayList<>(pendingPlacementSounds);
-        pendingPlacementSounds.clear();
+    ArrayList<HardDropEffect> getAndClearPendingHardDropEffects() {
+        if (pendingHardDropEffects.isEmpty()) return null;
+        ArrayList<HardDropEffect> copy = new ArrayList<>(pendingHardDropEffects);
+        pendingHardDropEffects.clear();
         return copy;
     }
 
