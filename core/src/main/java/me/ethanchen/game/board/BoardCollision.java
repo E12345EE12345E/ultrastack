@@ -215,6 +215,8 @@ final class BoardCollision {
         if (type == Piece.I) return Piece.WALL_KICKS_I;
         if (type == Piece.J || type == Piece.L || type == Piece.S
                 || type == Piece.T || type == Piece.Z) return Piece.WALL_KICKS_JLSTZ;
+        if (type == Piece.I3) return Piece.WALL_KICKS_I3;
+        if (type == Piece.L3) return Piece.WALL_KICKS_L3;
         return null;
     }
 
@@ -223,6 +225,8 @@ final class BoardCollision {
         if (type == Piece.I) return Piece.WALL_KICKS_180_I;
         if (type == Piece.J || type == Piece.L || type == Piece.S
                 || type == Piece.T || type == Piece.Z) return Piece.WALL_KICKS_180_JLSTZ;
+        if (type == Piece.I3) return Piece.WALL_KICKS_180_I3;
+        if (type == Piece.L3) return Piece.WALL_KICKS_180_L3;
         return null;
     }
 

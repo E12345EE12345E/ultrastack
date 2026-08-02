@@ -259,7 +259,7 @@ public class Board {
         }
         Vector2[] kicks180 = BoardCollision.kickTable180For(p.type);
         if (kicks180 != null) {
-            int stride = (p.type == Piece.I) ? 1 : 5;
+            int stride = (p.type == Piece.I || p.type == Piece.I3) ? 1 : 5;
             if (BoardCollision.tryKicks180(this, id, fromRotation, kicks180, stride)) {
                 if (p.lockTime > 0) { p.lockedMovementCounter++; p.lockTime = 0f; }
                 p.movementTimer = 0f;

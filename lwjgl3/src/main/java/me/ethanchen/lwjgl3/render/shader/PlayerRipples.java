@@ -29,16 +29,16 @@ public class PlayerRipples {
     private static final float THICKNESS_LARGE = 1.6f;
     private static final float RIPPLE_INTENSITY = 0.2f;
 
-    private static final float OPACITY_REMOTE_MIN = 0.08f;
-    private static final float OPACITY_REMOTE_MAX = 0.10f;
+    private static final float OPACITY_REMOTE_MIN = 0.12f;
+    private static final float OPACITY_REMOTE_MAX = 0.16f;
     private static final float OPACITY_LOCAL_MIN = 0.20f;
     private static final float OPACITY_LOCAL_MAX = 0.30f;
 
     /** Applies to any slot (local or remote) whose piece is in the blocked-cycling state. */
     private static final float RADIUS_BLOCKED = 3.5f;
     private static final float THICKNESS_BLOCKED = 2.0f;
-    private static final float OPACITY_BLOCKED_MIN = 0.06f;
-    private static final float OPACITY_BLOCKED_MAX = 0.08f;
+    private static final float OPACITY_BLOCKED_MIN = 0.10f;
+    private static final float OPACITY_BLOCKED_MAX = 0.12f;
 
     private static final float GROW_SECONDS = 1.0f;
     private static final float SPAWN_FADE_SECONDS = 1.0f;

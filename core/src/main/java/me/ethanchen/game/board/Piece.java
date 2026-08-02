@@ -39,6 +39,30 @@ public class Piece {
         new Vector2(0, 0), new Vector2(1, 0), new Vector2(-2, 0), new Vector2(1, -2), new Vector2(-2, 1),    // L->0
         new Vector2(0, 0), new Vector2(-1, 0), new Vector2(2, 0), new Vector2(2, -1), new Vector2(-1, 2),    // 0->L
     };
+    // I3 wall kicks (identical to JLSTZ)
+    public static final Vector2[] WALL_KICKS_I3 = {
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(-1, 1), new Vector2(0, -2), new Vector2(-1, -2), // 0->R
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, -1), new Vector2(0, 2), new Vector2(1, 2),       // R->0
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, -1), new Vector2(0, 2), new Vector2(1, 2),       // R->2
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(-1, 1), new Vector2(0, -2), new Vector2(-1, -2),   // 2->R
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, -2), new Vector2(1, -2),       // 2->L
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(-1, -1), new Vector2(0, 2), new Vector2(-1, 2),   // L->2
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(-1, -1), new Vector2(0, 2), new Vector2(-1, 2),   // L->0
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, -2), new Vector2(1, -2),     // 0->L
+    };
+    // L3 wall kicks
+    // Base 0->R; other rows are sign flips of (x,y): R->0/R->2=(-x,-y), 2->R=(x,y),
+    // 2->L/0->L=(-x,y), L->2/L->0=(x,-y)
+    public static final Vector2[] WALL_KICKS_L3 = {
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(0, 1), new Vector2(-1, -1), new Vector2(1, 1),  // 0->R
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, -1), new Vector2(1, 1), new Vector2(-1, -1), // R->0
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, -1), new Vector2(1, 1), new Vector2(-1, -1), // R->2
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(0, 1), new Vector2(-1, -1), new Vector2(1, 1),  // 2->R
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, -1), new Vector2(-1, 1),  // 2->L
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(0, -1), new Vector2(-1, 1), new Vector2(1, -1), // L->2
+        new Vector2(0, 0), new Vector2(-1, 0), new Vector2(0, -1), new Vector2(-1, 1), new Vector2(1, -1), // L->0
+        new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, -1), new Vector2(-1, 1),  // 0->L
+    };
 
     // SRS+ 180 rotation wall kicks — stride 5, indexed by fromRotation (0..3)
     public static final Vector2[] WALL_KICKS_180_JLSTZ = {
@@ -53,6 +77,20 @@ public class Piece {
         new Vector2(1, 0),   // 1->3
         new Vector2(0, -1),  // 2->0
         new Vector2(-1, 0),  // 3->1
+    };
+    // I3 180 wall kicks (placeholder: same as I) — stride 1
+    public static final Vector2[] WALL_KICKS_180_I3 = {
+        new Vector2(0, 1),   // 0->2
+        new Vector2(1, 0),   // 1->3
+        new Vector2(0, -1),  // 2->0
+        new Vector2(-1, 0),  // 3->1
+    };
+    // L3 180 wall kicks (identical to JLSTZ) — stride 5
+    public static final Vector2[] WALL_KICKS_180_L3 = {
+        new Vector2(0, 1), new Vector2(1, 1), new Vector2(-1, 1), new Vector2(1, 0), new Vector2(-1, 0),     // 0->2
+        new Vector2(1, 0), new Vector2(1, 2), new Vector2(1, 1), new Vector2(0, 2), new Vector2(0, 1),       // 1->3
+        new Vector2(0, -1), new Vector2(-1, -1), new Vector2(1, -1), new Vector2(-1, 0), new Vector2(1, 0),  // 2->0
+        new Vector2(-1, 0), new Vector2(-1, 2), new Vector2(-1, 1), new Vector2(0, 2), new Vector2(0, 1),    // 3->1
     };
 
     // Object
