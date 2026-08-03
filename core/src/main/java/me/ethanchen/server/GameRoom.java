@@ -458,7 +458,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             b.boards[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardFull();
         }
         b.totalPlayers = (byte) playerCount;
-        b.startTimeMS = startTimeMs;
+        b.msUntilStart = startTimeMs - System.currentTimeMillis();
         b.playerNames = playerNames;
         b.spectatorJoin = spectatorJoin;
         // Active slots for this member, in local-player order

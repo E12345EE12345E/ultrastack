@@ -10,7 +10,12 @@ public class StartGameBroadcast extends NetworkPacket {
     public byte totalPlayers;
     /** Board slots this connection controls, in local-player order. Empty = spectating. */
     public byte[] localPlayerIds = new byte[0];
-    public long startTimeMS;
+    /**
+     * Milliseconds from the moment this packet was sent until the match starts, so clients can
+     * rebase onto their own clock. Negative for a late (spectator) join into a running match.
+     * Must not be an absolute timestamp: client and server clocks are not synchronised.
+     */
+    public long msUntilStart;
     public String[] playerNames;
     /** True when this packet is a late join into an already-running game (spectator). */
     public boolean spectatorJoin;

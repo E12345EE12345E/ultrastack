@@ -86,12 +86,12 @@ public class GameScreen extends MenuScreen {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
         this.isHost = isHost;
         lastUpdateMs = System.currentTimeMillis();
-        long startGameTimer = b.startTimeMS - System.currentTimeMillis();
-        startTimeMS = b.startTimeMS;
+        long startGameTimer = b.msUntilStart;
+        startTimeMS = lastUpdateMs + startGameTimer;
         playerNames = b.playerNames;
         game = new GameHandler(b.totalPlayers);
         game.init(b.mode, startGameTimer);
-        gameEndTargetMs = b.startTimeMS + GameConstants.SCORE_MODE_DURATION_MS;
+        gameEndTargetMs = startTimeMS + GameConstants.SCORE_MODE_DURATION_MS;
         if (b.boards != null) {
             int count = Math.min(b.boards.length, game.getBoards().size());
             for (int i = 0; i < count; i++) {

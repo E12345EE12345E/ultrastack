@@ -7,7 +7,7 @@ import me.ethanchen.game.board.Piece;
 
 /**
  * Manages per-player piece-cycling while blocked at spawn, hold-while-blocked mechanics,
- * and the explode countdown that ends the game when all players stay blocked long enough.
+ * and the explode countdown that ends the game once all players are simultaneously blocked.
  * Extracted from {@link ServerGame}.
  */
 class BlockedSpawnController {
@@ -92,17 +92,17 @@ class BlockedSpawnController {
             }
         }
 
-        boolean allBlockedAtMin = players > 0;
+        boolean allBlocked = players > 0;
         for (int i = 0; i < players; i++) {
-            if (i >= board.getActivePieces().size()) { allBlockedAtMin = false; break; }
+            if (i >= board.getActivePieces().size()) { allBlocked = false; break; }
             Piece p = board.getActivePieces().get(i);
-            if (!p.isBlockedFromSpawning || timeBetweenNextPiece[i] > GameConstants.CYCLE_MIN) {
-                allBlockedAtMin = false;
+            if (!p.isBlockedFromSpawning) {
+                allBlocked = false;
                 break;
             }
         }
 
-        if (allBlockedAtMin) {
+        if (allBlocked) {
             if (explodeCountdown < 0f) explodeCountdown = 0f;
             explodeCountdown += dtSec;
             if (explodeCountdown >= GameConstants.EXPLODE_DURATION) {

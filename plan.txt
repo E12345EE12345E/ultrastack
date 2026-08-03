@@ -1,11 +1,5 @@
-pause menu
-
 all clear
 
 dying sound should play faster
-
-3mino
-
-bg options (load own image?)
 
 other gamemodes
