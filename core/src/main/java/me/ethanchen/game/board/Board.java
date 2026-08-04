@@ -530,6 +530,29 @@ public class Board {
     }
 
     /**
+     * Replaces the active piece at {@code id} with a fresh piece of {@code type} at
+     * {@code spawnPositions[id]}. Does not consume the piece queue or touch hold state.
+     */
+    public void swapActivePiece(int id, byte type) {
+        if (id < 0 || id >= spawnPositions.length || id >= activePieces.size()) return;
+        Piece next = Piece.defaultPiece(type);
+        next.location.add(spawnPositions[id]);
+        next.isBlockedFromSpawning = isSpawnBlocked(next);
+        next.justSpawned = true;
+        activePieces.set(id, next);
+    }
+
+    /**
+     * Like {@link #swapActivePiece(int, byte)}, but also forces this player's hold-used flag
+     * to {@code holdUsed}.
+     */
+    public void swapActivePiece(int id, byte type, boolean holdUsed) {
+        swapActivePiece(id, type);
+        if (playerHoldUsed == null) playerHoldUsed = new boolean[spawnPositions.length];
+        if (id >= 0 && id < playerHoldUsed.length) playerHoldUsed[id] = holdUsed;
+    }
+
+    /**
      * Re-evaluates each active piece's {@code justSpawned} grace flag: once a piece no longer
      * overlaps any other active player's piece, the flag is cleared and normal collision
      * (including against other players' pieces) resumes for it. Called every frame so a piece

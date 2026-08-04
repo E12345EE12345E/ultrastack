@@ -9,6 +9,7 @@ import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 
 /**
  * Accumulates per-tick particle events and sound broadcasts for delivery during the next
@@ -22,6 +23,7 @@ class PlacementEffects {
     final ArrayList<HardDropEffect> pendingHardDropEffects = new ArrayList<>();
     final ArrayList<HoldSoundBroadcast> pendingHoldSounds = new ArrayList<>();
     final ArrayList<BumpSoundBroadcast> pendingBumpSounds = new ArrayList<>();
+    final ArrayList<PieceSwapBroadcast> pendingPieceSwaps = new ArrayList<>();
 
     // -------------------------------------------------------------------------
     // Queueing
@@ -121,6 +123,14 @@ class PlacementEffects {
         pendingBumpSounds.add(bsb);
     }
 
+    /** Queues a {@link PieceSwapBroadcast}. */
+    void addPieceSwap(byte playerId, byte type) {
+        PieceSwapBroadcast psb = new PieceSwapBroadcast();
+        psb.playerId = playerId;
+        psb.pieceType = type;
+        pendingPieceSwaps.add(psb);
+    }
+
     // -------------------------------------------------------------------------
     // Draining (called by GameRoom.sendNetUpdates)
     // -------------------------------------------------------------------------
@@ -157,6 +167,13 @@ class PlacementEffects {
         if (pendingBumpSounds.isEmpty()) return null;
         ArrayList<BumpSoundBroadcast> copy = new ArrayList<>(pendingBumpSounds);
         pendingBumpSounds.clear();
+        return copy;
+    }
+
+    ArrayList<PieceSwapBroadcast> getAndClearPendingPieceSwaps() {
+        if (pendingPieceSwaps.isEmpty()) return null;
+        ArrayList<PieceSwapBroadcast> copy = new ArrayList<>(pendingPieceSwaps);
+        pendingPieceSwaps.clear();
         return copy;
     }
 }

@@ -528,6 +528,12 @@ public class GameRoom implements Runnable, GameRoomContext {
                 broadcastMembersTCP(hsb);
             }
         }
+        ArrayList<PieceSwapBroadcast> pieceSwaps = serverGame.getAndClearPendingPieceSwaps();
+        if (pieceSwaps != null) {
+            for (PieceSwapBroadcast psb : pieceSwaps) {
+                broadcastMembersTCP(psb);
+            }
+        }
         ArrayList<BumpSoundBroadcast> bumpSounds = serverGame.getAndClearPendingBumpSounds();
         if (bumpSounds != null) {
             for (BumpSoundBroadcast bsb : bumpSounds) {

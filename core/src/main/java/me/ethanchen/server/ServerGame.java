@@ -15,6 +15,7 @@ import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
@@ -162,6 +163,43 @@ public class ServerGame {
     }
 
     /**
+     * Immediately replaces player {@code playerId}'s active piece with a fresh piece of
+     * {@code type} at their spawn position. Does not consume the piece queue or touch hold
+     * state. Queues a {@link PieceSwapBroadcast} for the next net-update pass.
+     *
+     * @return true if the swap was applied
+     */
+    public synchronized boolean swapActivePiece(int playerId, byte type) {
+        if (!canSwapActivePiece(playerId)) return false;
+        Board board = game.getBoards().get(0);
+        board.swapActivePiece(playerId, type);
+        effects.addPieceSwap((byte) playerId, type);
+        return true;
+    }
+
+    /**
+     * Like {@link #swapActivePiece(int, byte)}, but also forces the player's hold-used flag
+     * to {@code holdUsed}.
+     *
+     * @return true if the swap was applied
+     */
+    public synchronized boolean swapActivePiece(int playerId, byte type, boolean holdUsed) {
+        if (!canSwapActivePiece(playerId)) return false;
+        Board board = game.getBoards().get(0);
+        board.swapActivePiece(playerId, type, holdUsed);
+        effects.addPieceSwap((byte) playerId, type);
+        return true;
+    }
+
+    private boolean canSwapActivePiece(int playerId) {
+        if (!inProgress || endCtrl.isGameEnded() || game == null) return false;
+        if (playerId < 0 || playerId >= players) return false;
+        if (game.getBoards().isEmpty()) return false;
+        Board board = game.getBoards().get(0);
+        return board.getActivePieces().size() > playerId;
+    }
+
+    /**
      * Shared post-placement logic: increments the placement counter, applies mode-specific
      * scoring, and queues sounds/particles.
      */
@@ -279,6 +317,10 @@ public class ServerGame {
 
     public ArrayList<BumpSoundBroadcast> getAndClearPendingBumpSounds() {
         return effects.getAndClearPendingBumpSounds();
+    }
+
+    public ArrayList<PieceSwapBroadcast> getAndClearPendingPieceSwaps() {
+        return effects.getAndClearPendingPieceSwaps();
     }
 
     public boolean computeHoldAvailable(int playerId) {

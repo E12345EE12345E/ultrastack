@@ -34,6 +34,7 @@ import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
@@ -79,7 +80,8 @@ public class GameScreen extends MenuScreen {
                 .on(ParticleBroadcast.class,        w -> handleParticleBroadcast((ParticleBroadcast) w.packet))
                 .on(HardDropEffectsBroadcast.class, w -> handleHardDropEffects((HardDropEffectsBroadcast) w.packet))
                 .on(HoldSoundBroadcast.class,       w -> handleHoldSound((HoldSoundBroadcast) w.packet))
-                .on(BumpSoundBroadcast.class,       w -> handleBumpSound((BumpSoundBroadcast) w.packet));
+                .on(BumpSoundBroadcast.class,       w -> handleBumpSound((BumpSoundBroadcast) w.packet))
+                .on(PieceSwapBroadcast.class,       w -> handlePieceSwap((PieceSwapBroadcast) w.packet));
     }
 
     public GameScreen(ClientApp app, StartGameBroadcast b, boolean isHost) {
@@ -534,6 +536,12 @@ public class GameScreen extends MenuScreen {
                     particles, particleRng);
             if (ripples != null) ripples.poof(e.playerId);
         }
+    }
+
+    private void handlePieceSwap(PieceSwapBroadcast p) {
+        if (game.getBoards().isEmpty()) return;
+        game.getBoards().get(0).swapActivePiece(p.playerId, p.pieceType);
+        if (ripples != null) ripples.poof(p.playerId);
     }
 
     private void handleHoldSound(HoldSoundBroadcast p) {

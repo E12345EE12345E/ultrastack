@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 
 import com.badlogic.gdx.math.Vector2;
 
+import me.ethanchen.network.dto.NetQueue;
+
 /**
  * Characterization tests for {@link Board} collision and line-clear/compaction behavior.
  * These lock in current behavior before the god-class split described in the refactoring plan.
@@ -321,5 +323,47 @@ class BoardTest {
         piece.location.set(4.5f, 20.5f);
 
         assertTrue(board.isSpawnBlocked(piece));
+    }
+
+    @Test
+    void swapActivePiece_replacesAtSpawnWithoutConsumingQueue() {
+        Board board = new Board(Board.Presets.STANDARD_SINGLE);
+        board.spawnInitialPieces();
+
+        NetQueue before = board.getPieceQueue(0).convertToNetQueue();
+        Vector2 spawn = board.getSpawnPos(0);
+        Piece expectedOrigin = Piece.defaultPiece(Piece.I3);
+        float expectedX = expectedOrigin.location.x + spawn.x;
+        float expectedY = expectedOrigin.location.y + spawn.y;
+
+        board.swapActivePiece(0, Piece.I3);
+
+        Piece swapped = board.getActivePiece(0);
+        assertEquals(Piece.I3, swapped.type);
+        assertEquals(expectedX, swapped.location.x, 0.001f);
+        assertEquals(expectedY, swapped.location.y, 0.001f);
+        assertTrue(swapped.justSpawned);
+
+        NetQueue after = board.getPieceQueue(0).convertToNetQueue();
+        assertEquals(before.alreadyGeneratedNumber, after.alreadyGeneratedNumber);
+        assertEquals(before.piecesAlreadyInBag.length, after.piecesAlreadyInBag.length);
+        for (int i = 0; i < before.piecesAlreadyInBag.length; i++) {
+            assertEquals(before.piecesAlreadyInBag[i], after.piecesAlreadyInBag[i]);
+        }
+    }
+
+    @Test
+    void swapActivePiece_holdUsedOverloadForcesHoldFlag() {
+        Board board = new Board(Board.Presets.STANDARD_SINGLE);
+        board.spawnInitialPieces();
+
+        assertFalse(board.isPlayerHoldUsed(0));
+        board.swapActivePiece(0, Piece.L3, true);
+        assertTrue(board.isPlayerHoldUsed(0));
+        assertEquals(Piece.L3, board.getActivePiece(0).type);
+
+        board.swapActivePiece(0, Piece.I3, false);
+        assertFalse(board.isPlayerHoldUsed(0));
+        assertEquals(Piece.I3, board.getActivePiece(0).type);
     }
 }
