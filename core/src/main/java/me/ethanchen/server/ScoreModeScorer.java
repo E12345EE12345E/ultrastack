@@ -68,7 +68,7 @@ class ScoreModeScorer {
         boolean glowBonus   = result.playerId == glowPlayerId;
         boolean diffColBonus = !clearedTilesHitRepeatColumn(result);
 
-        long base = baseScore(result.spinType, lines);
+        long base = baseScore(result.spinType, lines, result.pieceType);
 
         double multiplier = 1.0;
         if (b2bBonus)    multiplier *= GameConstants.B2B_MULTIPLIER;
@@ -76,6 +76,7 @@ class ScoreModeScorer {
         if (glowBonus)   multiplier *= GameConstants.GLOW_MULTIPLIER;
         if (diffColBonus) multiplier *= GameConstants.DIFF_COLUMN_MULTIPLIER;
         long points = Math.round(base * multiplier);
+        if (result.allClear) points += GameConstants.SCORE_ALL_CLEAR_BONUS;
         totalScore += points;
 
         float cx = result.restingCenterX;
@@ -136,6 +137,10 @@ class ScoreModeScorer {
     // -------------------------------------------------------------------------
 
     static long baseScore(SpinType spinType, int lines) {
+        return baseScore(spinType, lines, (byte) 0);
+    }
+
+    static long baseScore(SpinType spinType, int lines, byte pieceType) {
         switch (spinType) {
             case T_SPIN:
                 switch (lines) {
@@ -168,6 +173,7 @@ class ScoreModeScorer {
             default:
                 break;
         }
+        if (pieceType == Piece.I3 && lines == 3) return GameConstants.SCORE_I3_TRIPLE;
         switch (lines) {
             case 1: return GameConstants.SCORE_SINGLE;
             case 2: return GameConstants.SCORE_DOUBLE;

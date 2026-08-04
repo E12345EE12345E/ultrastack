@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
 
+import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
 
 /**
@@ -52,5 +53,12 @@ class ServerGameScoringTest {
         assertEquals(200, baseScore(SpinType.SMALL_SPIN, 1));
         assertEquals(400, baseScore(SpinType.SMALL_SPIN, 2));
         assertEquals(600, baseScore(SpinType.SMALL_SPIN, 3));
+    }
+
+    @Test
+    void i3TripleScoresLikeMiniTetris() {
+        assertEquals(600, ScoreModeScorer.baseScore(SpinType.NONE, 3, Piece.I3));
+        // Non-I3 triples still use the standard triple value.
+        assertEquals(300, ScoreModeScorer.baseScore(SpinType.NONE, 3, Piece.T));
     }
 }

@@ -78,7 +78,7 @@ public class Piece {
         new Vector2(0, -1),  // 2->0
         new Vector2(-1, 0),  // 3->1
     };
-    // I3 180 wall kicks (placeholder: same as I) — stride 1
+    // I3 180 wall kicks (identical to I) — stride 1
     public static final Vector2[] WALL_KICKS_180_I3 = {
         new Vector2(0, 1),   // 0->2
         new Vector2(1, 0),   // 1->3

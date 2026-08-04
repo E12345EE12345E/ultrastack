@@ -5,6 +5,8 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -75,11 +77,20 @@ public class ClientApp extends ApplicationAdapter {
     // internally and the Client's update thread (started once via start() in create()) survives
     // close(), so no separate start()/recreate step is needed to reconnect.
     private final ReentrantLock netLock = new ReentrantLock();
-    private int reconnectAttempts;
+    /**
+     * Bumped by every user-initiated connect and by {@link #disconnect()}. A connect attempt
+     * carries the epoch it was created with, so an attempt that is still resolving DNS or
+     * blocked inside KryoNet's connect() can tell that its result is no longer wanted (the
+     * player changed destination or left the screen) and drop the connection instead of
+     * handing it to whatever screen happens to be open when it finally completes.
+     */
+    private final AtomicInteger connectEpoch = new AtomicInteger();
+    /** Next attempt to run; replaced (not dropped) when a newer request arrives. */
+    private final AtomicReference<ConnectRequest> queuedConnect = new AtomicReference<>();
+    private volatile int reconnectAttempts;
     private Queue<ClientPacketWrapper> rpackets;
     private volatile String connectIP;
     private volatile int connectPort;
-    private volatile boolean autoConnectAttempt;
 
     // Embedded LAN server
     private ServerCore lanServer;
@@ -263,8 +274,16 @@ public class ClientApp extends ApplicationAdapter {
     // Connection helpers
     // -------------------------------------------------------------------------
 
+    /**
+     * Drops the connection and cancels any connect attempt that has not finished yet. Safe to
+     * call when nothing is connected: leaving a menu mid-connect must not leave a connect
+     * running that would later report success to an unrelated screen.
+     */
     public void disconnect() {
-        if (netClient == null || !netClient.isConnected()) return;
+        connectEpoch.incrementAndGet();
+        queuedConnect.set(null);
+        boolean connectPending = connectInProgress.get();
+        if (netClient == null || (!netClient.isConnected() && !connectPending)) return;
         intentionalDisconnect = true;
         closeNetClientAsync();
     }
@@ -400,18 +419,73 @@ public class ClientApp extends ApplicationAdapter {
     // Connect / reconnect
     // -------------------------------------------------------------------------
 
+    /** One connect attempt, pinned to the destination and epoch it was requested with. */
+    private static final class ConnectRequest {
+        final String host;
+        final int port;
+        final boolean auto;
+        final long delayMs;
+        final int epoch;
+
+        ConnectRequest(String host, int port, boolean auto, long delayMs, int epoch) {
+            this.host = host;
+            this.port = port;
+            this.auto = auto;
+            this.delayMs = delayMs;
+            this.epoch = epoch;
+        }
+    }
+
     // thread-safe
     public void tryConnect() {
-        autoConnectAttempt = false;
-        reconnectAttempts = 0;
-        tryConnect(0);
+        enqueueConnect(false);
     }
 
     /** Connect with a short timeout; posts {@link ConnectFailedPacket} on failure. */
     public void tryConnectAuto() {
-        autoConnectAttempt = true;
+        enqueueConnect(true);
+    }
+
+    private void enqueueConnect(boolean auto) {
+        if (shuttingDown) return;
         reconnectAttempts = 0;
-        tryConnect(0);
+        // A new request supersedes anything still in flight, and replaces anything queued.
+        queuedConnect.set(new ConnectRequest(connectIP, connectPort, auto, 0,
+                connectEpoch.incrementAndGet()));
+        startConnectWorker();
+    }
+
+    /**
+     * Starts the worker unless one is already running. A running worker drains
+     * {@link #queuedConnect} when its current attempt finishes, so requests made while it is
+     * busy are honoured rather than silently dropped.
+     */
+    private void startConnectWorker() {
+        if (!connectInProgress.compareAndSet(false, true)) return;
+        Thread connectThread = new Thread(this::runConnectWorker, "net-connect");
+        connectThread.setDaemon(true);
+        connectThread.start();
+    }
+
+    private void runConnectWorker() {
+        while (true) {
+            ConnectRequest req = queuedConnect.getAndSet(null);
+            if (req == null) {
+                connectInProgress.set(false);
+                // A request enqueued just before the flag was cleared saw the worker as busy
+                // and skipped starting one, so pick it up here instead of losing it.
+                if (queuedConnect.get() == null || !connectInProgress.compareAndSet(false, true)) {
+                    return;
+                }
+                continue;
+            }
+            runConnectAttempt(req);
+        }
+    }
+
+    /** True once a newer connect request or a disconnect has superseded this attempt. */
+    private boolean isStale(ConnectRequest req) {
+        return req.epoch != connectEpoch.get();
     }
 
     private void postConnectFailed(String reason) {
@@ -419,37 +493,27 @@ public class ClientApp extends ApplicationAdapter {
             rpackets.addLast(new ClientPacketWrapper(new ConnectFailedPacket(reason), null)));
     }
 
-    private void tryConnect(long delayBeforeConnectMs) {
-        if (shuttingDown || !connectInProgress.compareAndSet(false, true)) {
-            return;
-        }
-        Thread connectThread = new Thread(() -> runConnectAttempt(delayBeforeConnectMs), "net-connect");
-        connectThread.setDaemon(true);
-        connectThread.start();
-    }
-
-    private void runConnectAttempt(long delayBeforeConnectMs) {
+    private void runConnectAttempt(ConnectRequest req) {
         boolean shouldReconnect = false;
-        boolean wasAutoConnect = autoConnectAttempt;
         try {
-            if (delayBeforeConnectMs > 0) Thread.sleep(delayBeforeConnectMs);
-            if (shuttingDown) return;
+            if (req.delayMs > 0) Thread.sleep(req.delayMs);
+            if (shuttingDown || isStale(req)) return;
             String resolvedHost;
             try {
-                resolvedHost = resolveHost(connectIP);
-                System.out.println("[ClientApp] Resolved " + connectIP + " -> " + resolvedHost
-                        + ":" + connectPort);
+                resolvedHost = resolveHost(req.host);
+                System.out.println("[ClientApp] Resolved " + req.host + " -> " + resolvedHost
+                        + ":" + req.port);
             } catch (UnknownHostException e) {
-                System.err.println("[ClientApp] DNS resolution failed for " + connectIP + ": "
+                System.err.println("[ClientApp] DNS resolution failed for " + req.host + ": "
                         + e.getMessage());
-                if (wasAutoConnect) {
-                    postConnectFailed("Could not resolve " + connectIP);
+                if (req.auto) {
+                    postConnectFailed("Could not resolve " + req.host);
                 }
                 return;
             }
             netLock.lock();
             try {
-                if (shuttingDown) return;
+                if (shuttingDown || isStale(req)) return;
 
                 // KryoNet's Client update thread can die permanently (e.g. an uncaught
                 // KryoNetException from a bad/oversized packet) without anyone noticing.
@@ -462,7 +526,7 @@ public class ClientApp extends ApplicationAdapter {
                     InetSocketAddress remote = netClient.getRemoteAddressTCP();
                     boolean sameDestination = remote != null
                             && remote.getAddress().getHostAddress().equals(resolvedHost)
-                            && remote.getPort() == connectPort;
+                            && remote.getPort() == req.port;
                     if (sameDestination) {
                         // Already connected to the requested destination (e.g. re-entering a
                         // menu that expects a fresh ConnectionEstablishedPacket). Don't
@@ -475,15 +539,21 @@ public class ClientApp extends ApplicationAdapter {
                     }
                     // Connected elsewhere (e.g. switched from the online server to a LAN
                     // server, or vice versa): fall through and reconnect to the new
-                    // destination. Client#connect() closes the old connection first.
+                    // destination. Client#connect() closes the old connection first — that
+                    // drop is ours, so don't let update() treat it as a lost connection.
+                    intentionalDisconnect = true;
                 }
 
-                int timeout = wasAutoConnect
+                int timeout = req.auto
                         ? NetConfig.AUTO_CONNECT_TIMEOUT_MS
                         : NetConfig.CONNECT_TIMEOUT_MS;
-                netClient.connect(timeout, resolvedHost, connectPort, connectPort);
-                // If quit started during connect, drop the new connection immediately.
-                if (shuttingDown) {
+                netClient.connect(timeout, resolvedHost, req.port, req.port);
+                // connect() blocks for seconds; by the time it returns the player may have
+                // quit, left the screen, or asked for a different server. Nobody wants this
+                // connection any more, and keeping it would feed a stale
+                // ConnectionEstablishedPacket to whatever screen is now open.
+                if (shuttingDown || isStale(req)) {
+                    intentionalDisconnect = true;
                     netClient.close();
                 }
             } finally {
@@ -491,18 +561,15 @@ public class ClientApp extends ApplicationAdapter {
             }
         } catch (IOException e) {
             System.err.println("Connect failed: " + e.getMessage());
-            if (wasAutoConnect) {
+            if (req.auto) {
                 postConnectFailed(e.getMessage());
             } else {
                 shouldReconnect = true;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        } finally {
-            autoConnectAttempt = false;
-            connectInProgress.set(false);
         }
-        if (shouldReconnect) scheduleReconnect();
+        if (shouldReconnect) scheduleReconnect(req);
     }
 
     /**
@@ -528,11 +595,14 @@ public class ClientApp extends ApplicationAdapter {
         return InetAddress.getByName(host.trim()).getHostAddress();
     }
 
-    private void scheduleReconnect() {
-        if (shuttingDown) return;
+    private void scheduleReconnect(ConnectRequest failed) {
+        if (shuttingDown || isStale(failed)) return;
         reconnectAttempts++;
         if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) return;
-        tryConnect(RECONNECT_DELAY_MS);
+        ConnectRequest retry = new ConnectRequest(failed.host, failed.port, failed.auto,
+                RECONNECT_DELAY_MS, failed.epoch);
+        // Only retry if the player hasn't already asked for something newer.
+        queuedConnect.compareAndSet(null, retry);
     }
 
     // -------------------------------------------------------------------------

@@ -66,6 +66,12 @@ public class LineClearResult {
     public SpinType spinType = SpinType.NONE;
 
     /**
+     * True when this drop cleared at least one row and left the board completely empty
+     * of tiles (an "All Clear" / Perfect Clear). See {@link Board#isAllClear()}.
+     */
+    public boolean allClear;
+
+    /**
      * True when the piece was locked by the player via an explicit hard drop;
      * false when it was auto-locked by the server (lock delay expiry or movement overflow).
      */

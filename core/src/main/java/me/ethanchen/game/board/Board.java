@@ -76,6 +76,19 @@ public class Board {
         updateFromNetBoardLight(lightNetBoardFrom(nb));
     }
 
+    /**
+     * Returns true when every playable ({@code allowedTiles=true}) cell on the board is
+     * currently empty. Used to detect an "All Clear" (Perfect Clear) after a line clear.
+     */
+    public boolean isAllClear() {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (allowedTiles[y][x] && board[y][x].get() != Tile.EMPTY) return false;
+            }
+        }
+        return true;
+    }
+
     /** Returns true if any tile on the board is currently a garbage tile. */
     public boolean hasGarbage() {
         for (int y = 0; y < height; y++) {

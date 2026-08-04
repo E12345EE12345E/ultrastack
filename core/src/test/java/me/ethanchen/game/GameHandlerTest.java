@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import me.ethanchen.game.board.LineClearResult;
+import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
 
 /**
@@ -32,6 +33,24 @@ class GameHandlerTest {
         single.clearedRows = new int[]{0};
         single.spinType = SpinType.NONE;
         assertFalse(GameHandler.isB2BEligible(single));
+
+        LineClearResult allClearSingle = new LineClearResult();
+        allClearSingle.clearedRows = new int[]{0};
+        allClearSingle.spinType = SpinType.NONE;
+        allClearSingle.allClear = true;
+        assertTrue(GameHandler.isB2BEligible(allClearSingle));
+
+        LineClearResult i3Triple = new LineClearResult();
+        i3Triple.clearedRows = new int[]{0, 1, 2};
+        i3Triple.spinType = SpinType.NONE;
+        i3Triple.pieceType = Piece.I3;
+        assertTrue(GameHandler.isB2BEligible(i3Triple));
+
+        LineClearResult normalTriple = new LineClearResult();
+        normalTriple.clearedRows = new int[]{0, 1, 2};
+        normalTriple.spinType = SpinType.NONE;
+        normalTriple.pieceType = Piece.T;
+        assertFalse(GameHandler.isB2BEligible(normalTriple));
     }
 
     @Test

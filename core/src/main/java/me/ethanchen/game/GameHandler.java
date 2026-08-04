@@ -4,6 +4,7 @@ import java.util.ArrayList;
 
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.LineClearResult;
+import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
 
 public class GameHandler {
@@ -104,10 +105,13 @@ public class GameHandler {
 
     /**
      * Returns true when a line clear is eligible to increment (or extend) back-to-back:
-     * any spin type, or a 4-line clear.
+     * any spin type, a 4-line clear, an I3 3-line clear, or an all clear.
      */
     public static boolean isB2BEligible(LineClearResult r) {
-        return r.spinType != SpinType.NONE || r.numClearedRows() == 4;
+        return r.spinType != SpinType.NONE
+                || r.numClearedRows() == 4
+                || (r.pieceType == Piece.I3 && r.numClearedRows() == 3)
+                || r.allClear;
     }
 
     /**

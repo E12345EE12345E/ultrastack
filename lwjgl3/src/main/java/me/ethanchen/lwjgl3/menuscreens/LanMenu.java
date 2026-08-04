@@ -12,19 +12,26 @@ import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
 public class LanMenu extends MenuScreen {
     private boolean isHosting;
+    /** Set once Host or Join is pressed; guards against acting on someone else's connection. */
+    private boolean connectRequested;
     private String pendingUsername;
     private long pendingJoinCode;
     private TextInput messageText;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
-            .on(ConnectionEstablishedPacket.class, w -> app.sendJoinRequest(pendingUsername, pendingJoinCode))
-            .on(JoinResponse.class, w -> handleJoinResponse((JoinResponse) w.packet))
+            .on(ConnectionEstablishedPacket.class, w -> {
+                if (connectRequested) app.sendJoinRequest(pendingUsername, pendingJoinCode);
+            })
+            .on(JoinResponse.class, w -> {
+                if (connectRequested) handleJoinResponse((JoinResponse) w.packet);
+            })
             .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, isHosting)));
 
     public LanMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
 
         isHosting = false;
+        connectRequested = false;
         pendingUsername = "";
         pendingJoinCode = 0;
         messageText = new TextInput();
@@ -68,6 +75,7 @@ public class LanMenu extends MenuScreen {
             pendingUsername = hostUser;
             pendingJoinCode = code;
             isHosting = true;
+            connectRequested = true;
             messageText.set("Starting server...");
             app.startLanServer(NetConfig.PORT, code);
             app.setLanMode(true);
@@ -130,6 +138,7 @@ public class LanMenu extends MenuScreen {
             pendingUsername = joinUser;
             pendingJoinCode = code;
             isHosting = false;
+            connectRequested = true;
             app.setLanMode(true);
             app.setConnectDestination(ip, port);
             messageText.set("Connecting...");
@@ -141,10 +150,15 @@ public class LanMenu extends MenuScreen {
 
     @Override
     protected void onEscPressed() {
+        // Cancel first: disconnect() also invalidates a connect attempt that is still in
+        // flight, so it can't come back and join a server we are about to shut down.
+        connectRequested = false;
+        app.disconnect();
         if (isHosting) {
             app.stopLanServer();
+            isHosting = false;
         }
-        app.disconnect();
+        app.setLanMode(false);
         app.switchMenu(new MainMenu(app));
     }
 

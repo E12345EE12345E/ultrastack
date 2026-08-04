@@ -79,6 +79,9 @@ public final class GameConstants {
     public static final long SCORE_TRIPLE = 300;
     public static final long SCORE_TETRIS = 800;
 
+    /** Base score for a 3-line clear with an I3 (vertical 3-mino), analogous to a Tetris. */
+    public static final long SCORE_I3_TRIPLE = 600;
+
     public static final long SCORE_TSPIN_SINGLE = 400;
     public static final long SCORE_TSPIN_DOUBLE = 800;
     public static final long SCORE_TSPIN_TRIPLE = 1200;
@@ -94,4 +97,11 @@ public final class GameConstants {
     public static final long SCORE_SMALL_SPIN_SINGLE = 200;
     public static final long SCORE_SMALL_SPIN_DOUBLE = 400;
     public static final long SCORE_SMALL_SPIN_TRIPLE = 600;
+
+    /**
+     * Flat bonus added to a placement's score when it results in an All Clear (Perfect Clear).
+     * Applied post-multiplication, i.e. after all other bonuses have been applied to the
+     * base line-clear score. MULTIPLAYER_SCORE mode; see ScoreModeScorer#scoreHardDrop.
+     */
+    public static final long SCORE_ALL_CLEAR_BONUS = 2000;
 }

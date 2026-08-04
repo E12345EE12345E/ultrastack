@@ -86,5 +86,7 @@ final class BoardLineClear {
                 }
             }
         }
+
+        r.allClear = b.isAllClear();
     }
 }

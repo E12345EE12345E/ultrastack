@@ -69,6 +69,70 @@ class BoardTest {
     }
 
     @Test
+    void isAllClear_trueOnEmptyBoardFalseWithAnyTile() {
+        Board board = new Board(Board.Presets.STANDARD_SINGLE);
+        board.spawnInitialPieces();
+
+        assertTrue(board.isAllClear(), "freshly spawned board has no locked tiles yet");
+
+        board.getBoard()[0][0].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+        assertFalse(board.isAllClear());
+    }
+
+    @Test
+    void hardDrop_reportsAllClearWhenLastRowClearEmptiesBoard() {
+        Board board = new Board(Board.Presets.STANDARD_SINGLE);
+        board.spawnInitialPieces();
+
+        // Fill the bottom row except columns 4-6, leaving a slot for a flat I3 piece to
+        // complete it; this is the only non-empty row on the board.
+        Tile[][] cells = board.getBoard();
+        for (int x = 0; x < board.bw(); x++) {
+            if (x >= 4 && x <= 6) continue;
+            cells[0][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+        }
+
+        Piece i3Piece = Piece.defaultPiece(Piece.I3);
+        i3Piece.location.set(5f, 0.5f);
+        board.getActivePieces().set(0, i3Piece);
+
+        LineClearResult result = board.hardDrop(0);
+
+        assertNotNull(result);
+        assertTrue(result.placed);
+        assertEquals(1, result.numClearedRows());
+        assertTrue(result.allClear, "clearing the only occupied row should report an all clear");
+        assertTrue(board.isAllClear());
+    }
+
+    @Test
+    void hardDrop_doesNotReportAllClearWhenTilesRemain() {
+        Board board = new Board(Board.Presets.STANDARD_SINGLE);
+        board.spawnInitialPieces();
+
+        // Fill the bottom row except columns 4-6, and leave a garbage tile in row 1
+        // so the board is not fully empty after row 0 clears.
+        Tile[][] cells = board.getBoard();
+        for (int x = 0; x < board.bw(); x++) {
+            if (x >= 4 && x <= 6) continue;
+            cells[0][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+        }
+        cells[1][0].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+
+        Piece i3Piece = Piece.defaultPiece(Piece.I3);
+        i3Piece.location.set(5f, 0.5f);
+        board.getActivePieces().set(0, i3Piece);
+
+        LineClearResult result = board.hardDrop(0);
+
+        assertNotNull(result);
+        assertTrue(result.placed);
+        assertEquals(1, result.numClearedRows());
+        assertFalse(result.allClear);
+        assertFalse(board.isAllClear());
+    }
+
+    @Test
     void hardDrop_doesNotPlaceWhenRestingSolelyOnAnotherPlayersPiece() {
         Board board = new Board(Board.Presets.STANDARD_DUO);
         board.spawnInitialPieces();

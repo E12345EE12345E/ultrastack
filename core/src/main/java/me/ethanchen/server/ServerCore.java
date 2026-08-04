@@ -186,6 +186,14 @@ public class ServerCore implements PacketSender, Runnable {
 
         JoinResponse res = new JoinResponse();
 
+        if (req.playerName == null || req.playerName.trim().isEmpty()) {
+            res.accepted = false;
+            res.playerId = -1;
+            res.reason = "missing username";
+            sendTCP(w.connectionID, res);
+            return;
+        }
+
         String versionError = protocolVersionMismatchReason(req.protocolVersion);
         if (versionError != null) {
             res.accepted = false;
