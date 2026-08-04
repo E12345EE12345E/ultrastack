@@ -2,6 +2,9 @@ package me.ethanchen.server;
 
 import com.esotericsoftware.kryonet.Server;
 import me.ethanchen.game.GameConstants;
+import me.ethanchen.game.progression.Artifact;
+import me.ethanchen.game.progression.CharacterRegistry;
+import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.network.NetEndpoints;
 import me.ethanchen.network.NetworkRegister;
 import me.ethanchen.network.PacketDispatcher;
@@ -36,6 +39,7 @@ public class ServerCore implements PacketSender, Runnable {
     private final AuthProvider authProvider; // null = LAN mode
     private final ResultRecorder resultRecorder; // null = results not persisted (e.g. LAN mode)
     private final XpAwarder xpAwarder; // null = XP not awarded (e.g. LAN mode)
+    private final ProfileStore profileStore; // null = LAN mode (profiles are session-only)
     private final long lanJoinCode;          // only relevant in LAN mode
     private final int roomIdDigits;
     private final Random rng = new Random();
@@ -46,10 +50,12 @@ public class ServerCore implements PacketSender, Runnable {
     private final PacketDispatcher<ServerPacketWrapper> dispatcher;
 
     /** Account-mode constructor. */
-    public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, XpAwarder xpAwarder, int roomIdDigits) {
+    public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, XpAwarder xpAwarder,
+                       ProfileStore profileStore, int roomIdDigits) {
         this.authProvider = authProvider;
         this.resultRecorder = resultRecorder;
         this.xpAwarder = xpAwarder;
+        this.profileStore = profileStore;
         this.lanJoinCode = 0;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
@@ -62,10 +68,19 @@ public class ServerCore implements PacketSender, Runnable {
         this.authProvider = null;
         this.resultRecorder = null;
         this.xpAwarder = null;
+        // Session-only in-memory store: unifies LAN with the account-mode ProfileStore code
+        // path so GameRoom always has a store to resolve loadouts from at game start, while
+        // xpAwarder staying null (see grantVictoryArtifacts) keeps LAN from ever persisting
+        // real acquisition/fusion.
+        this.profileStore = new LanProfileStore();
         this.lanJoinCode = lanJoinCode;
         this.roomIdDigits = roomIdDigits;
         this.kryoServer = NetEndpoints.createServer();
         this.dispatcher = buildDispatcher();
+    }
+
+    ProfileStore getProfileStore() {
+        return profileStore;
     }
 
     /**
@@ -90,12 +105,17 @@ public class ServerCore implements PacketSender, Runnable {
             d.on(LeaveRoomRequest.class, w -> handleLeaveRoom(sessionFor(w)));
         }
 
+        // ---- Character/artifact profile packets (both modes) ----
+        d.on(LoadoutRequest.class, w -> handleLoadoutRequest(w, sessionFor(w)));
+        d.on(FusionRequest.class, w -> handleFusionRequest(w, sessionFor(w)));
+
         // ---- In-room packets (both modes) ----
         Consumer<ServerPacketWrapper> forward = w -> forwardToRoom(w, sessionFor(w));
         d.on(TextMessageRequest.class, forward);
         d.on(StartGameRequest.class, forward);
         d.on(MoveListRequest.class, forward);
         d.on(LocalPlayerCountRequest.class, forward);
+        d.on(AbilityRequest.class, forward);
         return d;
     }
 
@@ -222,7 +242,7 @@ public class ServerCore implements PacketSender, Runnable {
         int localPlayers = req.localPlayers & 0xFF;
         GameRoom lanRoom = rooms.computeIfAbsent("LAN", id ->
                 new GameRoom("LAN", this, w.connectionID, req.playerName, req.playerName,
-                        localPlayers, null, null));
+                        localPlayers, null, null, profileStore));
 
         GameRoom.AddMemberResult add = lanRoom.tryAddMember(
                 w.connectionID, req.playerName, session.accountUuid, localPlayers, GameConstants.MAX_PLAYERS);
@@ -245,6 +265,116 @@ public class ServerCore implements PacketSender, Runnable {
         // Ensure room thread is running
         if (!lanRoom.isRunning()) {
             lanRoom.start();
+        }
+
+        // LAN profiles are session-only: every character unlocked, two pre-rolled artifacts,
+        // no further acquisition or fusion (implementation.md, Part 5).
+        session.profile = profileStore.loadProfile(session.accountUuid);
+        session.profileReadOnly = true;
+        sendProfileSync(w.connectionID, session);
+    }
+
+    // -------------------------------------------------------------------------
+    // Character/artifact profile handlers (both modes)
+    // -------------------------------------------------------------------------
+
+    /** Loads (account mode) the profile for a freshly-authenticated session and syncs it to the client. */
+    private void loadAndSyncProfile(int connectionId, Session session) {
+        if (profileStore == null || session.accountUuid == null) return;
+        session.profile = profileStore.loadProfile(session.accountUuid);
+        session.profileReadOnly = false;
+        sendProfileSync(connectionId, session);
+    }
+
+    private void sendProfileSync(int connectionId, Session session) {
+        ProfileSyncBroadcast b = new ProfileSyncBroadcast();
+        b.profile = session.profile;
+        b.readOnly = session.profileReadOnly;
+        sendTCP(connectionId, b);
+    }
+
+    private void handleLoadoutRequest(ServerPacketWrapper w, Session session) {
+        if (session == null || session.profile == null) return;
+        LoadoutRequest req = (LoadoutRequest) w.packet;
+        PlayerProfile profile = session.profile;
+
+        if (CharacterRegistry.byId(req.characterId) == null || !profile.isCharacterUnlocked(req.characterId)) {
+            return; // silently ignore invalid/locked selection; client should not offer it
+        }
+        if (req.artifactIdA != null && profile.findArtifact(req.artifactIdA) == null) return;
+        if (req.artifactIdB != null && profile.findArtifact(req.artifactIdB) == null) return;
+
+        profile.selectedCharacterId = req.characterId;
+        profile.equippedArtifactIds[0] = (req.artifactIdA != null && !req.artifactIdA.isEmpty()) ? req.artifactIdA : null;
+        profile.equippedArtifactIds[1] = (req.artifactIdB != null && !req.artifactIdB.isEmpty()) ? req.artifactIdB : null;
+
+        // Loadout selection is always allowed and saved (even in LAN, where saving just updates
+        // the in-memory LanProfileStore so GameRoom sees it at game start); only acquisition and
+        // fusion are blocked for read-only (LAN) profiles.
+        if (profileStore != null) {
+            profileStore.saveProfile(session.accountUuid, profile);
+        }
+        sendProfileSync(w.connectionID, session);
+    }
+
+    private void handleFusionRequest(ServerPacketWrapper w, Session session) {
+        if (session == null || session.profile == null) return;
+        FusionResultBroadcast res = new FusionResultBroadcast();
+
+        if (session.profileReadOnly) {
+            res.success = false;
+            res.reason = "fusion is not available in LAN mode";
+            sendTCP(w.connectionID, res);
+            return;
+        }
+
+        FusionRequest req = (FusionRequest) w.packet;
+        PlayerProfile profile = session.profile;
+        if (req.artifactIds == null || req.artifactIds.length != 5) {
+            res.success = false;
+            res.reason = "fusion requires exactly 5 artifacts";
+            sendTCP(w.connectionID, res);
+            return;
+        }
+
+        java.util.List<Artifact> inputs = new java.util.ArrayList<>();
+        for (String id : req.artifactIds) {
+            Artifact a = profile.findArtifact(id);
+            if (a == null) {
+                res.success = false;
+                res.reason = "artifact not owned: " + id;
+                sendTCP(w.connectionID, res);
+                return;
+            }
+            if (id.equals(profile.equippedArtifactIds[0]) || id.equals(profile.equippedArtifactIds[1])) {
+                res.success = false;
+                res.reason = "cannot fuse an equipped artifact";
+                sendTCP(w.connectionID, res);
+                return;
+            }
+            inputs.add(a);
+        }
+
+        try {
+            me.ethanchen.game.progression.ArtifactFusion.Result fused =
+                    me.ethanchen.game.progression.ArtifactFusion.fuse(inputs, rng);
+            profile.inventory.removeIf(a -> {
+                for (String id : req.artifactIds) if (id.equals(a.id)) return true;
+                return false;
+            });
+            profile.inventory.add(fused.artifact);
+            if (profileStore != null) {
+                profileStore.saveProfile(session.accountUuid, profile);
+            }
+            res.success = true;
+            res.reason = "";
+            res.result = fused.artifact;
+            sendTCP(w.connectionID, res);
+            sendProfileSync(w.connectionID, session);
+        } catch (IllegalArgumentException e) {
+            res.success = false;
+            res.reason = e.getMessage();
+            sendTCP(w.connectionID, res);
         }
     }
 
@@ -288,6 +418,9 @@ public class ServerCore implements PacketSender, Runnable {
             res.reason = error;
         }
         sendTCP(w.connectionID, res);
+        if (res.success) {
+            loadAndSyncProfile(w.connectionID, session);
+        }
     }
 
     private void handleRegister(ServerPacketWrapper w, Session session) {
@@ -321,6 +454,9 @@ public class ServerCore implements PacketSender, Runnable {
             res.reason = error;
         }
         sendTCP(w.connectionID, res);
+        if (res.success) {
+            loadAndSyncProfile(w.connectionID, session);
+        }
     }
 
     private void handleRoomListRequest(ServerPacketWrapper w, Session session) {
@@ -349,7 +485,7 @@ public class ServerCore implements PacketSender, Runnable {
         CreateRoomRequest createReq = (CreateRoomRequest) w.packet;
         int localPlayers = createReq.localPlayers & 0xFF;
         GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid,
-                localPlayers, resultRecorder, xpAwarder);
+                localPlayers, resultRecorder, xpAwarder, profileStore);
         rooms.put(roomId, room);
         session.currentRoomId = roomId;
         room.start();

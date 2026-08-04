@@ -1,5 +1,10 @@
 package me.ethanchen.headless;
 
+import com.badlogic.gdx.utils.Json;
+import com.badlogic.gdx.utils.JsonWriter;
+
+import me.ethanchen.game.progression.PlayerProfile;
+import me.ethanchen.server.ProfileStore;
 import me.ethanchen.server.XpAwarder;
 
 import java.io.File;
@@ -21,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Core fields live in dedicated columns; anything added later goes into {@code extra_json}
  * so old rows and new player-account features stay compatible without a schema migration.
  */
-public class AccountStore implements XpAwarder {
+public class AccountStore implements XpAwarder, ProfileStore {
     private static final int SCHEMA_VERSION = 1;
 
     private final ConcurrentHashMap<String, Account> byUsername = new ConcurrentHashMap<>(); // key: lowercase username
@@ -106,6 +111,50 @@ public class AccountStore implements XpAwarder {
             acct.xp = newXp;
         } catch (SQLException e) {
             System.err.println("[AccountStore] Failed to award XP: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Loads a player's character/artifact profile from {@code extra_json}. New/blank profiles
+     * (including accounts created before this system existed) lazily migrate to
+     * {@link PlayerProfile#defaultProfile()} on first read.
+     */
+    @Override
+    public synchronized PlayerProfile loadProfile(String accountUuid) {
+        Account acct = byUuid.get(accountUuid);
+        if (acct == null || acct.extraJson == null || acct.extraJson.isEmpty()) {
+            return PlayerProfile.defaultProfile();
+        }
+        try {
+            Json json = new Json();
+            AccountExtra extra = json.fromJson(AccountExtra.class, acct.extraJson);
+            if (extra == null || extra.profile == null) return PlayerProfile.defaultProfile();
+            return extra.profile;
+        } catch (Exception e) {
+            System.err.println("[AccountStore] Failed to parse extra_json for " + accountUuid + ": " + e.getMessage());
+            return PlayerProfile.defaultProfile();
+        }
+    }
+
+    /** Persists {@code profile} into {@code extra_json}, immediately committing to disk. */
+    @Override
+    public synchronized void saveProfile(String accountUuid, PlayerProfile profile) {
+        Account acct = byUuid.get(accountUuid);
+        if (acct == null) return;
+        AccountExtra extra = new AccountExtra();
+        extra.profile = profile;
+        Json json = new Json();
+        json.setOutputType(JsonWriter.OutputType.json);
+        String extraJson = json.toJson(extra);
+
+        String sql = "UPDATE accounts SET extra_json = ? WHERE uuid = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, extraJson);
+            ps.setString(2, accountUuid);
+            ps.executeUpdate();
+            acct.extraJson = extraJson;
+        } catch (SQLException e) {
+            System.err.println("[AccountStore] Failed to save profile: " + e.getMessage());
         }
     }
 

@@ -33,6 +33,8 @@ class ClientMovePredictor {
         this.localIndex = (byte) localIndex;
     }
 
+    byte getLocalIndex() { return localIndex; }
+
     boolean hasTooManyPending() { return pendingMoves.size() > MAX_PENDING_MOVES; }
     boolean hasAny() { return !pendingMoves.isEmpty(); }
 

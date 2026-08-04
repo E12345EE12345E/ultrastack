@@ -25,8 +25,15 @@ class ScoreModeScorer {
     private final Random scoreRng = new Random();
     private int players;
     private GameHandler game;
+    /** Non-null only for CHARACTER_ modes: supplies the artifact/passive score bonus percent. */
+    private CharacterScoreBonusProvider bonusProvider;
 
     ScoreModeScorer() {}
+
+    /** Set by {@link ServerGame} for CHARACTER_ modes; cleared (null) for plain MULTIPLAYER_SCORE. */
+    void setBonusProvider(CharacterScoreBonusProvider bonusProvider) {
+        this.bonusProvider = bonusProvider;
+    }
 
     /** Re-initialises scorer for a new game. */
     void reset(int players, GameHandler game) {
@@ -51,11 +58,11 @@ class ScoreModeScorer {
      * updates combo/B2B counters via {@code game}, and ramps gravity.
      * Called only in MULTIPLAYER_SCORE mode.
      */
-    void scoreHardDrop(LineClearResult result, PlacementEffects effects) {
+    long scoreHardDrop(LineClearResult result, PlacementEffects effects) {
         int lines = result.numClearedRows();
         if (lines == 0) {
             game.applyClearToCounters(result);
-            return;
+            return 0L;
         }
 
         int priorB2b = game.getB2b();
@@ -75,6 +82,11 @@ class ScoreModeScorer {
         if (comboBonus)  multiplier *= GameConstants.COMBO_MULTIPLIER;
         if (glowBonus)   multiplier *= GameConstants.GLOW_MULTIPLIER;
         if (diffColBonus) multiplier *= GameConstants.DIFF_COLUMN_MULTIPLIER;
+        if (bonusProvider != null) {
+            float artifactBonusPercent = bonusProvider.scoreBonusPercent(
+                    result.playerId, result.pieceType, lines > 0, result.spinType != SpinType.NONE);
+            multiplier *= (1.0 + artifactBonusPercent / 100.0);
+        }
         long points = Math.round(base * multiplier);
         if (result.allClear) points += GameConstants.SCORE_ALL_CLEAR_BONUS;
         totalScore += points;
@@ -121,6 +133,8 @@ class ScoreModeScorer {
             newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
         }
         game.setGravity(newGravity);
+
+        return points;
     }
 
     ScoreModeData getScoreModeData() {

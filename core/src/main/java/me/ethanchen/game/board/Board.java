@@ -33,6 +33,8 @@ public class Board {
     public Vector2 getSpawnPos(int p) { return spawnPositions[p]; }
     public PieceQueue[] getPieceQueues() { return pieceQueues; }
     public PieceQueue getPieceQueue(int p) { return pieceQueues[p]; }
+    /** Replaces a player's queue, e.g. for a character's bag override. Must be called before any piece is taken from it. */
+    public void setPieceQueue(int p, PieceQueue queue) { pieceQueues[p] = queue; }
     public ArrayList<Piece> getActivePieces() { return activePieces; }
     public Piece getActivePiece(int p) { return activePieces.get(p); }
     public byte getHeldPieceType() { return heldPieceType; }

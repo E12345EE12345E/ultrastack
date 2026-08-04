@@ -5,6 +5,10 @@ import com.esotericsoftware.kryo.Kryo;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.PieceQueue;
+import me.ethanchen.game.progression.Artifact;
+import me.ethanchen.game.progression.ArtifactEffect;
+import me.ethanchen.game.progression.ArtifactEffectType;
+import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
@@ -15,14 +19,17 @@ import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.*;
 import me.ethanchen.network.packets.other.*;
 import me.ethanchen.network.packets.s2c.*;
+import me.ethanchen.network.packets.s2c.gamemode.CharacterModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
+import java.util.ArrayList;
+
 public class NetworkRegister {
     // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
-    public static final byte PROTOCOL_VERSION = 14;
+    public static final byte PROTOCOL_VERSION = 15;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -95,5 +102,20 @@ public class NetworkRegister {
         kryo.register(HostChangedBroadcast.class);
         kryo.register(RoomInfo.class);
         kryo.register(RoomInfo[].class);
+        // Character and leveling system (implementation.md)
+        kryo.register(ArrayList.class);
+        kryo.register(ArtifactEffectType.class);
+        kryo.register(ArtifactEffect.class);
+        kryo.register(ArtifactEffect[].class);
+        kryo.register(Artifact.class);
+        kryo.register(Artifact[].class);
+        kryo.register(PlayerProfile.class);
+        kryo.register(ProfileSyncBroadcast.class);
+        kryo.register(LoadoutRequest.class);
+        kryo.register(ArtifactGrantBroadcast.class);
+        kryo.register(FusionRequest.class);
+        kryo.register(FusionResultBroadcast.class);
+        kryo.register(AbilityRequest.class);
+        kryo.register(CharacterModeData.class);
     }
 }

@@ -12,10 +12,23 @@ public enum GameMode {
     },
     MULTIPLAYER_PUZZLE {
         @Override public GameModeRules rules() { return PUZZLE_RULES; }
+    },
+    /** Same mechanics as {@link #MULTIPLAYER_SCORE}, but characters and artifacts are active (implementation.md, Part 5). */
+    CHARACTER_SCORE {
+        @Override public GameModeRules rules() { return SCORE_RULES; }
     };
 
     /** Returns the rules strategy for this game mode. */
     public abstract GameModeRules rules();
+
+    /**
+     * True for gamemodes prefixed {@code CHARACTER_}, meaning characters and artifacts affect
+     * scoring; {@code MULTIPLAYER_} modes never do, even though artifacts can still be earned
+     * from them (implementation.md, Part 5).
+     */
+    public boolean supportsCharacters() {
+        return name().startsWith("CHARACTER_");
+    }
 
     // -------------------------------------------------------------------------
     // Rule implementations (static singletons, one per non-NONE mode)

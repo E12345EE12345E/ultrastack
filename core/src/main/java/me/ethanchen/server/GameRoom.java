@@ -2,12 +2,18 @@ package me.ethanchen.server;
 
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameMode;
+import me.ethanchen.game.progression.Artifact;
+import me.ethanchen.game.progression.ArtifactAcquisition;
+import me.ethanchen.game.progression.CharacterDef;
+import me.ethanchen.game.progression.CharacterRegistry;
+import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.ServerPacketWrapper;
 import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
+import me.ethanchen.network.packets.c2s.AbilityRequest;
 import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
@@ -20,6 +26,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class GameRoom implements Runnable, GameRoomContext {
@@ -102,6 +109,7 @@ public class GameRoom implements Runnable, GameRoomContext {
     private int hostConnId;
     private final ResultRecorder resultRecorder;
     private final XpAwarder xpAwarder;
+    private final ProfileStore profileStore;
 
     private volatile ServerGame serverGame;
     private volatile boolean running;
@@ -112,23 +120,29 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     /** Used for LAN rooms, which never persist results. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
-        this(roomId, sender, hostConnId, hostName, hostName, 1, null, null);
+        this(roomId, sender, hostConnId, hostName, hostName, 1, null, null, null);
     }
 
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
                     int hostLocalPlayers, ResultRecorder resultRecorder, XpAwarder xpAwarder) {
+        this(roomId, sender, hostConnId, hostName, hostUuid, hostLocalPlayers, resultRecorder, xpAwarder, null);
+    }
+
+    public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
+                    int hostLocalPlayers, ResultRecorder resultRecorder, XpAwarder xpAwarder, ProfileStore profileStore) {
         this.roomId = roomId;
         this.sender = sender;
         this.hostConnId = hostConnId;
         this.resultRecorder = resultRecorder;
         this.xpAwarder = xpAwarder;
+        this.profileStore = profileStore;
         addMemberUnconditional(hostConnId, hostName, hostUuid, hostLocalPlayers);
     }
 
     /** Convenience for account-mode create where localPlayers defaults to 1. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName, String hostUuid,
-                    ResultRecorder resultRecorder, XpAwarder xpAwarder) {
-        this(roomId, sender, hostConnId, hostName, hostUuid, 1, resultRecorder, xpAwarder);
+                    ResultRecorder resultRecorder, XpAwarder xpAwarder, ProfileStore profileStore) {
+        this(roomId, sender, hostConnId, hostName, hostUuid, 1, resultRecorder, xpAwarder, profileStore);
     }
 
     private PacketDispatcher<ServerPacketWrapper> buildDispatcher() {
@@ -136,7 +150,8 @@ public class GameRoom implements Runnable, GameRoomContext {
                 .on(TextMessageRequest.class, this::handleTextMessage)
                 .on(StartGameRequest.class, this::handleStartGameRequest)
                 .on(MoveListRequest.class, this::handleMoveListRequest)
-                .on(LocalPlayerCountRequest.class, this::handleLocalPlayerCountRequest);
+                .on(LocalPlayerCountRequest.class, this::handleLocalPlayerCountRequest)
+                .on(AbilityRequest.class, this::handleAbilityRequest);
     }
 
     // -------------------------------------------------------------------------
@@ -419,7 +434,8 @@ public class GameRoom implements Runnable, GameRoomContext {
         if (playerCount == 0) return;
 
         serverGame = new ServerGame(this);
-        serverGame.startGame(gameMode, playerCount, GameConstants.GAME_START_DELAY_MS);
+        ActiveLoadout[] loadouts = buildLoadouts(playerCount, gameMode.supportsCharacters());
+        serverGame.startGame(gameMode, playerCount, GameConstants.GAME_START_DELAY_MS, loadouts);
 
         long startTimeMs = System.currentTimeMillis() + GameConstants.GAME_START_DELAY_MS;
         String[] playerNames = buildActivePlayerNames();
@@ -431,6 +447,42 @@ public class GameRoom implements Runnable, GameRoomContext {
 
         System.out.println("[GameRoom " + roomId + "] Game started: mode=" + gameMode
                 + " players=" + playerCount);
+    }
+
+    /**
+     * Resolves each seated slot's equipped character and artifacts into a per-slot snapshot for
+     * {@link ServerGame#startGame}, so a loadout change mid-game never affects the current game
+     * (implementation.md, Part 4). Returns an all-null array (or {@code null} entries) for modes
+     * that don't support characters, or slots without a resolvable profile.
+     */
+    private ActiveLoadout[] buildLoadouts(int playerCount, boolean charactersEnabled) {
+        ActiveLoadout[] loadouts = new ActiveLoadout[playerCount];
+        if (!charactersEnabled || profileStore == null) return loadouts;
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.slot < 0 || s.slot >= playerCount) continue;
+                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
+                PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
+                CharacterDef character = CharacterRegistry.byId(profile.selectedCharacterId);
+                if (character == null) character = CharacterRegistry.byId(0);
+                Artifact a = profile.findArtifact(profile.equippedArtifactIds[0]);
+                Artifact b = profile.findArtifact(profile.equippedArtifactIds[1]);
+                loadouts[s.slot] = new ActiveLoadout(character, a, b);
+            }
+        }
+        return loadouts;
+    }
+
+    private void handleAbilityRequest(ServerPacketWrapper w) {
+        if (serverGame == null || !serverGame.isInProgress()) return;
+        int[] slots = connToSlots.get(w.connectionID);
+        if (slots == null) return;
+        AbilityRequest req = (AbilityRequest) w.packet;
+        int localIndex = req.localIndex & 0xFF;
+        if (localIndex < 0 || localIndex >= slots.length) return;
+        int slot = slots[localIndex];
+        if (slot < 0) return;
+        serverGame.activateAbility(slot);
     }
 
     private void sendSpectatorStartGame(int connId) {
@@ -612,19 +664,47 @@ public class GameRoom implements Runnable, GameRoomContext {
             if (resultRecorder != null) {
                 resultRecorder.recordGameResult(GameResultData.from(info, players));
             }
-            if (xpAwarder != null) {
-                long xp = XpCalculator.computeXp(info.mode, info.score);
-                if (xp > 0) {
-                    for (PlayerResultInfo player : players) {
-                        if (player.accountUuid != null && !player.accountUuid.isEmpty()) {
-                            xpAwarder.awardXp(player.accountUuid, xp);
-                        }
+            long xp = XpCalculator.computeXp(info.mode, info.score);
+            if (xpAwarder != null && xp > 0) {
+                for (PlayerResultInfo player : players) {
+                    if (player.accountUuid != null && !player.accountUuid.isEmpty()) {
+                        xpAwarder.awardXp(player.accountUuid, xp);
                     }
                 }
+            }
+
+            // Artifact acquisition: only on victories in modes that grant xp, and only for real
+            // (non-LAN) accounts -- LAN never persists xp (xpAwarder == null there) and must not
+            // grant artifacts either (implementation.md, Part 5).
+            if (info.win && xp > 0 && profileStore != null && xpAwarder != null) {
+                grantVictoryArtifacts(xp);
             }
         }
 
         // Game ended — allow reseating for next round (triggered via onGameStopped after stopGame)
+    }
+
+    private final Random artifactRng = new Random();
+
+    /**
+     * Rolls and grants one artifact to each real (non-extra) seated player on a victory,
+     * per implementation.md, Part 2. Extra local players (empty accountUuid) never earn xp and
+     * so never receive artifacts either.
+     */
+    private void grantVictoryArtifacts(long xp) {
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
+                PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
+                Artifact artifact = ArtifactAcquisition.rollFromVictory(xp, artifactRng);
+                profile.inventory.add(artifact);
+                profileStore.saveProfile(s.accountUuid, profile);
+
+                ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
+                grant.artifact = artifact;
+                sender.sendTCP(m.connId, grant);
+            }
+        }
     }
 
     @Override

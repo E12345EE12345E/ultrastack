@@ -48,6 +48,8 @@ public class GameSettings {
         public int rotate180  = Input.Keys.A;
         public int hold       = Input.Keys.C;
         public int hardDrop   = Input.Keys.SPACE;
+        /** Activates the current character's active ability (implementation.md, Part 1). */
+        public int ability    = Input.Keys.F;
 
         // Keyboard slot 2 (secondary); -1 = unbound
         public int left2       = -1;
@@ -58,6 +60,7 @@ public class GameSettings {
         public int rotate180_2 = -1;
         public int hold2       = -1;
         public int hardDrop2   = -1;
+        public int ability2    = -1;
 
         // Controller slot 1; -1 = unbound
         // SDL2 GameController button order (used by gdx-controllers 2.x):
@@ -71,6 +74,7 @@ public class GameSettings {
         public int ctrlRotateCcw = 1;  // B
         public int ctrlRotate180 = -1;
         public int ctrlHold      = 9;  // LB
+        public int ctrlAbility   = 8;  // RS
 
         // Controller slot 2; -1 = unbound
         public int ctrlLeft2      = -1;
@@ -81,5 +85,6 @@ public class GameSettings {
         public int ctrlRotateCcw2 = 2;  // X
         public int ctrlRotate180_2 = -1;
         public int ctrlHold2      = 10; // RB
+        public int ctrlAbility2   = -1;
     }
 }
