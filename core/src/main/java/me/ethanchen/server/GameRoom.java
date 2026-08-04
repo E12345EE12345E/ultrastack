@@ -687,22 +687,27 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final Random artifactRng = new Random();
 
     /**
-     * Rolls and grants one artifact to each real (non-extra) seated player on a victory,
+     * Rolls and grants artifacts to each real (non-extra) seated player on a victory,
      * per implementation.md, Part 2. Extra local players (empty accountUuid) never earn xp and
      * so never receive artifacts either.
+     *
+     * <p>TEMP: rolls 100 artifacts per player for testing; revert to a single roll shortly.
      */
     private void grantVictoryArtifacts(long xp) {
         for (RoomMember m : members) {
             for (Seat s : m.seats) {
                 if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
                 PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
-                Artifact artifact = ArtifactAcquisition.rollFromVictory(xp, artifactRng);
-                profile.inventory.add(artifact);
-                profileStore.saveProfile(s.accountUuid, profile);
+                // TEMP: 100 rolls for testing — revert to 1.
+                for (int i = 0; i < 100; i++) {
+                    Artifact artifact = ArtifactAcquisition.rollFromVictory(xp, artifactRng);
+                    profile.inventory.add(artifact);
 
-                ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
-                grant.artifact = artifact;
-                sender.sendTCP(m.connId, grant);
+                    ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
+                    grant.artifact = artifact;
+                    sender.sendTCP(m.connId, grant);
+                }
+                profileStore.saveProfile(s.accountUuid, profile);
             }
         }
     }

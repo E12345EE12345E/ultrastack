@@ -5,7 +5,7 @@ import java.util.UUID;
 
 /**
  * Rolls new {@link Artifact} instances and additional levels on existing ones, per the acquisition
- * math in implementation.md, Part 2.
+ * math in implementation.md, Parts 1–3.
  */
 public final class ArtifactRoller {
 
@@ -25,8 +25,9 @@ public final class ArtifactRoller {
     }
 
     /**
-     * Rolls {@code additionalLevels} new effect entries onto an existing artifact and bumps its
-     * level accordingly, keeping its previous effects and base quality (direct level-up, Part 1).
+     * Rolls {@code additionalLevels} exclusive effect picks onto an existing artifact and bumps
+     * its level accordingly, keeping its previous effects and base quality (direct level-up,
+     * Part 1).
      */
     public static void levelUp(Artifact artifact, int additionalLevels, Random rng) {
         for (int i = 0; i < additionalLevels; i++) {
@@ -35,17 +36,19 @@ public final class ArtifactRoller {
         artifact.level += additionalLevels;
     }
 
+    /**
+     * One level = exactly one mutually exclusive pick from the type's effect table, then a
+     * quality tweak against the artifact's base quality.
+     */
     private static void rollAndAppendLevel(Artifact artifact, Random rng) {
-        ArtifactTables.Row row = ArtifactTables.rollRow(artifact.pieceType, rng);
-        float tweakedQuality = tweakQuality(row.quality, artifact.baseQuality, rng);
-        for (ArtifactEffectType type : row.effects) {
-            artifact.effects.add(new ArtifactEffect(type, tweakedQuality));
-        }
+        ArtifactTables.Chance chance = ArtifactTables.rollChance(artifact.pieceType, rng);
+        float quality = tweakQuality(chance.quality, artifact.baseQuality, rng);
+        artifact.effects.add(new ArtifactEffect(chance.effect, quality));
     }
 
     /**
      * Applies the base-quality tweak: 5 independent 0-100 rolls, each multiplying {@code quality}
-     * by 1.1 on success (roll < baseQuality) or 0.9 on failure. Yields a range of roughly 59%-161%
+     * by 1.1 on success (roll &lt; baseQuality) or 0.9 on failure. Yields a range of roughly 59%-161%
      * of the untweaked quality.
      */
     static float tweakQuality(float quality, float baseQuality, Random rng) {

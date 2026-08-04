@@ -7,8 +7,8 @@ import me.ethanchen.game.board.Piece;
 
 /**
  * A single acquired artifact instance: a piece-typed item with a hidden {@code baseQuality} that
- * biases future effect rolls, and a list of independently-rolled effect entries -- one per level
- * (implementation.md, Part 1).
+ * biases future effect rolls, and a list of independently-rolled effect entries -- exactly one
+ * per level (implementation.md, Parts 1 and 3).
  */
 public class Artifact {
     public String id;

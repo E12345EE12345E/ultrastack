@@ -16,9 +16,10 @@ public final class ArtifactAcquisition {
 
     private ArtifactAcquisition() {}
 
-    /** Maps earned xp directly to a 0-100 base quality; xp above 100 simply caps at max quality. */
+    /** Maps earned xp to a 0-100 base quality. 160000 xp = 100% quality. */
     public static float baseQualityFromXp(long xp) {
-        return Math.max(0f, Math.min(100f, (float) xp));
+        float b = (float) Math.sqrt(Math.max(0, xp)) / 4f;
+        return Math.max(0f, Math.min(100f, b));
     }
 
     public static Artifact rollFromVictory(long xp, Random rng) {
