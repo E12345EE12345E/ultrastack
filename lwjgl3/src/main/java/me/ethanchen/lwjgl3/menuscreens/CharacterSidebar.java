@@ -10,7 +10,7 @@ import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.render.CharacterAssets;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIElement;
-import me.ethanchen.lwjgl3.menuscreens.ui.UIIconButton;
+import me.ethanchen.lwjgl3.menuscreens.ui.UIInventoryButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 
 /**
@@ -26,9 +26,9 @@ import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 public class CharacterSidebar {
     private final ClientApp app;
     private final Supplier<Boolean> charactersEnabled;
-    private final UIIconButton portrait;
-    private final UIIconButton artifactA;
-    private final UIIconButton artifactB;
+    private final UIInventoryButton portrait;
+    private final UIInventoryButton artifactA;
+    private final UIInventoryButton artifactB;
     private final UIText nameText;
 
     public CharacterSidebar(ClientApp app, ArrayList<UIElement> elements, MenuScreen returnScreen,
@@ -39,9 +39,9 @@ public class CharacterSidebar {
         double x = 0.08;
         Runnable open = () -> app.switchMenu(new CharacterScreen(app, returnScreen, charactersEnabled));
 
-        portrait = new UIIconButton(x, 0.78, 0.11, null, open);
-        artifactA = new UIIconButton(x - 0.045, 0.65, 0.06, null, open);
-        artifactB = new UIIconButton(x + 0.045, 0.65, 0.06, null, open);
+        portrait = new UIInventoryButton(x, 0.78, 0.11, null, open);
+        artifactA = new UIInventoryButton(x - 0.045, 0.65, 0.06, null, open);
+        artifactB = new UIInventoryButton(x + 0.045, 0.65, 0.06, null, open);
         nameText = new UIText(x, 0.71, "", 0.75);
 
         elements.add(portrait);
@@ -62,17 +62,27 @@ public class CharacterSidebar {
         boolean enabled = Boolean.TRUE.equals(charactersEnabled.get());
 
         CharacterDef character = profile != null ? CharacterRegistry.byId(profile.selectedCharacterId) : null;
-        portrait.icon = character != null ? CharacterAssets.portraitFor(character.id) : null;
+        if (character != null) {
+            portrait.showItem(CharacterAssets.portraitFor(character.id), null, null);
+        } else {
+            portrait.clearSlot(null);
+        }
         portrait.grayscale = !enabled;
         nameText.textin.set(character != null ? character.name : "No character");
 
         Artifact a = profile != null ? profile.findArtifact(profile.equippedArtifactIds[0]) : null;
         Artifact b = profile != null ? profile.findArtifact(profile.equippedArtifactIds[1]) : null;
-        artifactA.icon = CharacterAssets.artifactIconFor(a);
+        if (a != null) {
+            artifactA.showItem(CharacterAssets.artifactIconFor(a), a.id, null);
+        } else {
+            artifactA.clearSlot("-");
+        }
         artifactA.grayscale = !enabled;
-        artifactA.placeholderText = a == null ? "-" : null;
-        artifactB.icon = CharacterAssets.artifactIconFor(b);
+        if (b != null) {
+            artifactB.showItem(CharacterAssets.artifactIconFor(b), b.id, null);
+        } else {
+            artifactB.clearSlot("-");
+        }
         artifactB.grayscale = !enabled;
-        artifactB.placeholderText = b == null ? "-" : null;
     }
 }

@@ -73,19 +73,19 @@ public class UIText extends UIElement {
 
     @Override
     public void render(ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
-        float screenW = Gdx.graphics.getWidth();
-        float screenH = Gdx.graphics.getHeight();
-
         float pxX = MenuScreen.convertFromRelCoordsX((float) centerX);
-        float pxY = Gdx.graphics.getHeight() - MenuScreen.convertFromRelCoordsY((float) centerY);
+        float pxY = MenuScreen.toScreenYBottom((float) centerY);
 
         float[] savedScale = UIFont.saveAndSetScale(font, size);
 
         sprites.begin();
         String text = textin.get();
         GlyphLayout layout = new GlyphLayout(font, (text != null) ? text : "");
-        this.width = layout.width / screenW;
-        this.height = layout.height / screenH;
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        float refW = vp != null ? vp.viewW : Gdx.graphics.getWidth();
+        float refH = vp != null ? vp.viewH : Gdx.graphics.getHeight();
+        this.width = layout.width / refW;
+        this.height = layout.height / refH;
 
         float x;
         float y;

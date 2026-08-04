@@ -7,9 +7,9 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
  * Shared font-scale helpers for all UI widgets.
  *
  * <p>A "unit" multiplier ({@code mult = 1}) scales the font so that a typical glyph is
- * approximately {@value #REF_LINE_HEIGHT}px tall at a {@value #REF_HEIGHT}px window height,
- * then scales linearly with the actual window height so the UI stays proportional on any
- * resolution.
+ * approximately {@value #REF_LINE_HEIGHT}px tall at a {@value #REF_HEIGHT}px reference height,
+ * then scales linearly with the active UI height (window height for Simple UI, fitted design
+ * rect height for Aspect-locked UI).
  */
 public final class UIFont {
 
@@ -20,14 +20,16 @@ public final class UIFont {
 
     /**
      * Sets the font scale so that {@code mult = 1} produces a ~{@value #REF_LINE_HEIGHT}px glyph
-     * at {@value #REF_HEIGHT}px window height.
+     * at {@value #REF_HEIGHT}px reference height.
      *
      * <p>The caller is responsible for saving and restoring the previous scale if needed.
      */
     public static void setScale(BitmapFont font, float mult) {
         font.getData().setScale(1f);
         float adj = REF_LINE_HEIGHT / font.getData().lineHeight;
-        font.getData().setScale(mult * adj * (Gdx.graphics.getHeight() / REF_HEIGHT));
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        float height = vp != null ? vp.viewH : Gdx.graphics.getHeight();
+        font.getData().setScale(mult * adj * (height / REF_HEIGHT));
     }
 
     /**

@@ -12,6 +12,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 
 import me.ethanchen.lwjgl3.ClientApp;
+import me.ethanchen.lwjgl3.menuscreens.ui.AspectLockedViewport;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIElement;
 import me.ethanchen.lwjgl3.menuscreens.ui.UITextBox;
 import me.ethanchen.network.ClientPacketWrapper;
@@ -109,19 +110,54 @@ public abstract class MenuScreen extends InputAdapter {
     }
 
     public static float convertToRelCoordsX(int screenX) {
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) return vp.toRelX(screenX);
         return (float) HdpiUtils.toBackBufferX(screenX) / Gdx.graphics.getWidth();
     }
 
     public static float convertToRelCoordsY(int screenY) {
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) return vp.toRelY(screenY);
         return (float) (Gdx.graphics.getHeight() - HdpiUtils.toBackBufferY(screenY)) / Gdx.graphics.getHeight();
     }
 
+    /**
+     * Screen X of a relative center (or left edge when used with half-width). For Simple UI this is
+     * {@code rel * windowW}; for Aspect-locked UI it maps through the fitted design rect.
+     */
     public static float convertFromRelCoordsX(float relX) {
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) return vp.toScreenX(relX);
         return relX * Gdx.graphics.getWidth();
     }
 
+    /**
+     * Top-down screen Y ({@code 0} at top of window) of a relative Y — kept for callers that
+     * previously used this form. Prefer {@link #toScreenYBottom(float)} for new layout math.
+     */
     public static float convertFromRelCoordsY(float relY) {
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) return Gdx.graphics.getHeight() - vp.toScreenY(relY);
         return Gdx.graphics.getHeight() - (relY * Gdx.graphics.getHeight());
+    }
+
+    /** Bottom-up screen Y of a relative Y ({@code 0} at bottom). */
+    public static float toScreenYBottom(float relY) {
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) return vp.toScreenY(relY);
+        return relY * Gdx.graphics.getHeight();
+    }
+
+    public static float toScreenWidth(float relW) {
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) return vp.toScreenW(relW);
+        return relW * Gdx.graphics.getWidth();
+    }
+
+    public static float toScreenHeight(float relH) {
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) return vp.toScreenH(relH);
+        return relH * Gdx.graphics.getHeight();
     }
 
     public static void linkTextBoxTabChain(ArrayList<UIElement> elements) {

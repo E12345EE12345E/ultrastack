@@ -62,7 +62,7 @@ public final class CharacterDef {
     /** id 0: (Placeholder Name) 3-Mino. */
     public static final CharacterDef THREE_MINO = new CharacterDef(
             0, "3-Mino",
-            1.0f, 100f, 3000f,
+            1.0f, 300f, 3000f,
             CharacterAbility.RANDOM_I3_OR_L3, null,
             new byte[]{Piece.I3, Piece.L3}, 50f,
             4.0f, 1.0f);
@@ -70,7 +70,7 @@ public final class CharacterDef {
     /** id 1: (Placeholder Name) Wizard. */
     public static final CharacterDef WIZARD = new CharacterDef(
             1, "Wizard",
-            0.5f, 300f, 2000f,
+            1.0f, 25f, 3000f,
             CharacterAbility.FORCE_I, PieceQueue.BagTypes.BAG_WIZARD,
             null, 0f,
             1.0f, 1.0f);

@@ -31,6 +31,13 @@ public class AccountStore implements XpAwarder, ProfileStore {
 
     private final ConcurrentHashMap<String, Account> byUsername = new ConcurrentHashMap<>(); // key: lowercase username
     private final ConcurrentHashMap<String, Account> byUuid = new ConcurrentHashMap<>();
+    /**
+     * Live profile instances keyed by account uuid. {@link #loadProfile} must return a stable
+     * object for the life of the process so that {@code ServerCore.session.profile} and callers
+     * like {@code GameRoom.grantVictoryArtifacts} mutate the same inventory -- otherwise fusion
+     * (and loadout) see a stale copy while the DB/client already have newly granted artifacts.
+     */
+    private final ConcurrentHashMap<String, PlayerProfile> profileCache = new ConcurrentHashMap<>();
     private final Connection connection;
 
     public AccountStore(String dbPath) {
@@ -115,14 +122,27 @@ public class AccountStore implements XpAwarder, ProfileStore {
     }
 
     /**
-     * Loads a player's character/artifact profile from {@code extra_json}. New/blank profiles
-     * (including accounts created before this system existed) lazily migrate to
-     * {@link PlayerProfile#defaultProfile()} on first read.
+     * Returns the live in-memory profile for {@code accountUuid}, deserializing from
+     * {@code extra_json} only on the first access (or {@link PlayerProfile#defaultProfile()} for
+     * blank/legacy rows). Subsequent calls return the same instance so session-scoped mutations
+     * (grants, fusion, loadout) stay coherent.
      */
     @Override
     public synchronized PlayerProfile loadProfile(String accountUuid) {
+        if (accountUuid == null) return PlayerProfile.defaultProfile();
         Account acct = byUuid.get(accountUuid);
-        if (acct == null || acct.extraJson == null || acct.extraJson.isEmpty()) {
+        if (acct == null) return PlayerProfile.defaultProfile();
+
+        PlayerProfile cached = profileCache.get(accountUuid);
+        if (cached != null) return cached;
+
+        PlayerProfile profile = readProfileFromExtraJson(acct);
+        profileCache.put(accountUuid, profile);
+        return profile;
+    }
+
+    private static PlayerProfile readProfileFromExtraJson(Account acct) {
+        if (acct.extraJson == null || acct.extraJson.isEmpty()) {
             return PlayerProfile.defaultProfile();
         }
         try {
@@ -131,7 +151,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
             if (extra == null || extra.profile == null) return PlayerProfile.defaultProfile();
             return extra.profile;
         } catch (Exception e) {
-            System.err.println("[AccountStore] Failed to parse extra_json for " + accountUuid + ": " + e.getMessage());
+            System.err.println("[AccountStore] Failed to parse extra_json for " + acct.uuid + ": " + e.getMessage());
             return PlayerProfile.defaultProfile();
         }
     }
@@ -141,6 +161,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
     public synchronized void saveProfile(String accountUuid, PlayerProfile profile) {
         Account acct = byUuid.get(accountUuid);
         if (acct == null) return;
+        profileCache.put(accountUuid, profile);
         AccountExtra extra = new AccountExtra();
         extra.profile = profile;
         Json json = new Json();

@@ -6,39 +6,37 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import com.badlogic.gdx.graphics.Color;
-
 import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.render.CharacterAssets;
+import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIGrid;
-import me.ethanchen.lwjgl3.menuscreens.ui.UIIconButton;
+import me.ethanchen.lwjgl3.menuscreens.ui.UIInventoryButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.s2c.FusionResultBroadcast;
 
 /**
- * Artifact Fusion screen (implementation.md, Part 5, last bullet): five reference-only fusion
- * slots + a result slot on the top half, and the fusable inventory (equipped artifacts excluded)
- * on the bottom-left. Reached from {@link CharacterScreen}'s "Fusion" button.
+ * Artifact Fusion screen (implementation.md, Part 5): five reference-only fusion slots + a result
+ * slot on the top half, and the fusable inventory (equipped artifacts excluded) on the bottom-left.
+ * Laid out on a fixed 1920×1080 Aspect-locked canvas. Reached from {@link CharacterScreen}.
  */
-public class FusionScreen extends MenuScreen {
-    private static final UIGrid INVENTORY_GRID = new UIGrid(0.06, 0.42, 8, 0.05, 0.014);
-    private static final Color FUSION_QUEUED_OVERLAY = new Color(1f, 0f, 0f, 0.35f);
+public class FusionScreen extends AspectLockedMenuScreen {
+    private static final UIGrid INVENTORY_GRID = UIGrid.designSquare(160, 420, 8, 88, 14);
 
     private final CharacterScreen parent;
     private final Supplier<Boolean> charactersEnabled;
 
-    private final UIIconButton[] fusionSlots = new UIIconButton[5];
-    private final UIIconButton resultSlot;
+    private final UIInventoryButton[] fusionSlots = new UIInventoryButton[5];
+    private final UIInventoryButton resultSlot;
     private final UIText statsText;
     private final UIText messageText;
 
-    private final List<UIIconButton> inventoryButtons = new ArrayList<>();
-    private final Map<String, UIIconButton> inventoryButtonsById = new HashMap<>();
+    private final List<UIInventoryButton> inventoryButtons = new ArrayList<>();
+    private final Map<String, UIInventoryButton> inventoryButtonsById = new HashMap<>();
     private int lastInventorySize = -1;
 
     /** Owned artifact ids currently queued in the 5 fusion slots (nulls for empty). */
@@ -54,27 +52,37 @@ public class FusionScreen extends MenuScreen {
         this.parent = parent;
         this.charactersEnabled = charactersEnabled;
 
-        elements.add(new UIText(0.5, 0.98, "Artifact Fusion", 2.5));
-        elements.add(new UIButton(0.08, 0.95, 0.12, 0.06, "Back", () -> app.switchMenu(parent)));
+        elements.add(new UIText(DesignUi.nx(960), DesignUi.ny(1040), "Artifact Fusion", 2.5));
+        elements.add(new UIButton(
+                DesignUi.nx(140), DesignUi.ny(1020), DesignUi.nw(200), DesignUi.nh(64),
+                "Back", () -> app.switchMenu(parent)));
 
         for (int i = 0; i < fusionSlots.length; i++) {
             final int idx = i;
-            fusionSlots[i] = new UIIconButton(0.10 + i * 0.10, 0.80, 0.08, null, () -> highlightSlot(idx));
+            fusionSlots[i] = DesignUi.inventoryButton(
+                    200 + i * 160, 860, 120, null, () -> highlightSlot(idx));
             elements.add(fusionSlots[i]);
         }
-        elements.add(new UIButton(0.10, 0.68, 0.18, 0.055, "Add to Fusion", this::addToFusion));
-        elements.add(new UIButton(0.32, 0.68, 0.22, 0.055, "Remove from Fusion", this::removeFromFusion));
+        elements.add(new UIButton(
+                DesignUi.nx(200), DesignUi.ny(720), DesignUi.nw(260), DesignUi.nh(60),
+                "Add to Fusion", this::addToFusion));
+        elements.add(new UIButton(
+                DesignUi.nx(520), DesignUi.ny(720), DesignUi.nw(300), DesignUi.nh(60),
+                "Remove from Fusion", this::removeFromFusion));
 
-        resultSlot = new UIIconButton(0.72, 0.80, 0.1, null, () -> {
+        resultSlot = DesignUi.inventoryButton(1500, 860, 140, null, () -> {
             if (resultId != null) highlightedId = resultId;
         });
         elements.add(resultSlot);
-        elements.add(new UIButton(0.72, 0.66, 0.16, 0.06, "Perform Fusion", this::performFusion));
+        elements.add(new UIButton(
+                DesignUi.nx(1500), DesignUi.ny(700), DesignUi.nw(260), DesignUi.nh(64),
+                "Perform Fusion", this::performFusion));
 
-        statsText = new UIText(0.62, 0.40, "Select an artifact", 0.85, UIText.TextAlign.TOP_LEFT);
+        statsText = new UIText(
+                DesignUi.nx(1180), DesignUi.ny(480), "Select an artifact", 1.0, UIText.TextAlign.TOP_LEFT);
         elements.add(statsText);
 
-        messageText = new UIText(0.5, 0.03, "", 0.8);
+        messageText = new UIText(DesignUi.nx(960), DesignUi.ny(40), "", 0.9);
         elements.add(messageText);
 
         refresh();
@@ -89,7 +97,7 @@ public class FusionScreen extends MenuScreen {
         PlayerProfile profile = app.getProfile();
         if (profile == null || highlightedId == null) return;
         if (isEquipped(profile, highlightedId)) return;
-        for (String id : fusionIds) if (highlightedId.equals(id)) return; // already queued
+        for (String id : fusionIds) if (highlightedId.equals(id)) return;
         for (int i = 0; i < fusionIds.length; i++) {
             if (fusionIds[i] == null) { fusionIds[i] = highlightedId; return; }
         }
@@ -138,27 +146,32 @@ public class FusionScreen extends MenuScreen {
         boolean enabled = Boolean.TRUE.equals(charactersEnabled.get());
 
         rebuildInventoryIfNeeded(profile);
-        for (Map.Entry<String, UIIconButton> entry : inventoryButtonsById.entrySet()) {
-            UIIconButton btn = entry.getValue();
+        for (Map.Entry<String, UIInventoryButton> entry : inventoryButtonsById.entrySet()) {
+            UIInventoryButton btn = entry.getValue();
             btn.grayscale = !enabled;
             btn.selected = entry.getKey().equals(highlightedId);
             boolean queued = false;
             for (String id : fusionIds) if (entry.getKey().equals(id)) { queued = true; break; }
-            btn.overlayColor = queued ? FUSION_QUEUED_OVERLAY : null;
+            btn.overlayColor = queued ? UIInventoryButton.OVERLAY_FUSION_QUEUED : null;
         }
 
         for (int i = 0; i < fusionSlots.length; i++) {
             Artifact a = profile != null ? profile.findArtifact(fusionIds[i]) : null;
-            fusionSlots[i].icon = CharacterAssets.artifactIconFor(a);
-            fusionSlots[i].placeholderText = a == null ? "Empty" : null;
-            fusionSlots[i].cornerLabel = a != null ? "Lv" + a.level : null;
-            fusionSlots[i].selected = a != null && a.id.equals(highlightedId);
+            UIInventoryButton slot = fusionSlots[i];
+            if (a != null) {
+                slot.showItem(CharacterAssets.artifactIconFor(a), a.id, "Lv" + a.level);
+            } else {
+                slot.clearSlot("Empty");
+            }
+            slot.selected = a != null && a.id.equals(highlightedId);
         }
 
         Artifact result = profile != null ? profile.findArtifact(resultId) : null;
-        resultSlot.icon = CharacterAssets.artifactIconFor(result);
-        resultSlot.placeholderText = result == null ? "Result" : null;
-        resultSlot.cornerLabel = result != null ? "Lv" + result.level : null;
+        if (result != null) {
+            resultSlot.showItem(CharacterAssets.artifactIconFor(result), result.id, "Lv" + result.level);
+        } else {
+            resultSlot.clearSlot("Result");
+        }
         resultSlot.selected = result != null && result.id.equals(highlightedId);
 
         Artifact highlighted = profile != null ? profile.findArtifact(highlightedId) : null;
@@ -177,12 +190,13 @@ public class FusionScreen extends MenuScreen {
 
         int shown = 0;
         for (Artifact artifact : profile.inventory) {
-            if (isEquipped(profile, artifact.id)) continue; // implementation.md: can't fuse equipped artifacts
+            if (isEquipped(profile, artifact.id)) continue;
             int index = shown++;
-            UIIconButton btn = new UIIconButton(
-                    INVENTORY_GRID.cellCenterX(index), INVENTORY_GRID.cellCenterY(index), INVENTORY_GRID.cellSize,
+            UIInventoryButton btn = new UIInventoryButton(
+                    INVENTORY_GRID.cellCenterX(index), INVENTORY_GRID.cellCenterY(index),
+                    INVENTORY_GRID.cellW, INVENTORY_GRID.cellH,
                     CharacterAssets.artifactIconFor(artifact), () -> highlightedId = artifact.id);
-            btn.cornerLabel = "Lv" + artifact.level;
+            btn.showItem(CharacterAssets.artifactIconFor(artifact), artifact.id, "Lv" + artifact.level);
             inventoryButtons.add(btn);
             inventoryButtonsById.put(artifact.id, btn);
             elements.add(btn);
