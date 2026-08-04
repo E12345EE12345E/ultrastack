@@ -72,7 +72,7 @@ public abstract class MenuScreen extends InputAdapter {
     @Override
     public boolean touchDown(int screenX, int screenY, int pointer, int button) {
         for (UIElement el : elements) {
-            el.handleClick(screenX, screenY);
+            el.handleClick(screenX, screenY, button);
         }
         return true;
     }

@@ -16,9 +16,9 @@ public final class ArtifactAcquisition {
 
     private ArtifactAcquisition() {}
 
-    /** Maps earned xp to a 0-100 base quality. 160000 xp = 100% quality. */
+    /** Maps earned xp to a 0-100 base quality. 1600 xp = 100% quality. */
     public static float baseQualityFromXp(long xp) {
-        float b = (float) Math.sqrt(Math.max(0, xp)) / 4f;
+        float b = (float) Math.sqrt(Math.max(0, xp)) * 2.5f;
         return Math.max(0f, Math.min(100f, b));
     }
 

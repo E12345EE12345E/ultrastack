@@ -1,9 +1,7 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.Color;
@@ -16,6 +14,7 @@ import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.render.CharacterAssets;
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
+import me.ethanchen.lwjgl3.menuscreens.ui.InventoryPaging;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIGrid;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIInventoryButton;
@@ -33,7 +32,10 @@ import me.ethanchen.network.ClientPacketWrapper;
  */
 public class CharacterScreen extends AspectLockedMenuScreen {
     private static final float DIVIDER_Y = 560f;
-    private static final UIGrid INVENTORY_GRID = UIGrid.designSquare(130, 300, 14, 100, 12);
+    private static final int INV_COLUMNS = 14;
+    private static final int INV_ROWS = 3;
+    /** Packed grid (no gaps): first-cell center, 14×3, 100px tiles. */
+    private static final UIGrid INVENTORY_GRID = UIGrid.designSquare(130, 310, INV_COLUMNS, 100, 0);
 
     private final MenuScreen returnScreen;
     private final Supplier<Boolean> charactersEnabled;
@@ -46,9 +48,9 @@ public class CharacterScreen extends AspectLockedMenuScreen {
     private final UIText hoveredStatsText;
     private final UIText warningText;
 
-    private final List<UIInventoryButton> inventoryButtons = new ArrayList<>();
-    private final Map<String, UIInventoryButton> inventoryButtonsById = new HashMap<>();
-    private int lastInventorySize = -1;
+    private final List<UIInventoryButton> inventorySlots = new ArrayList<>();
+    private final InventoryPaging paging;
+    private int cachedItemCount = -1;
 
     /** Currently highlighted artifact id (inventory or equip-slot click). */
     private String highlightedId;
@@ -82,6 +84,8 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         // ---- Bottom half: reference equip slots + Use/Remove + stats + inventory ----
         equipSlots[0] = DesignUi.inventoryButton(150, 480, 110, null, () -> highlightEquipSlot(0));
         equipSlots[1] = DesignUi.inventoryButton(290, 480, 110, null, () -> highlightEquipSlot(1));
+        equipSlots[0].secondaryAction = () -> quickToggleEquipFromSlot(0);
+        equipSlots[1].secondaryAction = () -> quickToggleEquipFromSlot(1);
         elements.add(equipSlots[0]);
         elements.add(equipSlots[1]);
         elements.add(new UIButton(
@@ -98,11 +102,21 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         elements.add(highlightedStatsText);
         elements.add(hoveredStatsText);
 
+        int pageSize = INV_COLUMNS * INV_ROWS;
+        for (int i = 0; i < pageSize; i++) {
+            UIInventoryButton slot = new UIInventoryButton(
+                    INVENTORY_GRID.cellCenterX(i), INVENTORY_GRID.cellCenterY(i),
+                    INVENTORY_GRID.cellW, INVENTORY_GRID.cellH, null, null);
+            inventorySlots.add(slot);
+            elements.add(slot);
+        }
+        paging = InventoryPaging.addTo(elements, INV_COLUMNS, INV_ROWS, 780, 45, this::changeInventoryPage);
+
         elements.add(new UIButton(
                 DesignUi.nx(1780), DesignUi.ny(180), DesignUi.nw(220), DesignUi.nh(70),
                 "Fusion", () -> app.switchMenu(new FusionScreen(app, this, charactersEnabled))));
 
-        warningText = new UIText(DesignUi.nx(960), DesignUi.ny(40), "", 0.85);
+        warningText = new UIText(DesignUi.nx(1600), DesignUi.ny(45), "", 0.75);
         elements.add(warningText);
 
         refresh();
@@ -122,6 +136,11 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         shapes.setColor(Color.WHITE);
     }
 
+    private void changeInventoryPage(int delta) {
+        if (delta < 0) paging.prev(cachedItemCount);
+        else paging.next(cachedItemCount);
+    }
+
     private void selectCharacter(int characterId) {
         PlayerProfile profile = app.getProfile();
         if (profile == null || !profile.isCharacterUnlocked(characterId)) return;
@@ -136,11 +155,40 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         if (id != null) highlightedId = id;
     }
 
-    private void toggleInventoryHighlight(String artifactId) {
-        highlightedId = artifactId.equals(highlightedId) ? null : artifactId;
+    /** Right-click / double-click on an inventory tile: equip if possible, else unequip. */
+    private void quickToggleEquip(String artifactId) {
+        highlightedId = artifactId;
+        PlayerProfile profile = app.getProfile();
+        if (profile == null || profile.findArtifact(artifactId) == null) return;
+        if (isEquipped(profile, artifactId)) {
+            for (int i = 0; i < profile.equippedArtifactIds.length; i++) {
+                if (artifactId.equals(profile.equippedArtifactIds[i])) {
+                    profile.equippedArtifactIds[i] = null;
+                }
+            }
+            syncLoadout(profile);
+            return;
+        }
+        for (int i = 0; i < profile.equippedArtifactIds.length; i++) {
+            if (profile.equippedArtifactIds[i] == null) {
+                profile.equippedArtifactIds[i] = artifactId;
+                syncLoadout(profile);
+                return;
+            }
+        }
     }
 
-    /** Places the highlighted inventory artifact into the first empty equip slot (reference). */
+    /** Right-click / double-click on an equip slot: unequip that reference if present. */
+    private void quickToggleEquipFromSlot(int index) {
+        PlayerProfile profile = app.getProfile();
+        if (profile == null) return;
+        String id = profile.equippedArtifactIds[index];
+        if (id == null) return;
+        highlightedId = id;
+        profile.equippedArtifactIds[index] = null;
+        syncLoadout(profile);
+    }
+
     private void useHighlighted() {
         PlayerProfile profile = app.getProfile();
         if (profile == null || highlightedId == null) return;
@@ -155,7 +203,6 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         }
     }
 
-    /** Clears the highlighted artifact from whichever equip slot references it. */
     private void removeHighlighted() {
         PlayerProfile profile = app.getProfile();
         if (profile == null || highlightedId == null) return;
@@ -191,7 +238,7 @@ public class CharacterScreen extends AspectLockedMenuScreen {
 
         CharacterDef selected = profile != null ? CharacterRegistry.byId(profile.selectedCharacterId) : null;
         if (selected != null) {
-            bigPortrait.showItem(CharacterAssets.portraitFor(selected.id), null, null);
+            bigPortrait.showItem(CharacterAssets.portraitFor(selected.id), null, null, null);
         } else {
             bigPortrait.clearSlot(null);
         }
@@ -210,7 +257,7 @@ public class CharacterScreen extends AspectLockedMenuScreen {
             Artifact equipped = profile != null ? profile.findArtifact(profile.equippedArtifactIds[i]) : null;
             UIInventoryButton slot = equipSlots[i];
             if (equipped != null) {
-                slot.showItem(CharacterAssets.artifactIconFor(equipped), equipped.id, "Lv" + equipped.level);
+                slot.showArtifact(CharacterAssets.artifactIconFor(equipped), equipped);
             } else {
                 slot.clearSlot("Empty");
             }
@@ -219,14 +266,7 @@ public class CharacterScreen extends AspectLockedMenuScreen {
             slot.overlayColor = null;
         }
 
-        rebuildInventoryIfNeeded(profile);
-        for (Map.Entry<String, UIInventoryButton> entry : inventoryButtonsById.entrySet()) {
-            UIInventoryButton btn = entry.getValue();
-            btn.grayscale = !enabled;
-            btn.selected = entry.getKey().equals(highlightedId);
-            boolean equipped = profile != null && isEquipped(profile, entry.getKey());
-            btn.overlayColor = equipped ? UIInventoryButton.OVERLAY_EQUIPPED : null;
-        }
+        refreshInventoryPage(profile, enabled);
 
         Artifact highlighted = profile != null ? profile.findArtifact(highlightedId) : null;
         highlightedStatsText.textin.set(highlighted != null ? describe(highlighted) : "Select an artifact");
@@ -235,37 +275,41 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         hoveredStatsText.textin.set(hovered != null ? describe(hovered) : "Hover an artifact");
     }
 
+    private void refreshInventoryPage(PlayerProfile profile, boolean enabled) {
+        List<Artifact> items = profile != null ? profile.inventory : List.of();
+        cachedItemCount = items.size();
+        paging.updateLabel(cachedItemCount);
+
+        int start = paging.page * paging.pageSize();
+        for (int i = 0; i < inventorySlots.size(); i++) {
+            UIInventoryButton slot = inventorySlots.get(i);
+            int index = start + i;
+            if (index < items.size()) {
+                Artifact artifact = items.get(index);
+                slot.showArtifact(CharacterAssets.artifactIconFor(artifact), artifact);
+                slot.action = () -> highlightedId = artifact.id;
+                slot.secondaryAction = () -> quickToggleEquip(artifact.id);
+                slot.grayscale = !enabled;
+                slot.selected = artifact.id.equals(highlightedId);
+                slot.overlayColor = isEquipped(profile, artifact.id) ? UIInventoryButton.OVERLAY_EQUIPPED : null;
+            } else {
+                slot.clearSlot(null);
+                slot.grayscale = !enabled;
+                slot.selected = false;
+                slot.overlayColor = null;
+            }
+        }
+    }
+
     private Artifact findHoveredArtifact(PlayerProfile profile) {
         if (profile == null) return null;
-        for (UIInventoryButton btn : inventoryButtons) {
+        for (UIInventoryButton btn : inventorySlots) {
             if (btn.hovered && btn.boundId != null) return profile.findArtifact(btn.boundId);
         }
         for (UIInventoryButton slot : equipSlots) {
             if (slot.hovered && slot.boundId != null) return profile.findArtifact(slot.boundId);
         }
         return null;
-    }
-
-    private void rebuildInventoryIfNeeded(PlayerProfile profile) {
-        int size = profile != null ? profile.inventory.size() : 0;
-        if (size == lastInventorySize) return;
-        lastInventorySize = size;
-
-        elements.removeAll(inventoryButtons);
-        inventoryButtons.clear();
-        inventoryButtonsById.clear();
-        if (profile == null) return;
-        for (int i = 0; i < profile.inventory.size(); i++) {
-            Artifact artifact = profile.inventory.get(i);
-            UIInventoryButton btn = new UIInventoryButton(
-                    INVENTORY_GRID.cellCenterX(i), INVENTORY_GRID.cellCenterY(i),
-                    INVENTORY_GRID.cellW, INVENTORY_GRID.cellH,
-                    CharacterAssets.artifactIconFor(artifact), () -> toggleInventoryHighlight(artifact.id));
-            btn.showItem(CharacterAssets.artifactIconFor(artifact), artifact.id, "Lv" + artifact.level);
-            inventoryButtons.add(btn);
-            inventoryButtonsById.put(artifact.id, btn);
-            elements.add(btn);
-        }
     }
 
     private String describe(Artifact artifact) {

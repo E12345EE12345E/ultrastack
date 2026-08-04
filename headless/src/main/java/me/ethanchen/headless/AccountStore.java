@@ -21,7 +21,11 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Durably persists player accounts to a SQLite database. Each account is committed as soon as
  * it's created (JDBC autocommit), so unlike the previous JSON-file approach there is no
- * periodic/shutdown save step to lose data on a crash.
+ * buffered write window to lose data on a crash.
+ *
+ * <p>WAL pages are checkpointed into the main {@code .db} file on a schedule (see
+ * {@link SqliteWalSync}) so tools that copy only that file see recent commits without waiting
+ * for auto-checkpoint or process shutdown.
  *
  * <p>Core fields live in dedicated columns; anything added later goes into {@code extra_json}
  * so old rows and new player-account features stay compatible without a schema migration.
@@ -39,6 +43,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
      */
     private final ConcurrentHashMap<String, PlayerProfile> profileCache = new ConcurrentHashMap<>();
     private final Connection connection;
+    private final SqliteWalSync walSync;
 
     public AccountStore(String dbPath) {
         try {
@@ -64,6 +69,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
         } catch (ClassNotFoundException | SQLException e) {
             throw new RuntimeException("Failed to initialize account database", e);
         }
+        walSync = new SqliteWalSync("account-store-wal-sync", this::checkpointWal);
         load();
         Runtime.getRuntime().addShutdownHook(new Thread(this::close, "account-store-shutdown"));
     }
@@ -212,10 +218,25 @@ public class AccountStore implements XpAwarder, ProfileStore {
         }
     }
 
-    public synchronized void close() {
+    /** Folds {@code accounts.db-wal} into {@code accounts.db} and truncates the WAL. */
+    private synchronized void checkpointWal() {
         try {
-            if (connection != null && !connection.isClosed()) connection.close();
-        } catch (SQLException ignored) {
+            if (connection == null || connection.isClosed()) return;
+            try (Statement st = connection.createStatement()) {
+                st.execute("PRAGMA wal_checkpoint(TRUNCATE);");
+            }
+        } catch (SQLException e) {
+            System.err.println("[AccountStore] WAL checkpoint failed: " + e.getMessage());
+        }
+    }
+
+    public void close() {
+        walSync.close();
+        synchronized (this) {
+            try {
+                if (connection != null && !connection.isClosed()) connection.close();
+            } catch (SQLException ignored) {
+            }
         }
     }
 }

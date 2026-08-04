@@ -60,4 +60,23 @@ public class Artifact {
     public String displayName() {
         return pieceTypeName(pieceType) + " Artifact (Lv" + level + ")";
     }
+
+    /**
+     * Bottom-right inventory badge count: one star per level, capped at 5
+     * (higher levels still show five stars for now).
+     */
+    public int levelStarCount() {
+        return Math.max(0, Math.min(5, level));
+    }
+
+    /**
+     * Bottom-left inventory badge: {@link #baseQuality} rounded to the nearest int and clamped
+     * to {@code [0, 99]}.
+     */
+    public String qualityLabel() {
+        int q = Math.round(baseQuality);
+        if (q < 0) q = 0;
+        if (q > 99) q = 99;
+        return Integer.toString(q);
+    }
 }

@@ -12,8 +12,8 @@ public final class ArtifactFusion {
 
     private static final int FUSION_INPUT_COUNT = 5;
     private static final float OVERFLOW_THRESHOLD = 100f;
-    private static final float OVERFLOW_REROLL_MIN = 40f;
-    private static final float OVERFLOW_REROLL_MAX = 80f;
+    private static final float OVERFLOW_REROLL_MIN = 30f;
+    private static final float OVERFLOW_REROLL_MAX = 50f;
     private static final float TYPE_MATCH_CHANCE = 0.2f;
 
     private ArtifactFusion() {}
@@ -44,7 +44,7 @@ public final class ArtifactFusion {
             float mult = (rng.nextBoolean()) ? 2.0f : 0.8f;
             sum += a.baseQuality * mult;
         }
-        float baseValue = sum / FUSION_INPUT_COUNT;
+        float baseValue = sum / FUSION_INPUT_COUNT + 10f + rng.nextFloat() * 10f;
 
         int outputLevel = level;
         if (baseValue > OVERFLOW_THRESHOLD) {

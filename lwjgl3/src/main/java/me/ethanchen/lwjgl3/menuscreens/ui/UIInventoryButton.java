@@ -1,6 +1,7 @@
 package me.ethanchen.lwjgl3.menuscreens.ui;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
@@ -9,6 +10,7 @@ import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 
+import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 
 /**
@@ -23,14 +25,25 @@ public class UIInventoryButton extends UIElement {
 
     public Texture icon;
     public Runnable action;
+    /**
+     * Fired on right-click or double left-click (e.g. quick add/remove from equip or fusion).
+     * When null, those inputs fall back to {@link #action} for left double-click only if set —
+     * right-click does nothing.
+     */
+    public Runnable secondaryAction;
     /** True while the pointer is over this tile (updated during {@link #render}). */
     public boolean hovered;
     /** Yellow border when this tile is the active highlight / selected character. */
     public boolean selected;
     /** Desaturates the icon and dims the border (locked character, disabled mode). */
     public boolean grayscale;
-    /** Bottom-right label, e.g. {@code Lv1}. */
-    public String cornerLabel;
+    /** Bottom-left label, e.g. rounded base quality {@code 0}–{@code 99}. */
+    public String cornerLabelLeft;
+    /**
+     * Number of filled stars drawn in the bottom-right (0–5). Drawn with
+     * {@link ShapeRenderer} so we don't depend on the UI font containing {@code ★}.
+     */
+    public int cornerStars;
     /** Translucent fill over the tile (equipped lime, fusion-queued red, etc.). */
     public Color overlayColor;
     /** Centred when {@link #icon} is null. */
@@ -65,15 +78,28 @@ public class UIInventoryButton extends UIElement {
     public void clearSlot(String placeholder) {
         icon = null;
         boundId = null;
-        cornerLabel = null;
+        cornerLabelLeft = null;
+        cornerStars = 0;
         placeholderText = placeholder;
+        action = null;
+        secondaryAction = null;
     }
 
-    /** Binds this tile to an artifact-like display (icon + id + level corner). */
-    public void showItem(Texture itemIcon, String id, String levelLabel) {
+    /** Binds this tile to an icon with an optional bottom-left text badge (no stars). */
+    public void showItem(Texture itemIcon, String id, String leftLabel, String rightLabelIgnored) {
         icon = itemIcon;
         boundId = id;
-        cornerLabel = levelLabel;
+        cornerLabelLeft = leftLabel;
+        cornerStars = 0;
+        placeholderText = null;
+    }
+
+    /** Convenience for artifact tiles: quality bottom-left, level stars bottom-right. */
+    public void showArtifact(Texture itemIcon, Artifact artifact) {
+        icon = itemIcon;
+        boundId = artifact.id;
+        cornerLabelLeft = artifact.qualityLabel();
+        cornerStars = artifact.levelStarCount();
         placeholderText = null;
     }
 
@@ -148,17 +174,54 @@ public class UIInventoryButton extends UIElement {
         shapes.rect(pxX, pxY, pxW, pxH);
         shapes.end();
 
-        if (cornerLabel != null && !cornerLabel.isEmpty()) {
+        if (cornerLabelLeft != null && !cornerLabelLeft.isEmpty()) {
             GlyphLayout layout = new GlyphLayout();
             float[] saved = UIFont.saveAndSetScale(font, 0.55f);
-            layout.setText(font, cornerLabel);
+            layout.setText(font, cornerLabelLeft);
             sprites.begin();
             font.setColor(Color.WHITE);
-            font.draw(sprites, cornerLabel, pxX + pxW - layout.width - 2f, pxY + layout.height + 2f);
+            font.draw(sprites, cornerLabelLeft, pxX + 2f, pxY + layout.height + 2f);
             sprites.end();
             UIFont.restoreScale(font, saved);
         }
+
+        int stars = Math.max(0, Math.min(5, cornerStars));
+        if (stars > 0) {
+            float outerR = Math.min(pxW, pxH) * 0.075f;
+            float gap = outerR * 2.05f;
+            float cy = pxY + outerR + 3f;
+            float right = pxX + pxW - outerR - 3f;
+            Color starColor = grayscale ? new Color(0.45f, 0.45f, 0.45f, 1f) : new Color(1f, 0.85f, 0.2f, 1f);
+            shapes.begin(ShapeRenderer.ShapeType.Filled);
+            for (int i = 0; i < stars; i++) {
+                drawStar(shapes, right - (stars - 1 - i) * gap, cy, outerR, starColor);
+            }
+            shapes.end();
+        }
     }
+
+    /** Filled 5-point star centred at ({@code cx}, {@code cy}), tip pointing up (Y-up coords). */
+    private static void drawStar(ShapeRenderer shapes, float cx, float cy, float outerR, Color color) {
+        float innerR = outerR * 0.4f;
+        shapes.setColor(color);
+        for (int i = 0; i < 5; i++) {
+            // +π/2 puts the first tip at +Y (up). -π/2 would point down in Y-up space.
+            double a0 = Math.PI / 2.0 + i * (2.0 * Math.PI / 5.0);
+            double a1 = a0 + Math.PI / 5.0;
+            double a2 = a0 + 2.0 * Math.PI / 5.0;
+            float ox0 = cx + (float) (Math.cos(a0) * outerR);
+            float oy0 = cy + (float) (Math.sin(a0) * outerR);
+            float ix  = cx + (float) (Math.cos(a1) * innerR);
+            float iy  = cy + (float) (Math.sin(a1) * innerR);
+            float ox1 = cx + (float) (Math.cos(a2) * outerR);
+            float oy1 = cy + (float) (Math.sin(a2) * outerR);
+            shapes.triangle(cx, cy, ox0, oy0, ix, iy);
+            shapes.triangle(cx, cy, ix, iy, ox1, oy1);
+        }
+    }
+
+    private static final long DOUBLE_CLICK_MS = 350L;
+    private long lastLeftClickMs;
 
     @Override
     public void onClick() {
@@ -167,7 +230,27 @@ public class UIInventoryButton extends UIElement {
 
     @Override
     public void handleClick(int screenX, int screenY) {
-        if (isClicked(screenX, screenY)) onClick();
+        handleClick(screenX, screenY, 0);
+    }
+
+    @Override
+    public void handleClick(int screenX, int screenY, int button) {
+        if (!isClicked(screenX, screenY)) return;
+        if (button == Input.Buttons.RIGHT) {
+            if (secondaryAction != null) secondaryAction.run();
+            return;
+        }
+        if (button != Input.Buttons.LEFT) return;
+
+        long now = System.currentTimeMillis();
+        boolean isDouble = lastLeftClickMs > 0 && (now - lastLeftClickMs) <= DOUBLE_CLICK_MS;
+        lastLeftClickMs = now;
+        if (isDouble && secondaryAction != null) {
+            secondaryAction.run();
+            lastLeftClickMs = 0; // require a fresh pair for the next double-click
+            return;
+        }
+        onClick();
     }
 
     @Override

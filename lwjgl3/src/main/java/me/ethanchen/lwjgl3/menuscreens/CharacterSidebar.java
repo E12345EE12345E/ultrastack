@@ -9,26 +9,27 @@ import me.ethanchen.game.progression.CharacterRegistry;
 import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.render.CharacterAssets;
+import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIElement;
-import me.ethanchen.lwjgl3.menuscreens.ui.UIInventoryButton;
+import me.ethanchen.lwjgl3.menuscreens.ui.UIImage;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 
 /**
- * Left-side sidebar showing the local player's currently selected character and two equipped
- * artifacts; clicking any part opens {@link CharacterScreen} (implementation.md, Part 5). Shared
- * by the room browser and both lobby screens.
+ * Left-side sidebar showing the local player's loadout as plain images, with a
+ * {@code Character Loadout} button underneath that opens {@link CharacterScreen}
+ * (implementation.md, Part 5). Shared by the room browser and both lobby screens.
  *
  * <p>{@code charactersEnabled} reports whether the current room's gamemode supports characters;
- * when false, the whole sidebar renders desaturated (still clickable). Non-host clients can't
- * currently see the host's pending gamemode choice before a game starts, so this only reflects
- * the host's local {@code LobbySettings} -- see {@link ClientApp#getLobbySettings()}.
+ * when false, the images render desaturated. Non-host clients can't currently see the host's
+ * pending gamemode choice before a game starts, so this only reflects the host's local
+ * {@code LobbySettings} — see {@link ClientApp#getLobbySettings()}.
  */
 public class CharacterSidebar {
     private final ClientApp app;
     private final Supplier<Boolean> charactersEnabled;
-    private final UIInventoryButton portrait;
-    private final UIInventoryButton artifactA;
-    private final UIInventoryButton artifactB;
+    private final UIImage portrait;
+    private final UIImage artifactA;
+    private final UIImage artifactB;
     private final UIText nameText;
 
     public CharacterSidebar(ClientApp app, ArrayList<UIElement> elements, MenuScreen returnScreen,
@@ -39,15 +40,16 @@ public class CharacterSidebar {
         double x = 0.08;
         Runnable open = () -> app.switchMenu(new CharacterScreen(app, returnScreen, charactersEnabled));
 
-        portrait = new UIInventoryButton(x, 0.78, 0.11, null, open);
-        artifactA = new UIInventoryButton(x - 0.045, 0.65, 0.06, null, open);
-        artifactB = new UIInventoryButton(x + 0.045, 0.65, 0.06, null, open);
-        nameText = new UIText(x, 0.71, "", 0.75);
+        portrait = new UIImage(x, 0.80, 0.12);
+        nameText = new UIText(x, 0.715, "", 0.75);
+        artifactA = new UIImage(x - 0.04, 0.64, 0.065);
+        artifactB = new UIImage(x + 0.04, 0.64, 0.065);
 
         elements.add(portrait);
         elements.add(nameText);
         elements.add(artifactA);
         elements.add(artifactB);
+        elements.add(new UIButton(x, 0.545, 0.18, 0.07, "Character Loadout", open, 0.7f));
 
         refresh();
     }
@@ -62,27 +64,15 @@ public class CharacterSidebar {
         boolean enabled = Boolean.TRUE.equals(charactersEnabled.get());
 
         CharacterDef character = profile != null ? CharacterRegistry.byId(profile.selectedCharacterId) : null;
-        if (character != null) {
-            portrait.showItem(CharacterAssets.portraitFor(character.id), null, null);
-        } else {
-            portrait.clearSlot(null);
-        }
+        portrait.texture = character != null ? CharacterAssets.portraitFor(character.id) : null;
         portrait.grayscale = !enabled;
         nameText.textin.set(character != null ? character.name : "No character");
 
         Artifact a = profile != null ? profile.findArtifact(profile.equippedArtifactIds[0]) : null;
         Artifact b = profile != null ? profile.findArtifact(profile.equippedArtifactIds[1]) : null;
-        if (a != null) {
-            artifactA.showItem(CharacterAssets.artifactIconFor(a), a.id, null);
-        } else {
-            artifactA.clearSlot("-");
-        }
+        artifactA.texture = CharacterAssets.artifactIconFor(a);
         artifactA.grayscale = !enabled;
-        if (b != null) {
-            artifactB.showItem(CharacterAssets.artifactIconFor(b), b.id, null);
-        } else {
-            artifactB.clearSlot("-");
-        }
+        artifactB.texture = CharacterAssets.artifactIconFor(b);
         artifactB.grayscale = !enabled;
     }
 }
