@@ -62,20 +62,25 @@ public class ClientApp extends ApplicationAdapter {
     private static final int MAX_RECONNECT_ATTEMPTS = 3;
 
     // Network
-    // volatile: reassigned by ensureClientAlive() on the connect thread when the KryoNet
-    // update thread has died and needs recreating; read from the render thread (sendTCP/
-    // sendUDP/disconnect) and other background threads.
-    private volatile Client netClient;
-    private ClientNetworkListener clientNetworkListener;
+    /** A KryoNet client together with the listener that feeds {@link #rpackets}. */
+    private static final class NetClient {
+        final Client client;
+        final ClientNetworkListener listener;
+
+        NetClient(Client client, ClientNetworkListener listener) {
+            this.client = client;
+            this.listener = listener;
+        }
+    }
+
+    // volatile: replaced by the connect thread on every connect attempt and by disconnect(),
+    // read from the render thread (sendTCP/sendUDP) every frame.
+    private volatile NetClient net;
     private volatile boolean shuttingDown;
-    private volatile boolean intentionalDisconnect;
     private final AtomicBoolean connectInProgress = new AtomicBoolean(false);
-    // Guards netClient.connect()/close()/sendTCP()/sendUDP() against each other. connect() and
-    // close() run on their own background threads (see runConnectAttempt/disconnect/dispose)
-    // while sendTCP/sendUDP are called from the render thread every frame, so without this lock
-    // a close() could race a concurrent send. Note KryoNet's connect() already calls close()
-    // internally and the Client's update thread (started once via start() in create()) survives
-    // close(), so no separate start()/recreate step is needed to reconnect.
+    // Serialises replacement of `net` between the connect thread and disconnect(). Only ever
+    // held across cheap operations: connecting and closing both happen outside it, because
+    // disconnect() runs on the render thread and must never stall a frame.
     private final ReentrantLock netLock = new ReentrantLock();
     /**
      * Bumped by every user-initiated connect and by {@link #disconnect()}. A connect attempt
@@ -129,10 +134,7 @@ public class ClientApp extends ApplicationAdapter {
         reconnectAttempts = 0;
         this.connectIP = NetConfig.HOST;
         this.connectPort = NetConfig.PORT;
-        netClient = NetEndpoints.createClient();
-        clientNetworkListener = new ClientNetworkListener(this.rpackets);
-        netClient.addListener(clientNetworkListener);
-        netClient.start();
+        net = createStartedClient();
 
         //tryConnect();
 
@@ -164,15 +166,13 @@ public class ClientApp extends ApplicationAdapter {
         while (rpackets.notEmpty()) {
             ClientPacketWrapper wrapper = rpackets.removeFirst();
 
-            // Unexpected disconnects (server crash/kick, network drop) bounce back to the main
-            // menu so the player gets feedback instead of a stuck/stale screen. Disconnects we
-            // initiated ourselves (see disconnect()) are expected: the current screen already
-            // knows what to do next, so we don't override its navigation.
+            // Only a genuinely lost connection (server crash/kick, network drop) reaches here,
+            // because clients we shut down on purpose get their listener detached first. Bounce
+            // back to the main menu so the player gets feedback instead of a stale screen.
             if (wrapper.packet instanceof DisconnectPacket) {
-                if (!intentionalDisconnect && !(menuScreen instanceof MainMenu)) {
+                if (!(menuScreen instanceof MainMenu)) {
                     switchMenu(new MainMenu(this));
                 }
-                intentionalDisconnect = false;
                 roomHost = false;
             }
 
@@ -230,10 +230,9 @@ public class ClientApp extends ApplicationAdapter {
 
         Controllers.removeListener(controllerRoster);
 
-        // Never block the GL/dispose thread on netLock or KryoNet close — connect can hold
-        // the lock for the full connect timeout (and longer), which froze the window on quit.
-        // Match disconnect(): close on a daemon thread so the window can exit immediately.
-        closeNetClientAsync();
+        // Never block the GL/dispose thread on a KryoNet close (see retireClient) — that froze
+        // the window on quit. Retire on a daemon thread so the window can exit immediately.
+        retireClient(net);
 
         batch.dispose();
         font.dispose();
@@ -242,19 +241,62 @@ public class ClientApp extends ApplicationAdapter {
         AudioManager.getInstance().dispose();
     }
 
-    /** Close the KryoNet client without blocking the caller (dispose / UI thread). */
-    private void closeNetClientAsync() {
-        if (netClient == null) return;
+    private NetClient createStartedClient() {
+        Client client = NetEndpoints.createClient();
+        // Close it before it has an update thread. KryoNet's connect() begins by closing, and
+        // that close calls selector.selectNow(), which has to take the selector's monitor —
+        // held for 250ms at a time by the client's own update thread sitting in select(). The
+        // monitor is unfair, so connect() can lose that race over and over: measured here it
+        // stalled connect by up to 26 seconds, which is the "sat on the menu and sometimes
+        // never connected" symptom. Closing now, while no update thread exists yet, is
+        // instant and makes the close inside connect() a no-op. It stays a no-op because a
+        // client with no channels registered never gets a non-empty select.
+        client.close();
+        ClientNetworkListener listener = new ClientNetworkListener(rpackets);
+        client.addListener(listener);
+        client.start();
+        return new NetClient(client, listener);
+    }
+
+    /**
+     * Shuts a client down on a throwaway thread. Closing a live connection competes with the
+     * client's own update thread for the selector monitor (see createStartedClient) and has
+     * been measured taking tens of seconds, so nothing the player is waiting on may ever call
+     * it directly — including quit, which it used to freeze. The listener is
+     * detached first so a client we retired on purpose cannot report its own shutdown as a
+     * lost connection or hand a doomed connection to the current screen.
+     */
+    private void retireClient(NetClient retired) {
+        if (retired == null) return;
+        retired.listener.detach();
         Thread t = new Thread(() -> {
-            netLock.lock();
+            retired.client.close();
+            retired.client.stop();
             try {
-                netClient.close();
-            } finally {
-                netLock.unlock();
+                // Let the update thread notice the shutdown before the selector it is
+                // selecting on is closed underneath it.
+                Thread updateThread = retired.client.getUpdateThread();
+                if (updateThread != null) updateThread.join(2000);
+                retired.client.dispose();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException ignored) {
             }
-        }, "net-dispose-close");
+        }, "net-retire");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** Swaps in a fresh idle client, retiring whatever was there. Never blocks. */
+    private void replaceClientWithIdle() {
+        netLock.lock();
+        try {
+            NetClient previous = net;
+            net = createStartedClient();
+            retireClient(previous);
+        } finally {
+            netLock.unlock();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -282,10 +324,10 @@ public class ClientApp extends ApplicationAdapter {
     public void disconnect() {
         connectEpoch.incrementAndGet();
         queuedConnect.set(null);
-        boolean connectPending = connectInProgress.get();
-        if (netClient == null || (!netClient.isConnected() && !connectPending)) return;
-        intentionalDisconnect = true;
-        closeNetClientAsync();
+        if (shuttingDown) return;
+        // Nothing to drop: keep the idle client rather than churning through a new one.
+        if (!net.client.isConnected() && !connectInProgress.get()) return;
+        replaceClientWithIdle();
     }
 
     public void setConnectDestination(String newIP, int newPort) {
@@ -342,28 +384,22 @@ public class ClientApp extends ApplicationAdapter {
     // Packet send helpers
     // -------------------------------------------------------------------------
 
+    // Sends take no lock: they only touch the client that is current at this instant, and a
+    // client is never closed while it is the current one (see retireClient). Locking here used
+    // to mean a send could be dropped just because a connect was in flight — including the
+    // JoinRequest that a screen fires the moment it is told the connection is up.
     public boolean sendTCP(NetworkPacket packet) {
         if (shuttingDown || packet == null) return false;
-        // Never block the caller (typically the render thread): if a connect/close/dispose is
-        // in flight, just drop this send rather than waiting for it to finish.
-        if (!netLock.tryLock()) return false;
-        try {
-            if (!netClient.isConnected()) return false;
-            return netClient.sendTCP(packet) != -1;
-        } finally {
-            netLock.unlock();
-        }
+        Client client = net.client;
+        if (!client.isConnected()) return false;
+        return client.sendTCP(packet) != -1;
     }
 
     public boolean sendUDP(NetworkPacket packet) {
         if (shuttingDown || packet == null) return false;
-        if (!netLock.tryLock()) return false;
-        try {
-            if (!netClient.isConnected()) return false;
-            return netClient.sendUDP(packet) != -1;
-        } finally {
-            netLock.unlock();
-        }
+        Client client = net.client;
+        if (!client.isConnected()) return false;
+        return client.sendUDP(packet) != -1;
     }
 
     public boolean sendJoinRequest(String username, long credential) {
@@ -511,53 +547,45 @@ public class ClientApp extends ApplicationAdapter {
                 }
                 return;
             }
+            if (isAlreadyConnectedTo(req, resolvedHost)) return;
+
+            // Always connect on a brand new client rather than reusing the current one.
+            // KryoNet's connect() begins by closing the existing connection, and that close
+            // fights the client's own update thread for an internal lock: measured locally it
+            // stalled connect() by 3-13 seconds, which is the "stuck on the menu, sometimes
+            // never connects" symptom. A fresh client has nothing to close and connects in
+            // about a millisecond, and the old one is retired in the background.
+            NetClient fresh = createStartedClient();
             netLock.lock();
             try {
-                if (shuttingDown || isStale(req)) return;
-
-                // KryoNet's Client update thread can die permanently (e.g. an uncaught
-                // KryoNetException from a bad/oversized packet) without anyone noticing.
-                // Once that happens nothing services the selector anymore, so a later
-                // connect() call just hangs forever with no error ("Connecting..." stuck
-                // indefinitely). Detect that and recreate the client before connecting.
-                ensureClientAlive();
-
-                if (netClient.isConnected()) {
-                    InetSocketAddress remote = netClient.getRemoteAddressTCP();
-                    boolean sameDestination = remote != null
-                            && remote.getAddress().getHostAddress().equals(resolvedHost)
-                            && remote.getPort() == req.port;
-                    if (sameDestination) {
-                        // Already connected to the requested destination (e.g. re-entering a
-                        // menu that expects a fresh ConnectionEstablishedPacket). Don't
-                        // reconnect, but still notify the current screen so it doesn't sit on
-                        // "Connecting..." forever waiting for a packet that will never come.
-                        Client connected = netClient;
-                        Gdx.app.postRunnable(() -> rpackets.addLast(
-                                new ClientPacketWrapper(new ConnectionEstablishedPacket(), connected)));
-                        return;
-                    }
-                    // Connected elsewhere (e.g. switched from the online server to a LAN
-                    // server, or vice versa): fall through and reconnect to the new
-                    // destination. Client#connect() closes the old connection first — that
-                    // drop is ours, so don't let update() treat it as a lost connection.
-                    intentionalDisconnect = true;
-                }
-
-                int timeout = req.auto
-                        ? NetConfig.AUTO_CONNECT_TIMEOUT_MS
-                        : NetConfig.CONNECT_TIMEOUT_MS;
-                netClient.connect(timeout, resolvedHost, req.port, req.port);
-                // connect() blocks for seconds; by the time it returns the player may have
-                // quit, left the screen, or asked for a different server. Nobody wants this
-                // connection any more, and keeping it would feed a stale
-                // ConnectionEstablishedPacket to whatever screen is now open.
                 if (shuttingDown || isStale(req)) {
-                    intentionalDisconnect = true;
-                    netClient.close();
+                    retireClient(fresh);
+                    return;
                 }
+                // Publish before connecting so that the ConnectionEstablishedPacket raised
+                // during connect() already refers to the current client.
+                NetClient previous = net;
+                net = fresh;
+                retireClient(previous);
             } finally {
                 netLock.unlock();
+            }
+
+            int timeout = req.auto
+                    ? NetConfig.AUTO_CONNECT_TIMEOUT_MS
+                    : NetConfig.CONNECT_TIMEOUT_MS;
+            try {
+                fresh.client.connect(timeout, resolvedHost, req.port, req.port);
+            } catch (IOException e) {
+                discardIfCurrent(fresh);
+                throw e;
+            }
+            // connect() blocks for up to the timeout; by the time it returns the player may
+            // have quit, left the screen, or asked for a different server. Nobody wants this
+            // connection any more, and keeping it would feed a stale
+            // ConnectionEstablishedPacket to whatever screen is now open.
+            if (shuttingDown || isStale(req)) {
+                discardIfCurrent(fresh);
             }
         } catch (IOException e) {
             System.err.println("Connect failed: " + e.getMessage());
@@ -573,22 +601,36 @@ public class ClientApp extends ApplicationAdapter {
     }
 
     /**
-     * Recreates {@link #netClient} if its background update thread has died (see caller for
-     * why that can happen). Must be called while holding {@link #netLock}.
+     * True if the current client is already connected where {@code req} wants to go, in which
+     * case the session is kept (e.g. re-entering a menu that expects a fresh
+     * ConnectionEstablishedPacket). The packet is re-posted anyway so the screen doesn't sit
+     * on "Connecting..." forever waiting for something that will never come.
      */
-    private void ensureClientAlive() {
-        Thread updateThread = netClient.getUpdateThread();
-        if (updateThread != null && updateThread.isAlive()) return;
-        System.err.println("[ClientApp] Net client update thread is dead; recreating client.");
-        Client dead = netClient;
-        try {
-            dead.close();
-        } catch (Exception ignored) {
+    private boolean isAlreadyConnectedTo(ConnectRequest req, String resolvedHost) {
+        Client client = net.client;
+        if (!client.isConnected()) return false;
+        InetSocketAddress remote = client.getRemoteAddressTCP();
+        if (remote == null
+                || !remote.getAddress().getHostAddress().equals(resolvedHost)
+                || remote.getPort() != req.port) {
+            return false;
         }
-        Client fresh = NetEndpoints.createClient();
-        fresh.addListener(clientNetworkListener);
-        fresh.start();
-        netClient = fresh;
+        Gdx.app.postRunnable(() -> rpackets.addLast(
+                new ClientPacketWrapper(new ConnectionEstablishedPacket(), client)));
+        return true;
+    }
+
+    /** Retires {@code doomed}, leaving a fresh idle client behind if it was still current. */
+    private void discardIfCurrent(NetClient doomed) {
+        netLock.lock();
+        try {
+            if (net == doomed && !shuttingDown) {
+                net = createStartedClient();
+            }
+        } finally {
+            netLock.unlock();
+        }
+        retireClient(doomed);
     }
 
     private static String resolveHost(String host) throws UnknownHostException {

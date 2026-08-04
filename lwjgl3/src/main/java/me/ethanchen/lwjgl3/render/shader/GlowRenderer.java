@@ -24,7 +24,7 @@ import me.ethanchen.lwjgl3.render.PieceTints;
 public class GlowRenderer implements ShaderRenderer {
 
     public static float GLOW_BLUR_RADIUS = 6f;
-    public static int GLOW_BLUR_PASSES = 6;
+    public static int GLOW_BLUR_PASSES = 8;
 
     private ShaderProgram blurShader;
     private final SpriteBatch glowSprites;
