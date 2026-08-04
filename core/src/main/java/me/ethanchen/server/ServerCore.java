@@ -287,6 +287,7 @@ public class ServerCore implements PacketSender, Runnable {
     }
 
     private void sendProfileSync(int connectionId, Session session) {
+        if (session.profile != null) session.profile.sortInventory();
         ProfileSyncBroadcast b = new ProfileSyncBroadcast();
         b.profile = session.profile;
         b.readOnly = session.profileReadOnly;
@@ -363,6 +364,7 @@ public class ServerCore implements PacketSender, Runnable {
                 return false;
             });
             profile.inventory.add(fused.artifact);
+            profile.sortInventory();
             if (profileStore != null) {
                 profileStore.saveProfile(session.accountUuid, profile);
             }

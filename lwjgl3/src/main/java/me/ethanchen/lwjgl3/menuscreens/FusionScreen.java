@@ -214,7 +214,7 @@ public class FusionScreen extends AspectLockedMenuScreen {
         resultSlot.selected = result != null && result.id.equals(highlightedId);
 
         Artifact highlighted = profile != null ? profile.findArtifact(highlightedId) : null;
-        statsText.textin.set(highlighted != null ? describe(highlighted) : "Select an artifact");
+        statsText.textin.set(highlighted != null ? highlighted.describeForUi(5) : "Select an artifact");
     }
 
     private void refreshInventoryPage(PlayerProfile profile, boolean enabled) {
@@ -248,14 +248,6 @@ public class FusionScreen extends AspectLockedMenuScreen {
                 slot.overlayColor = null;
             }
         }
-    }
-
-    private String describe(Artifact artifact) {
-        StringBuilder sb = new StringBuilder(artifact.displayName());
-        for (var effect : artifact.effects) {
-            sb.append('\n').append(effect.describe());
-        }
-        return sb.toString();
     }
 
     @Override

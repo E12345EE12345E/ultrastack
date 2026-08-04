@@ -39,6 +39,11 @@ public class PlayerProfile {
         return null;
     }
 
+    /** Sorts {@link #inventory} by star count (desc), then level (desc). */
+    public void sortInventory() {
+        inventory.sort(Artifact::compareForInventory);
+    }
+
     /** New-account default: characters 0 and 1 unlocked (Part 4), empty inventory, no loadout. */
     public static PlayerProfile defaultProfile() {
         PlayerProfile p = new PlayerProfile();

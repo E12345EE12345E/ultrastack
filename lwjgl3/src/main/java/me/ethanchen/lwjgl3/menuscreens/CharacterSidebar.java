@@ -37,19 +37,20 @@ public class CharacterSidebar {
         this.app = app;
         this.charactersEnabled = charactersEnabled;
 
-        double x = 0.08;
+        double x = 0.14;
         Runnable open = () -> app.switchMenu(new CharacterScreen(app, returnScreen, charactersEnabled));
 
-        portrait = new UIImage(x, 0.80, 0.12);
-        nameText = new UIText(x, 0.715, "", 0.75);
-        artifactA = new UIImage(x - 0.04, 0.64, 0.065);
-        artifactB = new UIImage(x + 0.04, 0.64, 0.065);
+        // Square images scale height from width, so leave extra vertical gap on wide windows.
+        portrait = new UIImage(x, 0.70, 0.11);
+        nameText = new UIText(x, 0.595, "", 0.75);
+        artifactA = new UIImage(x - 0.06, 0.48, 0.055);
+        artifactB = new UIImage(x + 0.06, 0.48, 0.055);
 
         elements.add(portrait);
         elements.add(nameText);
         elements.add(artifactA);
         elements.add(artifactB);
-        elements.add(new UIButton(x, 0.545, 0.18, 0.07, "Character Loadout", open, 0.7f));
+        elements.add(new UIButton(x, 0.375, 0.20, 0.07, "Character Loadout", open, 0.7f));
 
         refresh();
     }

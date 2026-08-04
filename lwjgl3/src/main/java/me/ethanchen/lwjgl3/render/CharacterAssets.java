@@ -23,7 +23,8 @@ public final class CharacterAssets {
     private static Texture load(String file) {
         return CACHE.computeIfAbsent(file, f -> {
             Texture t = new Texture(Gdx.files.internal(f));
-            t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+            // Nearest: artifact/portrait assets are low-res pixel art; Linear blurs them when scaled.
+            t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             return t;
         });
     }

@@ -194,6 +194,7 @@ public class ClientApp extends ApplicationAdapter {
                 ProfileSyncBroadcast p = (ProfileSyncBroadcast) wrapper.packet;
                 profile = p.profile;
                 profileReadOnly = p.readOnly;
+                if (profile != null) profile.sortInventory();
             }
 
             if (wrapper.packet instanceof ArtifactGrantBroadcast) {
@@ -202,6 +203,7 @@ public class ClientApp extends ApplicationAdapter {
                 ArtifactGrantBroadcast g = (ArtifactGrantBroadcast) wrapper.packet;
                 if (profile != null && g.artifact != null) {
                     profile.inventory.add(g.artifact);
+                    profile.sortInventory();
                 }
             }
 

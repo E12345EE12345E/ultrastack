@@ -28,6 +28,7 @@ public final class LanProfileFactory {
         Artifact b = ArtifactRoller.roll(randomTetromino(rng), 1, 60f, rng);
         profile.inventory.add(a);
         profile.inventory.add(b);
+        profile.sortInventory();
         profile.equippedArtifactIds[0] = a.id;
         profile.equippedArtifactIds[1] = b.id;
         return profile;

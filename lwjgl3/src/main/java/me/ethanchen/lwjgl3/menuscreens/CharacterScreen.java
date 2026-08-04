@@ -31,11 +31,13 @@ import me.ethanchen.network.ClientPacketWrapper;
  * the right.
  */
 public class CharacterScreen extends AspectLockedMenuScreen {
-    private static final float DIVIDER_Y = 560f;
-    private static final int INV_COLUMNS = 14;
-    private static final int INV_ROWS = 3;
-    /** Packed grid (no gaps): first-cell center, 14×3, 100px tiles. */
-    private static final UIGrid INVENTORY_GRID = UIGrid.designSquare(130, 310, INV_COLUMNS, 100, 0);
+    /** Raised so the artifact half has room for name + up to 5 effect lines. */
+    private static final float DIVIDER_Y = 610f;
+    private static final int INV_COLUMNS = 15;
+    private static final int INV_ROWS = 2;
+    /** Packed grid (no gaps): slightly smaller tiles than the prior 100px / 3-row layout. */
+    private static final UIGrid INVENTORY_GRID = UIGrid.designSquare(118, 275, INV_COLUMNS, 84, 0);
+    private static final int MAX_EFFECT_LINES = 5;
 
     private final MenuScreen returnScreen;
     private final Supplier<Boolean> charactersEnabled;
@@ -60,14 +62,14 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         this.returnScreen = returnScreen;
         this.charactersEnabled = charactersEnabled;
 
-        elements.add(new UIText(DesignUi.nx(960), DesignUi.ny(990), "Character & Artifacts", 2.5));
+        elements.add(new UIText(DesignUi.nx(960), DesignUi.ny(1010), "Character & Artifacts", 2.5));
         elements.add(new UIButton(
-                DesignUi.nx(140), DesignUi.ny(1000), DesignUi.nw(200), DesignUi.nh(64),
+                DesignUi.nx(140), DesignUi.ny(1020), DesignUi.nw(200), DesignUi.nh(64),
                 "Back", () -> app.switchMenu(returnScreen)));
 
-        // ---- Top half: character selection ----
-        bigPortrait = DesignUi.inventoryButton(340, 760, 260, null, null);
-        nameText = new UIText(DesignUi.nx(340), DesignUi.ny(600), "", 1.4);
+        // ---- Top half: character selection (compressed above the raised divider) ----
+        bigPortrait = DesignUi.inventoryButton(340, 820, 230, null, null);
+        nameText = new UIText(DesignUi.nx(340), DesignUi.ny(670), "", 1.3);
         elements.add(bigPortrait);
         elements.add(nameText);
 
@@ -75,30 +77,30 @@ public class CharacterScreen extends AspectLockedMenuScreen {
             int id = def.id;
             int index = characterButtons.size();
             UIInventoryButton btn = DesignUi.inventoryButton(
-                    580, 860 - index * 150, 120,
+                    580, 900 - index * 140, 110,
                     CharacterAssets.portraitFor(id), () -> selectCharacter(id));
             characterButtons.add(btn);
             elements.add(btn);
         }
 
         // ---- Bottom half: reference equip slots + Use/Remove + stats + inventory ----
-        equipSlots[0] = DesignUi.inventoryButton(150, 480, 110, null, () -> highlightEquipSlot(0));
-        equipSlots[1] = DesignUi.inventoryButton(290, 480, 110, null, () -> highlightEquipSlot(1));
+        equipSlots[0] = DesignUi.inventoryButton(150, 530, 100, null, () -> highlightEquipSlot(0));
+        equipSlots[1] = DesignUi.inventoryButton(280, 530, 100, null, () -> highlightEquipSlot(1));
         equipSlots[0].secondaryAction = () -> quickToggleEquipFromSlot(0);
         equipSlots[1].secondaryAction = () -> quickToggleEquipFromSlot(1);
         elements.add(equipSlots[0]);
         elements.add(equipSlots[1]);
         elements.add(new UIButton(
-                DesignUi.nx(140), DesignUi.ny(380), DesignUi.nw(140), DesignUi.nh(52),
+                DesignUi.nx(140), DesignUi.ny(430), DesignUi.nw(140), DesignUi.nh(48),
                 "Use", this::useHighlighted));
         elements.add(new UIButton(
-                DesignUi.nx(300), DesignUi.ny(380), DesignUi.nw(160), DesignUi.nh(52),
+                DesignUi.nx(290), DesignUi.ny(430), DesignUi.nw(160), DesignUi.nh(48),
                 "Remove", this::removeHighlighted));
 
         highlightedStatsText = new UIText(
-                DesignUi.nx(480), DesignUi.ny(520), "Select an artifact", 1.45, UIText.TextAlign.TOP_LEFT);
+                DesignUi.nx(460), DesignUi.ny(575), "Select an artifact", 1.35, UIText.TextAlign.TOP_LEFT);
         hoveredStatsText = new UIText(
-                DesignUi.nx(1180), DesignUi.ny(520), "Hover an artifact", 1.45, UIText.TextAlign.TOP_LEFT);
+                DesignUi.nx(1160), DesignUi.ny(575), "Hover an artifact", 1.35, UIText.TextAlign.TOP_LEFT);
         elements.add(highlightedStatsText);
         elements.add(hoveredStatsText);
 
@@ -110,13 +112,14 @@ public class CharacterScreen extends AspectLockedMenuScreen {
             inventorySlots.add(slot);
             elements.add(slot);
         }
-        paging = InventoryPaging.addTo(elements, INV_COLUMNS, INV_ROWS, 780, 45, this::changeInventoryPage);
+        // Page bar centred under the 15-col grid.
+        paging = InventoryPaging.addTo(elements, INV_COLUMNS, INV_ROWS, 706, 50, this::changeInventoryPage);
 
         elements.add(new UIButton(
                 DesignUi.nx(1780), DesignUi.ny(180), DesignUi.nw(220), DesignUi.nh(70),
                 "Fusion", () -> app.switchMenu(new FusionScreen(app, this, charactersEnabled))));
 
-        warningText = new UIText(DesignUi.nx(1600), DesignUi.ny(45), "", 0.75);
+        warningText = new UIText(DesignUi.nx(1600), DesignUi.ny(50), "", 0.75);
         elements.add(warningText);
 
         refresh();
@@ -269,10 +272,12 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         refreshInventoryPage(profile, enabled);
 
         Artifact highlighted = profile != null ? profile.findArtifact(highlightedId) : null;
-        highlightedStatsText.textin.set(highlighted != null ? describe(highlighted) : "Select an artifact");
+        highlightedStatsText.textin.set(highlighted != null
+                ? highlighted.describeForUi(MAX_EFFECT_LINES) : "Select an artifact");
 
         Artifact hovered = findHoveredArtifact(profile);
-        hoveredStatsText.textin.set(hovered != null ? describe(hovered) : "Hover an artifact");
+        hoveredStatsText.textin.set(hovered != null
+                ? hovered.describeForUi(MAX_EFFECT_LINES) : "Hover an artifact");
     }
 
     private void refreshInventoryPage(PlayerProfile profile, boolean enabled) {
@@ -310,14 +315,6 @@ public class CharacterScreen extends AspectLockedMenuScreen {
             if (slot.hovered && slot.boundId != null) return profile.findArtifact(slot.boundId);
         }
         return null;
-    }
-
-    private String describe(Artifact artifact) {
-        StringBuilder sb = new StringBuilder(artifact.displayName());
-        for (var effect : artifact.effects) {
-            sb.append('\n').append(effect.describe());
-        }
-        return sb.toString();
     }
 
     @Override

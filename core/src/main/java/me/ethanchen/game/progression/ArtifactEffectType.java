@@ -53,13 +53,13 @@ public enum ArtifactEffectType {
     /** Short human-readable label for UI display (implementation.md, Part 3, effects a-g). */
     public String label() {
         switch (this) {
-            case LINE_CLEAR_SCORE:         return "Line clear score";
-            case SPIN_SCORE:                return "Spin score";
-            case LINE_CLEAR_METER:          return "Line clear meter (all)";
-            case SPIN_METER:                return "Spin meter (all)";
-            case EQUIPPED_LINE_CLEAR_METER: return "Any line clear meter (self)";
-            case EQUIPPED_SPIN_METER:       return "Any spin meter (self)";
-            case EQUIPPED_PASSIVE_FILL_SPEED: return "Passive meter fill speed";
+            case LINE_CLEAR_SCORE:            return "line clears score";
+            case SPIN_SCORE:                   return "spins score";
+            case LINE_CLEAR_METER:             return "line clear meter bonus";
+            case SPIN_METER:                   return "spin meter bonus";
+            case EQUIPPED_LINE_CLEAR_METER:    return "All line clears meter bonus";
+            case EQUIPPED_SPIN_METER:          return "All spins meter bonus";
+            case EQUIPPED_PASSIVE_FILL_SPEED:  return "Meter fill over time";
             default: return name();
         }
     }

@@ -79,4 +79,27 @@ public class Artifact {
         if (q > 99) q = 99;
         return Integer.toString(q);
     }
+
+    /**
+     * Inventory sort: higher {@link #levelStarCount()} first, then higher {@link #level}.
+     * Stable for equal stars/level (returns 0).
+     */
+    public static int compareForInventory(Artifact a, Artifact b) {
+        int starCmp = Integer.compare(b.levelStarCount(), a.levelStarCount());
+        if (starCmp != 0) return starCmp;
+        return Integer.compare(b.level, a.level);
+    }
+
+    /**
+     * UI stats block: display name, then up to {@code maxEffects} effect lines
+     * (name + 5 effects = 6 lines total when fully filled). Effect lines use libGDX color markup.
+     */
+    public String describeForUi(int maxEffects) {
+        StringBuilder sb = new StringBuilder(displayName());
+        int n = Math.min(Math.max(0, maxEffects), effects.size());
+        for (int i = 0; i < n; i++) {
+            sb.append('\n').append(effects.get(i).describe(pieceType));
+        }
+        return sb.toString();
+    }
 }

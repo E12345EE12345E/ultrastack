@@ -80,7 +80,14 @@ public class UIText extends UIElement {
 
         sprites.begin();
         String text = textin.get();
-        GlyphLayout layout = new GlyphLayout(font, (text != null) ? text : "");
+        if (text == null) text = "";
+
+        // libGDX color tags like [#FFD700]I[] — used by artifact effect lines.
+        boolean useMarkup = text.indexOf("[#") >= 0;
+        boolean prevMarkup = font.getData().markupEnabled;
+        font.getData().markupEnabled = useMarkup;
+
+        GlyphLayout layout = new GlyphLayout(font, text);
         AspectLockedViewport vp = AspectLockedViewport.current();
         float refW = vp != null ? vp.viewW : Gdx.graphics.getWidth();
         float refH = vp != null ? vp.viewH : Gdx.graphics.getHeight();
@@ -129,9 +136,10 @@ public class UIText extends UIElement {
                 break;
         }
         font.setColor(Color.WHITE);
-        font.draw(sprites, (text != null) ? text : "", x, y);
+        font.draw(sprites, layout, x, y);
         sprites.end();
 
+        font.getData().markupEnabled = prevMarkup;
         UIFont.restoreScale(font, savedScale);
     }
 

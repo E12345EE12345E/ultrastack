@@ -698,6 +698,7 @@ public class GameRoom implements Runnable, GameRoomContext {
                 PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
                 Artifact artifact = ArtifactAcquisition.rollFromVictory(xp, artifactRng);
                 profile.inventory.add(artifact);
+                profile.sortInventory();
                 profileStore.saveProfile(s.accountUuid, profile);
 
                 ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();

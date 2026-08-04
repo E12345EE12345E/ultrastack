@@ -143,6 +143,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
         if (cached != null) return cached;
 
         PlayerProfile profile = readProfileFromExtraJson(acct);
+        profile.sortInventory();
         profileCache.put(accountUuid, profile);
         return profile;
     }
