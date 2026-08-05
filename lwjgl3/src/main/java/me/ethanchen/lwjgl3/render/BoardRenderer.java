@@ -368,12 +368,15 @@ public class BoardRenderer {
                     && Math.abs(shadow.locationY - piece.location.y) < 0.01f) continue;
 
             Color baseColor;
+            boolean local = isLocalPlayer != null && i < isLocalPlayer.length && isLocalPlayer[i];
+            boolean otherPlayer = isLocalPlayer != null && !local;
             if (shadow.wouldPlace) {
-                boolean local = isLocalPlayer != null && i < isLocalPlayer.length && isLocalPlayer[i];
                 // When isLocalPlayer is null, treat as "no grayscale" (legacy / spectator).
-                float colorAmt = (isLocalPlayer != null && !local) ? 1f - grayscaleAmt : 1f;
+                float colorAmt = otherPlayer ? 1f - grayscaleAmt : 1f;
                 Color c = PieceTints.blendGrayscale(piece.type, colorAmt, false);
-                baseColor = new Color(c.r, c.g, c.b, 0.75f);
+                // Other players' shadows are more transparent; local stays more opaque.
+                float alpha = otherPlayer ? 0.25f : 0.75f;
+                baseColor = new Color(c.r, c.g, c.b, alpha);
             } else {
                 baseColor = SHADOW_GRAY;
             }

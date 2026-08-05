@@ -317,9 +317,9 @@ public class GameScreen extends MenuScreen {
         renderCharacterMeters(board, originX, originY, tileSize);
     }
 
-    /** Draws each local player's character portrait + meter donut to the right of the board. */
+    /** Draws every seated player's character portrait + meter donut to the right of the board. */
     private void renderCharacterMeters(Board board, float originX, float originY, float tileSize) {
-        if (latestCharacterMode == null || localPlayers.isEmpty()) return;
+        if (latestCharacterMode == null) return;
         int[] ids = latestCharacterMode.characterIds;
         float[] fill = latestCharacterMode.meterFill;
         float[] max = latestCharacterMode.meterMax;
@@ -329,13 +329,14 @@ public class GameScreen extends MenuScreen {
         float boxX = originX + board.bw() * tileSize + tileSize * 0.5f;
         float boxY = originY + (board.bh() - 4) * tileSize;
         int drawn = 0;
-        for (LocalPlayer lp : localPlayers) {
-            if (lp.slot < 0 || lp.slot >= ids.length) continue;
-            String name = (playerNames != null && lp.slot < playerNames.length) ? playerNames[lp.slot] : null;
+        int n = Math.min(ids.length, Math.min(fill.length, max.length));
+        for (int slot = 0; slot < n; slot++) {
+            if (ids[slot] < 0) continue;
+            String name = (playerNames != null && slot < playerNames.length) ? playerNames[slot] : null;
             float widgetY = boxY - drawn * (boxSize + tileSize * 0.3f);
             CharacterMeterRenderer.draw(shapes, sprites, font,
-                    ids[lp.slot], name, fill[lp.slot], max[lp.slot],
-                    me.ethanchen.lwjgl3.render.shader.PlayerRipples.colorForSlot(lp.slot),
+                    ids[slot], name, fill[slot], max[slot],
+                    PlayerRipples.colorForSlot(slot),
                     boxX, widgetY, boxSize);
             drawn++;
         }

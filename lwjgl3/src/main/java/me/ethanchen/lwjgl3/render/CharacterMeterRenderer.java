@@ -12,7 +12,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
  * Draws one player's character portrait with a circular "donut" meter ring around it, for the
  * in-game HUD (implementation.md, Part 1: "meter that fills during gameplay ... when the meter is
  * full, the player can activate the ability"). Placed to the right of the board in
- * {@code GameScreen}, one per local player. The label under the portrait is the player's display
+ * {@code GameScreen}, one per seated player. The label under the portrait is the player's display
  * name (portrait already identifies the character).
  */
 public final class CharacterMeterRenderer {
