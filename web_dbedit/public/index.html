@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UltraStack accounts.db Editor</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">accounts.db editor</div>
+    <div class="topbar-status" id="statusText">No database loaded</div>
+    <div class="topbar-actions">
+      <label class="btn btn-secondary file-btn">
+        Open DB
+        <input type="file" id="fileInput" accept=".db,application/octet-stream" hidden />
+      </label>
+      <button type="button" class="btn btn-primary" id="saveBtn" disabled>Save DB</button>
+    </div>
+  </header>
+
+  <div id="dropOverlay" class="drop-overlay hidden" aria-hidden="true">
+    <div class="drop-overlay-inner">Drop accounts.db to load</div>
+  </div>
+
+  <main class="layout" id="mainLayout">
+    <aside class="sidebar left-sidebar">
+      <div class="sidebar-title">Accounts</div>
+      <div class="account-list" id="accountList">
+        <div class="empty-hint">Load an accounts.db to list accounts.</div>
+      </div>
+    </aside>
+
+    <section class="center-pane">
+      <div class="center-top">
+        <div class="pane-label">Account JSON</div>
+        <pre class="json-view" id="accountJson">Select an account.</pre>
+      </div>
+      <div class="center-bottom">
+        <div class="pane-label">Artifact Inventory</div>
+        <div class="inventory-scroll" id="inventoryScroll">
+          <div class="inventory-grid" id="inventoryGrid"></div>
+        </div>
+        <div class="hover-tip" id="hoverTip" hidden></div>
+      </div>
+    </section>
+
+    <aside class="sidebar right-sidebar">
+      <div class="sidebar-title">Artifact Editor</div>
+      <div id="artifactEditor" class="artifact-editor muted">
+        Click an artifact in the inventory to edit it.
+      </div>
+
+      <div class="add-section">
+        <div class="sidebar-title">Add Artifact</div>
+        <form id="addArtifactForm" class="add-form">
+          <label>
+            Piece type
+            <select name="pieceType" id="addPieceType"></select>
+          </label>
+          <label>
+            Level
+            <input name="level" id="addLevel" type="number" min="1" step="1" value="1" required />
+          </label>
+          <label>
+            Base quality
+            <input name="baseQuality" type="number" step="any" value="50" required />
+          </label>
+          <label>
+            Effect type
+            <select name="effectType" id="addEffectType"></select>
+          </label>
+          <label>
+            Effect quality (q)
+            <input name="quality" type="number" step="any" value="10" required />
+          </label>
+          <button type="submit" class="btn btn-primary" id="addArtifactBtn" disabled>Add Artifact</button>
+        </form>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -72,7 +72,9 @@ public class PieceQueue {
 
     public static enum BagTypes {
         BAG_7(new byte[]{Piece.I, Piece.J, Piece.L, Piece.O, Piece.S, Piece.T, Piece.Z}),
-        BAG_3MINO(new byte[]{Piece.I3, Piece.L3, Piece.I3, Piece.L3});
+        BAG_3MINO(new byte[]{Piece.I3, Piece.L3, Piece.I3, Piece.L3}),
+        /** Wizard character passive: queue contains only J, L, S, T, Z pieces (implementation.md, Part 4). */
+        BAG_WIZARD(new byte[]{Piece.J, Piece.L, Piece.S, Piece.T, Piece.Z});
 
         private byte[] pieces;
         private BagTypes(byte[] pieces) {

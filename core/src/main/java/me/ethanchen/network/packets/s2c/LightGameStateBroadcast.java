@@ -2,6 +2,7 @@ package me.ethanchen.network.packets.s2c;
 
 import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
+import me.ethanchen.network.packets.s2c.gamemode.CharacterModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
@@ -28,6 +29,8 @@ public class LightGameStateBroadcast extends NetworkPacket {
     // Mode-specific (null in all modes except the corresponding one)
     public ScoreModeData scoreMode;
     public PuzzleModeData puzzleMode;
+    /** Non-null only for CHARACTER_ modes: per-slot character meter state. */
+    public CharacterModeData characterMode;
 
     /** True once the server has detected win/loss; the rest of this packet's payload is frozen
      *  and may be re-sent unchanged until EndGameBroadcast follows (see

@@ -10,11 +10,15 @@ import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.LineClearResult;
 import me.ethanchen.game.board.MoveType;
 import me.ethanchen.game.board.Piece;
+import me.ethanchen.game.board.PieceQueue;
+import me.ethanchen.game.board.SpinType;
+import me.ethanchen.game.progression.CharacterDef;
 import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
@@ -48,6 +52,8 @@ public class ServerGame {
     private final ScoreModeScorer scorer = new ScoreModeScorer();
     private final BlockedSpawnController blocked = new BlockedSpawnController();
     private final GameEndController endCtrl = new GameEndController();
+    private final MeterController meterController = new MeterController();
+    private ActiveLoadout[] loadouts;
 
     public ServerGame(GameRoomContext room) {
         inProgress = false;
@@ -62,11 +68,21 @@ public class ServerGame {
      * {@link #update()}/{@link #applyMoves(int, int[], byte[])} call on the room thread.
      */
     public synchronized boolean startGame(GameMode gameMode, int players, int msToStart) {
+        return startGame(gameMode, players, msToStart, null);
+    }
+
+    /**
+     * As {@link #startGame(GameMode, int, int)}, but additionally captures a per-slot character
+     * loadout snapshot for CHARACTER_ modes (implementation.md, Part 4). {@code loadouts} may be
+     * null or contain null entries for modes/slots without an active character.
+     */
+    public synchronized boolean startGame(GameMode gameMode, int players, int msToStart, ActiveLoadout[] loadouts) {
         if (inProgress) return false;
         inProgress = true;
         lastUpdateMs = System.currentTimeMillis();
         this.gameMode = gameMode;
         this.players = players;
+        this.loadouts = gameMode.supportsCharacters() ? loadouts : null;
         this.game = new GameHandler(players);
         this.game.init(gameMode, msToStart);
 
@@ -84,7 +100,43 @@ public class ServerGame {
         blocked.reset(players);
         endCtrl.reset(gameStartMs, gameEndTargetMs);
         t = 0;
+
+        if (this.loadouts != null) {
+            scorer.setBonusProvider(this::characterScoreBonusPercent);
+            meterController.reset(players, this.loadouts);
+            applyBagOverrides();
+        } else {
+            scorer.setBonusProvider(null);
+        }
         return true;
+    }
+
+    /** Replaces a seated player's queue with their character's bag override, if any (e.g. Wizard). */
+    private void applyBagOverrides() {
+        if (game.getBoards().isEmpty()) return;
+        Board board = game.getBoards().get(0);
+        for (int i = 0; i < loadouts.length; i++) {
+            ActiveLoadout loadout = loadouts[i];
+            if (loadout == null || loadout.character == null || loadout.character.bagOverride == null) continue;
+            PieceQueue.BagTypes bag = loadout.character.bagOverride;
+            board.setPieceQueue(i, new PieceQueue(new java.util.Random().nextInt(), bag));
+        }
+    }
+
+    /**
+     * Combines the placer's equipped artifact score bonuses (piece-specific a/b and equipped
+     * any-piece score effects) with their character's flat passive score bonus (e.g. 3-Mino's
+     * +50% on I3/L3 clears) into one percentage.
+     */
+    private float characterScoreBonusPercent(int playerId, byte pieceType, boolean lineClear, boolean spin) {
+        if (loadouts == null || playerId < 0 || playerId >= loadouts.length) return 0f;
+        ActiveLoadout loadout = loadouts[playerId];
+        if (loadout == null) return 0f;
+        float bonus = loadout.scoreBonusPercent(pieceType, lineClear, spin);
+        if (lineClear && loadout.character != null && loadout.character.hasPassiveBonusFor(pieceType)) {
+            bonus += loadout.character.passiveLineClearScoreBonusPercent;
+        }
+        return bonus;
     }
 
     public synchronized void stopGame() {
@@ -92,6 +144,8 @@ public class ServerGame {
         this.game = null;
         this.players = 0;
         this.highestMoveId = null;
+        this.loadouts = null;
+        scorer.setBonusProvider(null);
         inProgress = false;
         room.onGameStopped();
     }
@@ -162,14 +216,55 @@ public class ServerGame {
     }
 
     /**
+     * Immediately replaces player {@code playerId}'s active piece with a fresh piece of
+     * {@code type} at their spawn position. Does not consume the piece queue or touch hold
+     * state. Queues a {@link PieceSwapBroadcast} for the next net-update pass.
+     *
+     * @return true if the swap was applied
+     */
+    public synchronized boolean swapActivePiece(int playerId, byte type) {
+        if (!canSwapActivePiece(playerId)) return false;
+        Board board = game.getBoards().get(0);
+        board.swapActivePiece(playerId, type);
+        effects.addPieceSwap((byte) playerId, type);
+        return true;
+    }
+
+    /**
+     * Like {@link #swapActivePiece(int, byte)}, but also forces the player's hold-used flag
+     * to {@code holdUsed}.
+     *
+     * @return true if the swap was applied
+     */
+    public synchronized boolean swapActivePiece(int playerId, byte type, boolean holdUsed) {
+        if (!canSwapActivePiece(playerId)) return false;
+        Board board = game.getBoards().get(0);
+        board.swapActivePiece(playerId, type, holdUsed);
+        effects.addPieceSwap((byte) playerId, type);
+        return true;
+    }
+
+    private boolean canSwapActivePiece(int playerId) {
+        if (!inProgress || endCtrl.isGameEnded() || game == null) return false;
+        if (playerId < 0 || playerId >= players) return false;
+        if (game.getBoards().isEmpty()) return false;
+        Board board = game.getBoards().get(0);
+        return board.getActivePieces().size() > playerId;
+    }
+
+    /**
      * Shared post-placement logic: increments the placement counter, applies mode-specific
      * scoring, and queues sounds/particles.
      */
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
         int priorCombo = game.getCombo();
-        if (gameMode == GameMode.MULTIPLAYER_SCORE) {
-            scorer.scoreHardDrop(result, effects);
+        if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
+            long points = scorer.scoreHardDrop(result, effects);
+            if (loadouts != null && points > 0) {
+                meterController.onScoreEvent(result.playerId, points, result.pieceType,
+                        result.numClearedRows() > 0, result.spinType != SpinType.NONE);
+            }
         } else {
             game.applyClearToCounters(result);
         }
@@ -222,7 +317,11 @@ public class ServerGame {
         switch (gameMode) {
             case MULTIPLAYER_SCORE:
             case MULTIPLAYER_PUZZLE:
+            case CHARACTER_SCORE:
                 updateGameTick();
+                if (loadouts != null && game != null && game.isStarted() && !endCtrl.isGameEnded()) {
+                    meterController.tickPassive(deltaTime / 1000f);
+                }
                 if (game != null) sendNetUpdates();
                 break;
             default:
@@ -281,6 +380,10 @@ public class ServerGame {
         return effects.getAndClearPendingBumpSounds();
     }
 
+    public ArrayList<PieceSwapBroadcast> getAndClearPendingPieceSwaps() {
+        return effects.getAndClearPendingPieceSwaps();
+    }
+
     public boolean computeHoldAvailable(int playerId) {
         if (game == null || game.getBoards().isEmpty()) return true;
         return blocked.computeHoldAvailable(playerId, game.getBoards().get(0));
@@ -319,7 +422,52 @@ public class ServerGame {
             b.scoreMode = scorer.getScoreModeData();
         } else if (gameMode == me.ethanchen.game.GameMode.MULTIPLAYER_PUZZLE) {
             b.puzzleMode = getPuzzleModeData();
+        } else if (gameMode == me.ethanchen.game.GameMode.CHARACTER_SCORE) {
+            b.scoreMode = scorer.getScoreModeData();
+            if (loadouts != null) b.characterMode = meterController.getCharacterModeData();
         }
+    }
+
+    /**
+     * Activates {@code playerId}'s character ability if their meter is full (implementation.md,
+     * Part 1/4): 3-Mino fills skyline gaps with garbage, Wizard forces an I. No-op (returns false)
+     * for non-character modes, an unready meter, or an invalid player.
+     */
+    public synchronized boolean activateAbility(int playerId) {
+        if (loadouts == null || !canActivateAbility(playerId)) return false;
+        if (playerId < 0 || playerId >= loadouts.length || loadouts[playerId] == null) return false;
+        CharacterDef character = loadouts[playerId].character;
+        if (character == null) return false;
+
+        switch (character.ability) {
+            case FILL_SKYLINE_GAPS:
+                if (!meterController.tryConsume(playerId)) return false;
+                return activateFillSkylineGaps();
+            case FORCE_I:
+                if (!canSwapActivePiece(playerId)) return false;
+                if (!meterController.tryConsume(playerId)) return false;
+                return swapActivePiece(playerId, Piece.I);
+            default:
+                return false;
+        }
+    }
+
+    /** True when the game is running and {@code playerId} is a valid seated slot. */
+    private boolean canActivateAbility(int playerId) {
+        if (!inProgress || endCtrl.isGameEnded() || game == null) return false;
+        if (playerId < 0 || playerId >= players) return false;
+        return !game.getBoards().isEmpty();
+    }
+
+    /**
+     * Fills skyline-band gaps with garbage and queues hard-drop flash particles for each filled
+     * cell. Always returns true after a successful meter consume (even if no cells were filled).
+     */
+    private boolean activateFillSkylineGaps() {
+        Board board = game.getBoards().get(0);
+        int[][] filled = board.fillSkylineGaps();
+        effects.queueHardDropCellFlashes(filled);
+        return true;
     }
 
     public void sendNetUpdates() {

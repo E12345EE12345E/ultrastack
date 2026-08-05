@@ -69,10 +69,10 @@ public class UIButton extends UIElement {
 
     @Override
     public void render(ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
-        float pxWidth  = MenuScreen.convertFromRelCoordsX((float) width);
-        float pxHeight = (float) (height * Gdx.graphics.getHeight());
+        float pxWidth  = MenuScreen.toScreenWidth((float) width);
+        float pxHeight = MenuScreen.toScreenHeight((float) height);
         float pxX = MenuScreen.convertFromRelCoordsX((float) centerX) - 0.5f * pxWidth;
-        float pxY = (Gdx.graphics.getHeight() - MenuScreen.convertFromRelCoordsY((float) centerY)) - 0.5f * pxHeight;
+        float pxY = MenuScreen.toScreenYBottom((float) centerY) - 0.5f * pxHeight;
 
         float mouseX = Gdx.input.getX();
         float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();

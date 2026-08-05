@@ -1,23 +1,33 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
 import me.ethanchen.game.GameMode;
+import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.lwjgl3.ClientApp;
+import me.ethanchen.lwjgl3.render.CharacterAssets;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
+import me.ethanchen.lwjgl3.menuscreens.ui.UIImage;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
+import me.ethanchen.network.packets.s2c.ArtifactGrantBroadcast;
 import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
 public class EndGameScreen extends MenuScreen {
     private boolean isHost;
+    private boolean grantPopupShown;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             // A host who returns to the lobby first can start a new game while other players
             // are still viewing results, so pull them straight into the GameScreen too.
             .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, app.isRoomHost())))
-            .on(RoomClosedBroadcast.class, w -> handleRoomClosed());
+            .on(RoomClosedBroadcast.class, w -> handleRoomClosed())
+            .on(ArtifactGrantBroadcast.class, w -> {
+                ArtifactGrantBroadcast g = (ArtifactGrantBroadcast) w.packet;
+                app.consumePendingVictoryArtifact(); // already merged into profile by ClientApp
+                if (g.artifact != null) showArtifactGrantPopup(g.artifact);
+            });
 
     public EndGameScreen(ClientApp app, EndGameBroadcast pkt, boolean isHost) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -38,7 +48,8 @@ public class EndGameScreen extends MenuScreen {
         }
 
         // Score-mode final score and time survived
-        if (pkt.mode == GameMode.MULTIPLAYER_SCORE && pkt.scoreModeEnd != null) {
+        if ((pkt.mode == GameMode.MULTIPLAYER_SCORE || pkt.mode == GameMode.CHARACTER_SCORE)
+                && pkt.scoreModeEnd != null) {
             double scoreY = startY - (pkt.playerNames != null ? pkt.playerNames.length : 0) * stepY - 0.04;
             elements.add(new UIText(0.5, scoreY, "Final Score: " + pkt.scoreModeEnd.finalScore, 2.5));
             long ms = pkt.scoreModeEnd.timeSurvivedMs;
@@ -59,6 +70,24 @@ public class EndGameScreen extends MenuScreen {
         }
 
         elements.add(new UIButton(0.5, 0.15, 0.4, 0.1, "Back to Menu", this::backToRoom));
+
+        // Grant is sent after EndGameBroadcast; it may already be stashed from the fade delay.
+        if (pkt.win) {
+            Artifact pending = app.consumePendingVictoryArtifact();
+            if (pending != null) showArtifactGrantPopup(pending);
+        }
+    }
+
+    private void showArtifactGrantPopup(Artifact artifact) {
+        if (grantPopupShown || artifact == null) return;
+        grantPopupShown = true;
+
+        elements.add(new UIText(0.82, 0.32, "New Artifact Acquired!", 1.1));
+        UIImage icon = new UIImage(0.82, 0.18, 0.12);
+        icon.drawWhiteBox = true;
+        icon.showEmptyPlaceholder = false;
+        icon.texture = CharacterAssets.artifactIconFor(artifact);
+        elements.add(icon);
     }
 
     private void backToRoom() {
@@ -74,6 +103,11 @@ public class EndGameScreen extends MenuScreen {
 
     @Override
     public void update() {
+        // Late grant during this screen (if fade was shorter than the TCP arrival).
+        if (!grantPopupShown) {
+            Artifact pending = app.consumePendingVictoryArtifact();
+            if (pending != null) showArtifactGrantPopup(pending);
+        }
     }
 
     @Override

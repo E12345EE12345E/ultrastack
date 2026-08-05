@@ -1,5 +1,10 @@
 package me.ethanchen.headless;
 
+import com.badlogic.gdx.utils.Json;
+import com.badlogic.gdx.utils.JsonWriter;
+
+import me.ethanchen.game.progression.PlayerProfile;
+import me.ethanchen.server.ProfileStore;
 import me.ethanchen.server.XpAwarder;
 
 import java.io.File;
@@ -16,17 +21,29 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Durably persists player accounts to a SQLite database. Each account is committed as soon as
  * it's created (JDBC autocommit), so unlike the previous JSON-file approach there is no
- * periodic/shutdown save step to lose data on a crash.
+ * buffered write window to lose data on a crash.
+ *
+ * <p>WAL pages are checkpointed into the main {@code .db} file on a schedule (see
+ * {@link SqliteWalSync}) so tools that copy only that file see recent commits without waiting
+ * for auto-checkpoint or process shutdown.
  *
  * <p>Core fields live in dedicated columns; anything added later goes into {@code extra_json}
  * so old rows and new player-account features stay compatible without a schema migration.
  */
-public class AccountStore implements XpAwarder {
+public class AccountStore implements XpAwarder, ProfileStore {
     private static final int SCHEMA_VERSION = 1;
 
     private final ConcurrentHashMap<String, Account> byUsername = new ConcurrentHashMap<>(); // key: lowercase username
     private final ConcurrentHashMap<String, Account> byUuid = new ConcurrentHashMap<>();
+    /**
+     * Live profile instances keyed by account uuid. {@link #loadProfile} must return a stable
+     * object for the life of the process so that {@code ServerCore.session.profile} and callers
+     * like {@code GameRoom.grantVictoryArtifacts} mutate the same inventory -- otherwise fusion
+     * (and loadout) see a stale copy while the DB/client already have newly granted artifacts.
+     */
+    private final ConcurrentHashMap<String, PlayerProfile> profileCache = new ConcurrentHashMap<>();
     private final Connection connection;
+    private final SqliteWalSync walSync;
 
     public AccountStore(String dbPath) {
         try {
@@ -52,6 +69,7 @@ public class AccountStore implements XpAwarder {
         } catch (ClassNotFoundException | SQLException e) {
             throw new RuntimeException("Failed to initialize account database", e);
         }
+        walSync = new SqliteWalSync("account-store-wal-sync", this::checkpointWal);
         load();
         Runtime.getRuntime().addShutdownHook(new Thread(this::close, "account-store-shutdown"));
     }
@@ -109,6 +127,65 @@ public class AccountStore implements XpAwarder {
         }
     }
 
+    /**
+     * Returns the live in-memory profile for {@code accountUuid}, deserializing from
+     * {@code extra_json} only on the first access (or {@link PlayerProfile#defaultProfile()} for
+     * blank/legacy rows). Subsequent calls return the same instance so session-scoped mutations
+     * (grants, fusion, loadout) stay coherent.
+     */
+    @Override
+    public synchronized PlayerProfile loadProfile(String accountUuid) {
+        if (accountUuid == null) return PlayerProfile.defaultProfile();
+        Account acct = byUuid.get(accountUuid);
+        if (acct == null) return PlayerProfile.defaultProfile();
+
+        PlayerProfile cached = profileCache.get(accountUuid);
+        if (cached != null) return cached;
+
+        PlayerProfile profile = readProfileFromExtraJson(acct);
+        profile.sortInventory();
+        profileCache.put(accountUuid, profile);
+        return profile;
+    }
+
+    private static PlayerProfile readProfileFromExtraJson(Account acct) {
+        if (acct.extraJson == null || acct.extraJson.isEmpty()) {
+            return PlayerProfile.defaultProfile();
+        }
+        try {
+            Json json = new Json();
+            AccountExtra extra = json.fromJson(AccountExtra.class, acct.extraJson);
+            if (extra == null || extra.profile == null) return PlayerProfile.defaultProfile();
+            return extra.profile;
+        } catch (Exception e) {
+            System.err.println("[AccountStore] Failed to parse extra_json for " + acct.uuid + ": " + e.getMessage());
+            return PlayerProfile.defaultProfile();
+        }
+    }
+
+    /** Persists {@code profile} into {@code extra_json}, immediately committing to disk. */
+    @Override
+    public synchronized void saveProfile(String accountUuid, PlayerProfile profile) {
+        Account acct = byUuid.get(accountUuid);
+        if (acct == null) return;
+        profileCache.put(accountUuid, profile);
+        AccountExtra extra = new AccountExtra();
+        extra.profile = profile;
+        Json json = new Json();
+        json.setOutputType(JsonWriter.OutputType.json);
+        String extraJson = json.toJson(extra);
+
+        String sql = "UPDATE accounts SET extra_json = ? WHERE uuid = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, extraJson);
+            ps.setString(2, accountUuid);
+            ps.executeUpdate();
+            acct.extraJson = extraJson;
+        } catch (SQLException e) {
+            System.err.println("[AccountStore] Failed to save profile: " + e.getMessage());
+        }
+    }
+
     /** Returns the Account if credentials match, null otherwise. */
     public Account authenticate(String username, String passcode) {
         Account acct = byUsername.get(username.toLowerCase());
@@ -142,10 +219,25 @@ public class AccountStore implements XpAwarder {
         }
     }
 
-    public synchronized void close() {
+    /** Folds {@code accounts.db-wal} into {@code accounts.db} and truncates the WAL. */
+    private synchronized void checkpointWal() {
         try {
-            if (connection != null && !connection.isClosed()) connection.close();
-        } catch (SQLException ignored) {
+            if (connection == null || connection.isClosed()) return;
+            try (Statement st = connection.createStatement()) {
+                st.execute("PRAGMA wal_checkpoint(TRUNCATE);");
+            }
+        } catch (SQLException e) {
+            System.err.println("[AccountStore] WAL checkpoint failed: " + e.getMessage());
+        }
+    }
+
+    public void close() {
+        walSync.close();
+        synchronized (this) {
+            try {
+                if (connection != null && !connection.isClosed()) connection.close();
+            } catch (SQLException ignored) {
+            }
         }
     }
 }

@@ -9,6 +9,7 @@ import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 
 /**
  * Accumulates per-tick particle events and sound broadcasts for delivery during the next
@@ -22,6 +23,7 @@ class PlacementEffects {
     final ArrayList<HardDropEffect> pendingHardDropEffects = new ArrayList<>();
     final ArrayList<HoldSoundBroadcast> pendingHoldSounds = new ArrayList<>();
     final ArrayList<BumpSoundBroadcast> pendingBumpSounds = new ArrayList<>();
+    final ArrayList<PieceSwapBroadcast> pendingPieceSwaps = new ArrayList<>();
 
     // -------------------------------------------------------------------------
     // Queueing
@@ -121,6 +123,36 @@ class PlacementEffects {
         pendingBumpSounds.add(bsb);
     }
 
+    /** Queues a {@link PieceSwapBroadcast}. */
+    void addPieceSwap(byte playerId, byte type) {
+        PieceSwapBroadcast psb = new PieceSwapBroadcast();
+        psb.playerId = playerId;
+        psb.pieceType = type;
+        pendingPieceSwaps.add(psb);
+    }
+
+    /**
+     * Queues a {@link ParticleSpawner#TYPE_HARD_DROP_CELLS} spawner that flashes every filled
+     * cell from 3-Mino's skyline-fill ability. No-op when {@code cells} is null/empty.
+     *
+     * @param cells packed {@code [x, y]} pairs of board cells that were just filled
+     */
+    void queueHardDropCellFlashes(int[][] cells) {
+        if (cells == null || cells.length == 0) return;
+        byte[] xs = new byte[cells.length];
+        byte[] ys = new byte[cells.length];
+        for (int i = 0; i < cells.length; i++) {
+            xs[i] = (byte) cells[i][0];
+            ys[i] = (byte) cells[i][1];
+        }
+        ParticleSpawner ps = new ParticleSpawner();
+        ps.spawnerType = ParticleSpawner.TYPE_HARD_DROP_CELLS;
+        ps.boardIndex = 0;
+        ps.cellXs = xs;
+        ps.cellYs = ys;
+        pendingSpawners.add(ps);
+    }
+
     // -------------------------------------------------------------------------
     // Draining (called by GameRoom.sendNetUpdates)
     // -------------------------------------------------------------------------
@@ -157,6 +189,13 @@ class PlacementEffects {
         if (pendingBumpSounds.isEmpty()) return null;
         ArrayList<BumpSoundBroadcast> copy = new ArrayList<>(pendingBumpSounds);
         pendingBumpSounds.clear();
+        return copy;
+    }
+
+    ArrayList<PieceSwapBroadcast> getAndClearPendingPieceSwaps() {
+        if (pendingPieceSwaps.isEmpty()) return null;
+        ArrayList<PieceSwapBroadcast> copy = new ArrayList<>(pendingPieceSwaps);
+        pendingPieceSwaps.clear();
         return copy;
     }
 }

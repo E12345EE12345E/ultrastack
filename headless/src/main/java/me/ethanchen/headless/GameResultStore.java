@@ -15,8 +15,12 @@ import java.util.UUID;
 
 /**
  * Durably persists finished-game results to a SQLite database. Each result is committed as
- * soon as it's recorded (JDBC autocommit), so unlike {@link AccountStore} there is no
- * periodic/shutdown save step to lose data on a crash.
+ * soon as it's recorded (JDBC autocommit), so there is no buffered write window to lose data
+ * on a crash.
+ *
+ * <p>WAL pages are checkpointed into the main {@code .db} file on a schedule (see
+ * {@link SqliteWalSync}) so tools that copy only that file see recent commits without waiting
+ * for auto-checkpoint or process shutdown.
  *
  * <p>Core (sortable/queryable) fields live in dedicated columns; anything gamemode-specific
  * or added later goes into {@code extra_json} so old rows and new gamemodes stay compatible
@@ -27,6 +31,7 @@ public class GameResultStore implements ResultRecorder {
 
     private final Connection connection;
     private final Json json;
+    private final SqliteWalSync walSync;
 
     public GameResultStore(String dbPath) {
         this.json = new Json();
@@ -58,6 +63,7 @@ public class GameResultStore implements ResultRecorder {
         } catch (ClassNotFoundException | SQLException e) {
             throw new RuntimeException("Failed to initialize game result database", e);
         }
+        walSync = new SqliteWalSync("game-result-store-wal-sync", this::checkpointWal);
         Runtime.getRuntime().addShutdownHook(new Thread(this::close, "game-result-store-shutdown"));
     }
 
@@ -83,10 +89,25 @@ public class GameResultStore implements ResultRecorder {
         }
     }
 
-    public synchronized void close() {
+    /** Folds {@code results.db-wal} into {@code results.db} and truncates the WAL. */
+    private synchronized void checkpointWal() {
         try {
-            if (connection != null && !connection.isClosed()) connection.close();
-        } catch (SQLException ignored) {
+            if (connection == null || connection.isClosed()) return;
+            try (Statement st = connection.createStatement()) {
+                st.execute("PRAGMA wal_checkpoint(TRUNCATE);");
+            }
+        } catch (SQLException e) {
+            System.err.println("[GameResultStore] WAL checkpoint failed: " + e.getMessage());
+        }
+    }
+
+    public void close() {
+        walSync.close();
+        synchronized (this) {
+            try {
+                if (connection != null && !connection.isClosed()) connection.close();
+            } catch (SQLException ignored) {
+            }
         }
     }
 }

@@ -74,6 +74,9 @@ class GameInputHandler {
         boolean isSoftDrop = keycode == keys.softDrop || (keys.softDrop2 != -1 && keycode == keys.softDrop2);
         if (isSoftDrop) return handleSoftDropDown(board, holdAvailable);
 
+        boolean isAbility = keycode == keys.ability || (keys.ability2 != -1 && keycode == keys.ability2);
+        if (isAbility) { app.sendAbilityRequest(predictor.getLocalIndex()); return true; }
+
         if (!canAct(board)) return false;
         MoveType type = null;
         if      (keycode == keys.hardDrop  || (keys.hardDrop2  != -1 && keycode == keys.hardDrop2))  type = MoveType.HARD_DROP;
@@ -111,6 +114,9 @@ class GameInputHandler {
 
         boolean isSoftDrop = b != -1 && (b == keys.ctrlSoftDrop || b == keys.ctrlSoftDrop2);
         if (isSoftDrop) return handleSoftDropDown(board, holdAvailable);
+
+        boolean isAbility = b != -1 && (b == keys.ctrlAbility || b == keys.ctrlAbility2);
+        if (isAbility) { app.sendAbilityRequest(predictor.getLocalIndex()); return true; }
 
         if (!canAct(board)) return false;
         MoveType type = null;

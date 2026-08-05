@@ -27,8 +27,7 @@ public class LobbySettingsScreen extends MenuScreen {
         elements.add(new UIText(0.5, 0.65, "Game Mode", 1.5));
         UIButton modeButton = new UIButton(0.5, 0.56, 0.4, 0.1, modeLabel(settings.gamemode), null);
         modeButton.action = () -> {
-            settings.gamemode = (settings.gamemode == GameMode.MULTIPLAYER_SCORE)
-                    ? GameMode.MULTIPLAYER_PUZZLE : GameMode.MULTIPLAYER_SCORE;
+            settings.gamemode = nextMode(settings.gamemode);
             modeButton.text = modeLabel(settings.gamemode);
         };
         elements.add(modeButton);
@@ -41,8 +40,20 @@ public class LobbySettingsScreen extends MenuScreen {
         elements.add(new UIButton(0.82, 0.125, 0.28, 0.1, "View Chat", () -> app.switchMenu(chatScreen)));
     }
 
+    private static GameMode nextMode(GameMode mode) {
+        switch (mode) {
+            case MULTIPLAYER_SCORE: return GameMode.MULTIPLAYER_PUZZLE;
+            case MULTIPLAYER_PUZZLE: return GameMode.CHARACTER_SCORE;
+            default: return GameMode.MULTIPLAYER_SCORE;
+        }
+    }
+
     private static String modeLabel(GameMode mode) {
-        return mode == GameMode.MULTIPLAYER_PUZZLE ? "Mode: Puzzle" : "Mode: Score";
+        switch (mode) {
+            case MULTIPLAYER_PUZZLE: return "Mode: Puzzle";
+            case CHARACTER_SCORE: return "Mode: Characters";
+            default: return "Mode: Score";
+        }
     }
 
     @Override

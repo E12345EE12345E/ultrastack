@@ -25,6 +25,7 @@ public class MultiplayerLobby extends MenuScreen {
     private boolean isHost;
     private boolean hostButtonsAdded;
     private final LocalPlayerSidebar sidebar;
+    private final CharacterSidebar characterSidebar;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(TextMessageBroadcast.class, w -> handleTextMessage((TextMessageBroadcast) w.packet))
@@ -67,6 +68,9 @@ public class MultiplayerLobby extends MenuScreen {
 
         sidebar = new LocalPlayerSidebar(app, elements, app::sendLocalPlayerCount);
         app.sendLocalPlayerCount();
+
+        characterSidebar = new CharacterSidebar(app, elements, this,
+                () -> app.getLobbySettings().gamemode.supportsCharacters());
     }
 
     private void addHostButtons() {
@@ -110,6 +114,7 @@ public class MultiplayerLobby extends MenuScreen {
     @Override
     public void update() {
         sidebar.tick();
+        characterSidebar.tick();
     }
 
     @Override

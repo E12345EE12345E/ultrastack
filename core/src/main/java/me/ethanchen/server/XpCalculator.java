@@ -10,6 +10,7 @@ public final class XpCalculator {
         if (mode == null) return 0L;
         switch (mode) {
             case MULTIPLAYER_SCORE:
+            case CHARACTER_SCORE:
                 return (long) Math.ceil(score / 100.0);
             case MULTIPLAYER_PUZZLE:
                 return 20L;

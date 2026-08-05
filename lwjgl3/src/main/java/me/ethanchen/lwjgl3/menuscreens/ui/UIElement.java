@@ -21,7 +21,16 @@ public abstract class UIElement {
 
     public abstract void onClick();
 
+    /** Left-click handler; subclasses that care about other buttons should override {@link #handleClick(int, int, int)}. */
     public abstract void handleClick(int screenX, int screenY);
+
+    /**
+     * Mouse-button-aware click. Default: left button only, delegates to {@link #handleClick(int, int)}.
+     * {@code button} uses libGDX {@code Input.Buttons} constants.
+     */
+    public void handleClick(int screenX, int screenY, int button) {
+        if (button == 0) handleClick(screenX, screenY);
+    }
 
     public abstract void handleKeyTyped(char key);
 

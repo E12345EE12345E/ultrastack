@@ -56,6 +56,11 @@ public class PlayerRipples {
             Color.RED, Color.GREEN, Color.ORANGE, Color.PURPLE
     };
 
+    /** Shared with other HUD elements (e.g. the character meter donut) that key off a player's ripple color. */
+    public static Color colorForSlot(int slot) {
+        return SLOT_COLORS[((slot % SLOT_COLORS.length) + SLOT_COLORS.length) % SLOT_COLORS.length];
+    }
+
     /**
      * Per-slot-color opacity multiplier, applied on top of every opacity value computed in
      * {@link #draw}. Green/orange/purple read as visually brighter than red at equal alpha, so

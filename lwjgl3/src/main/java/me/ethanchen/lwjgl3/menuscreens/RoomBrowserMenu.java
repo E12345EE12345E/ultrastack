@@ -15,6 +15,7 @@ public class RoomBrowserMenu extends MenuScreen {
     private TextInput roomListText;
     private TextInput messageText;
     private final LocalPlayerSidebar sidebar;
+    private final CharacterSidebar characterSidebar;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(RoomListBroadcast.class, w -> handleRoomList((RoomListBroadcast) w.packet))
@@ -61,6 +62,7 @@ public class RoomBrowserMenu extends MenuScreen {
         }));
 
         sidebar = new LocalPlayerSidebar(app, elements, () -> {});
+        characterSidebar = new CharacterSidebar(app, elements, this, () -> true);
     }
 
     @Override
@@ -77,6 +79,7 @@ public class RoomBrowserMenu extends MenuScreen {
             app.sendRoomListRequest();
         }
         sidebar.tick();
+        characterSidebar.tick();
     }
 
 

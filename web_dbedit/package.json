@@ -1,0 +1,20 @@
+{
+  "name": "ultrastack-web-dbedit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Debug editor for UltraStack accounts.db",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "multer": "^2.2.0",
+    "uuid": "^11.1.0"
+  }
+}

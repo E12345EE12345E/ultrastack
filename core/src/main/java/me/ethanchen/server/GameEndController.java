@@ -87,7 +87,7 @@ class GameEndController {
 
         frozenScoreEnd  = null;
         frozenPuzzleEnd = null;
-        if (mode == GameMode.MULTIPLAYER_SCORE) {
+        if (mode == GameMode.MULTIPLAYER_SCORE || mode == GameMode.CHARACTER_SCORE) {
             frozenScoreEnd = new ScoreModeEndData();
             frozenScoreEnd.finalScore = scorer != null ? scorer.getTotalScore() : 0;
             frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
@@ -163,7 +163,8 @@ class GameEndController {
 
     private long computeFinalScore(GameMode mode, ScoreModeScorer scorer) {
         switch (mode) {
-            case MULTIPLAYER_SCORE:  return scorer != null ? scorer.getTotalScore() : 0L;
+            case MULTIPLAYER_SCORE:
+            case CHARACTER_SCORE:    return scorer != null ? scorer.getTotalScore() : 0L;
             case MULTIPLAYER_PUZZLE: return frozenPuzzleEnd != null ? frozenPuzzleEnd.score : 0L;
             default:                 return 0L;
         }

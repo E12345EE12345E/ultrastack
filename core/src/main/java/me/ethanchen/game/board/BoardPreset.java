@@ -63,7 +63,7 @@ public final class BoardPreset {
         for (boolean[] row : allowed) Arrays.fill(row, true);
         PieceQueue[] queues = new PieceQueue[spawnPositions.length];
         for (int i = 0; i < queues.length; i++) {
-            queues[i] = new PieceQueue(rng.nextInt(), PieceQueue.BagTypes.BAG_3MINO);
+            queues[i] = new PieceQueue(rng.nextInt(), PieceQueue.BagTypes.BAG_7);
         }
         return new BoardPreset(w, h, allowed, spawnPositions, queues);
     }

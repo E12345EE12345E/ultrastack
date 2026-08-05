@@ -21,6 +21,7 @@ import me.ethanchen.lwjgl3.input.LocalPlayerRoster;
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
+import me.ethanchen.lwjgl3.render.CharacterMeterRenderer;
 import me.ethanchen.lwjgl3.render.Particle;
 import me.ethanchen.lwjgl3.render.shader.PlayerRipples;
 import me.ethanchen.network.ClientPacketWrapper;
@@ -34,7 +35,9 @@ import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleSpawner;
+import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
+import me.ethanchen.network.packets.s2c.gamemode.CharacterModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
@@ -65,6 +68,7 @@ public class GameScreen extends MenuScreen {
 
     private ScoreModeData latestScoreMode;
     private PuzzleModeData latestPuzzleMode;
+    private CharacterModeData latestCharacterMode;
 
     private long gameEndTargetMs;
     private long startTimeMS;
@@ -79,7 +83,8 @@ public class GameScreen extends MenuScreen {
                 .on(ParticleBroadcast.class,        w -> handleParticleBroadcast((ParticleBroadcast) w.packet))
                 .on(HardDropEffectsBroadcast.class, w -> handleHardDropEffects((HardDropEffectsBroadcast) w.packet))
                 .on(HoldSoundBroadcast.class,       w -> handleHoldSound((HoldSoundBroadcast) w.packet))
-                .on(BumpSoundBroadcast.class,       w -> handleBumpSound((BumpSoundBroadcast) w.packet));
+                .on(BumpSoundBroadcast.class,       w -> handleBumpSound((BumpSoundBroadcast) w.packet))
+                .on(PieceSwapBroadcast.class,       w -> handlePieceSwap((PieceSwapBroadcast) w.packet));
     }
 
     public GameScreen(ClientApp app, StartGameBroadcast b, boolean isHost) {
@@ -309,6 +314,31 @@ public class GameScreen extends MenuScreen {
 
         renderCountdown(board, originX, originY, tileSize);
         renderPlayerNames(board, originX, originY, tileSize);
+        renderCharacterMeters(board, originX, originY, tileSize);
+    }
+
+    /** Draws each local player's character portrait + meter donut to the right of the board. */
+    private void renderCharacterMeters(Board board, float originX, float originY, float tileSize) {
+        if (latestCharacterMode == null || localPlayers.isEmpty()) return;
+        int[] ids = latestCharacterMode.characterIds;
+        float[] fill = latestCharacterMode.meterFill;
+        float[] max = latestCharacterMode.meterMax;
+        if (ids == null || fill == null || max == null) return;
+
+        float boxSize = tileSize * 4.5f;
+        float boxX = originX + board.bw() * tileSize + tileSize * 0.5f;
+        float boxY = originY + (board.bh() - 4) * tileSize;
+        int drawn = 0;
+        for (LocalPlayer lp : localPlayers) {
+            if (lp.slot < 0 || lp.slot >= ids.length) continue;
+            String name = (playerNames != null && lp.slot < playerNames.length) ? playerNames[lp.slot] : null;
+            float widgetY = boxY - drawn * (boxSize + tileSize * 0.3f);
+            CharacterMeterRenderer.draw(shapes, sprites, font,
+                    ids[lp.slot], name, fill[lp.slot], max[lp.slot],
+                    me.ethanchen.lwjgl3.render.shader.PlayerRipples.colorForSlot(lp.slot),
+                    boxX, widgetY, boxSize);
+            drawn++;
+        }
     }
 
     private void renderCountdown(Board board, float originX, float originY, float tileSize) {
@@ -469,6 +499,7 @@ public class GameScreen extends MenuScreen {
         }
         if (p.scoreMode  != null) latestScoreMode  = p.scoreMode;
         if (p.puzzleMode != null) latestPuzzleMode = p.puzzleMode;
+        if (p.characterMode != null) latestCharacterMode = p.characterMode;
 
         game.setGravity(p.gravity);
         game.setGravityTickCounter(p.gravityTickCounter);
@@ -534,6 +565,12 @@ public class GameScreen extends MenuScreen {
                     particles, particleRng);
             if (ripples != null) ripples.poof(e.playerId);
         }
+    }
+
+    private void handlePieceSwap(PieceSwapBroadcast p) {
+        if (game.getBoards().isEmpty()) return;
+        game.getBoards().get(0).swapActivePiece(p.playerId, p.pieceType);
+        if (ripples != null) ripples.poof(p.playerId);
     }
 
     private void handleHoldSound(HoldSoundBroadcast p) {

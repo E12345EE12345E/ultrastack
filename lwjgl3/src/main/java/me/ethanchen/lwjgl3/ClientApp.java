@@ -50,10 +50,17 @@ import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.LoginRequest;
 import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.RoomListRequest;
+import me.ethanchen.network.packets.c2s.LoadoutRequest;
+import me.ethanchen.network.packets.c2s.FusionRequest;
+import me.ethanchen.network.packets.c2s.AbilityRequest;
 import me.ethanchen.network.packets.other.ConnectFailedPacket;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.other.DisconnectPacket;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
+import me.ethanchen.network.packets.s2c.ProfileSyncBroadcast;
+import me.ethanchen.network.packets.s2c.ArtifactGrantBroadcast;
+import me.ethanchen.game.progression.Artifact;
+import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.server.ServerCore;
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
@@ -118,6 +125,12 @@ public class ClientApp extends ApplicationAdapter {
     /** Whether this client is currently the host of its room (session-only). */
     private boolean roomHost;
 
+    // Character and leveling system (session cache, populated by ProfileSyncBroadcast)
+    private volatile PlayerProfile profile;
+    private volatile boolean profileReadOnly;
+    /** Most recent victory-granted artifact, consumed by {@link me.ethanchen.lwjgl3.menuscreens.EndGameScreen}. */
+    private volatile Artifact pendingVictoryArtifact;
+
     @Override
     public void create() {
         settings = SettingsManager.load();
@@ -178,6 +191,25 @@ public class ClientApp extends ApplicationAdapter {
 
             if (wrapper.packet instanceof HostChangedBroadcast) {
                 roomHost = ((HostChangedBroadcast) wrapper.packet).youAreHost;
+            }
+
+            if (wrapper.packet instanceof ProfileSyncBroadcast) {
+                ProfileSyncBroadcast p = (ProfileSyncBroadcast) wrapper.packet;
+                profile = p.profile;
+                profileReadOnly = p.readOnly;
+                if (profile != null) profile.sortInventory();
+            }
+
+            if (wrapper.packet instanceof ArtifactGrantBroadcast) {
+                // Optimistic merge: the server already persisted this artifact, so just reflect
+                // it locally rather than waiting for a full ProfileSyncBroadcast round trip.
+                ArtifactGrantBroadcast g = (ArtifactGrantBroadcast) wrapper.packet;
+                if (profile != null && g.artifact != null) {
+                    profile.inventory.add(g.artifact);
+                    profile.sortInventory();
+                }
+                // Stash for the end-game popup (grant is sent after EndGameBroadcast).
+                if (g.artifact != null) pendingVictoryArtifact = g.artifact;
             }
 
             menuScreen.passClientPacket(wrapper);
@@ -685,6 +717,47 @@ public class ClientApp extends ApplicationAdapter {
 
     public void setRoomHost(boolean host) {
         this.roomHost = host;
+    }
+
+    public PlayerProfile getProfile() {
+        return profile;
+    }
+
+    public boolean isProfileReadOnly() {
+        return profileReadOnly;
+    }
+
+    /**
+     * Returns and clears the artifact from the latest {@link ArtifactGrantBroadcast}, if any.
+     * Used by the victory screen popup.
+     */
+    public Artifact consumePendingVictoryArtifact() {
+        Artifact a = pendingVictoryArtifact;
+        pendingVictoryArtifact = null;
+        return a;
+    }
+
+    /** Requests a character/artifact loadout change; the server echoes back a {@code ProfileSyncBroadcast}. */
+    public boolean sendLoadoutRequest(int characterId, String artifactIdA, String artifactIdB) {
+        LoadoutRequest req = new LoadoutRequest();
+        req.characterId = characterId;
+        req.artifactIdA = artifactIdA;
+        req.artifactIdB = artifactIdB;
+        return sendTCP(req);
+    }
+
+    /** Requests fusing exactly 5 owned artifacts; the server replies with {@code FusionResultBroadcast}. */
+    public boolean sendFusionRequest(String[] artifactIds) {
+        FusionRequest req = new FusionRequest();
+        req.artifactIds = artifactIds;
+        return sendTCP(req);
+    }
+
+    /** Requests activation of {@code localIndex}'s character ability; a no-op server-side if the meter isn't full. */
+    public boolean sendAbilityRequest(byte localIndex) {
+        AbilityRequest req = new AbilityRequest();
+        req.localIndex = localIndex;
+        return sendTCP(req);
     }
 
     public SpriteBatch getSprites() {
