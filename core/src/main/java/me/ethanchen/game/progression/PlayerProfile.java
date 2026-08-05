@@ -2,6 +2,9 @@ package me.ethanchen.game.progression;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+
+import me.ethanchen.game.board.Piece;
 
 /**
  * A player's persisted character-and-leveling state: which characters are unlocked, which
@@ -44,12 +47,33 @@ public class PlayerProfile {
         inventory.sort(Artifact::compareForInventory);
     }
 
-    /** New-account default: characters 0 and 1 unlocked (Part 4), empty inventory, no loadout. */
+    /**
+     * Fallback for blank/legacy {@code extra_json} rows: characters 0 and 1 unlocked, empty
+     * inventory, no loadout. New registrations use {@link #newAccountProfile(Random)} instead.
+     */
     public static PlayerProfile defaultProfile() {
         PlayerProfile p = new PlayerProfile();
         p.unlockCharacter(0);
         p.unlockCharacter(1);
         p.selectedCharacterId = 0;
+        return p;
+    }
+
+    /**
+     * Profile written for a freshly registered account: characters 0 and 1 unlocked, three
+     * level-2 starter artifacts (I/O/T) with rolled effects, I and O equipped.
+     */
+    public static PlayerProfile newAccountProfile(Random rng) {
+        PlayerProfile p = defaultProfile();
+        Artifact iArtifact = ArtifactRoller.roll(Piece.I, 2, 30f, rng);
+        Artifact oArtifact = ArtifactRoller.roll(Piece.O, 2, 20f, rng);
+        Artifact tArtifact = ArtifactRoller.roll(Piece.T, 2, 15f, rng);
+        p.inventory.add(iArtifact);
+        p.inventory.add(oArtifact);
+        p.inventory.add(tArtifact);
+        p.sortInventory();
+        p.equippedArtifactIds[0] = iArtifact.id;
+        p.equippedArtifactIds[1] = oArtifact.id;
         return p;
     }
 }

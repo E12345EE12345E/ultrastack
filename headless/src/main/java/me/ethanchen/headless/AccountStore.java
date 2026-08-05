@@ -15,6 +15,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Base64;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,8 +28,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link SqliteWalSync}) so tools that copy only that file see recent commits without waiting
  * for auto-checkpoint or process shutdown.
  *
- * <p>Core fields live in dedicated columns; anything added later goes into {@code extra_json}
- * so old rows and new player-account features stay compatible without a schema migration.
+     * <p>Core fields live in dedicated columns; anything added later goes into {@code extra_json}
+     * so old rows and new player-account features stay compatible without a schema migration.
+     * New registrations seed a starter {@link PlayerProfile} into {@code extra_json}; pre-existing
+     * blank rows keep the empty {@link PlayerProfile#defaultProfile()} fallback on first load.
  */
 public class AccountStore implements XpAwarder, ProfileStore {
     private static final int SCHEMA_VERSION = 1;
@@ -82,10 +85,18 @@ public class AccountStore implements XpAwarder, ProfileStore {
         byte[] hash = PasswordHasher.hash(passcode, salt);
         String uuid = UUID.randomUUID().toString();
         long createdAtMs = System.currentTimeMillis();
+
+        PlayerProfile starter = PlayerProfile.newAccountProfile(new Random());
+        AccountExtra extra = new AccountExtra();
+        extra.profile = starter;
+        Json json = new Json();
+        json.setOutputType(JsonWriter.OutputType.json);
+        String extraJson = json.toJson(extra);
+
         Account acct = new Account(uuid, key,
                 Base64.getEncoder().encodeToString(salt),
                 Base64.getEncoder().encodeToString(hash),
-                createdAtMs, 0L, null);
+                createdAtMs, 0L, extraJson);
 
         String sql = "INSERT INTO accounts " +
                 "(uuid, username, salt_base64, hash_base64, created_at_ms, xp, schema_version, extra_json) " +
@@ -106,6 +117,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
         }
         byUsername.put(key, acct);
         byUuid.put(acct.uuid, acct);
+        profileCache.put(acct.uuid, starter);
         return null;
     }
 
