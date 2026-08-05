@@ -44,7 +44,7 @@ public final class ArtifactFusion {
             float mult = (rng.nextBoolean()) ? 2.0f : 0.8f;
             sum += a.baseQuality * mult;
         }
-        float baseValue = sum / FUSION_INPUT_COUNT + 10f + rng.nextFloat() * 10f;
+        float baseValue = sum / FUSION_INPUT_COUNT + 20f + rng.nextFloat() * 10f;
 
         int outputLevel = level;
         if (baseValue > OVERFLOW_THRESHOLD) {

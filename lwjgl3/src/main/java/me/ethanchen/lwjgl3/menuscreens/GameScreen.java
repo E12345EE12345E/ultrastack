@@ -331,9 +331,10 @@ public class GameScreen extends MenuScreen {
         int drawn = 0;
         for (LocalPlayer lp : localPlayers) {
             if (lp.slot < 0 || lp.slot >= ids.length) continue;
+            String name = (playerNames != null && lp.slot < playerNames.length) ? playerNames[lp.slot] : null;
             float widgetY = boxY - drawn * (boxSize + tileSize * 0.3f);
             CharacterMeterRenderer.draw(shapes, sprites, font,
-                    ids[lp.slot], fill[lp.slot], max[lp.slot],
+                    ids[lp.slot], name, fill[lp.slot], max[lp.slot],
                     me.ethanchen.lwjgl3.render.shader.PlayerRipples.colorForSlot(lp.slot),
                     boxX, widgetY, boxSize);
             drawn++;

@@ -131,6 +131,28 @@ class PlacementEffects {
         pendingPieceSwaps.add(psb);
     }
 
+    /**
+     * Queues a {@link ParticleSpawner#TYPE_HARD_DROP_CELLS} spawner that flashes every filled
+     * cell from 3-Mino's skyline-fill ability. No-op when {@code cells} is null/empty.
+     *
+     * @param cells packed {@code [x, y]} pairs of board cells that were just filled
+     */
+    void queueHardDropCellFlashes(int[][] cells) {
+        if (cells == null || cells.length == 0) return;
+        byte[] xs = new byte[cells.length];
+        byte[] ys = new byte[cells.length];
+        for (int i = 0; i < cells.length; i++) {
+            xs[i] = (byte) cells[i][0];
+            ys[i] = (byte) cells[i][1];
+        }
+        ParticleSpawner ps = new ParticleSpawner();
+        ps.spawnerType = ParticleSpawner.TYPE_HARD_DROP_CELLS;
+        ps.boardIndex = 0;
+        ps.cellXs = xs;
+        ps.cellYs = ys;
+        pendingSpawners.add(ps);
+    }
+
     // -------------------------------------------------------------------------
     // Draining (called by GameRoom.sendNetUpdates)
     // -------------------------------------------------------------------------

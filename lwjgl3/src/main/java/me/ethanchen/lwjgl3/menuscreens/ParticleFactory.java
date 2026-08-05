@@ -32,6 +32,8 @@ final class ParticleFactory {
      *
      * <p>TYPE_LINE_CLEAR — emits one TILE_BREAK burst per non-(-1) entry in
      * {@link ParticleSpawner#tileIds}.
+     *
+     * <p>TYPE_HARD_DROP_CELLS — emits one FLASH particle per {@code (cellXs[i], cellYs[i])} pair.
      */
     static void expandSpawner(ParticleSpawner ps, List<Particle> out, Random rng) {
         if (ps.spawnerType == ParticleSpawner.TYPE_LINE_CLEAR) {
@@ -45,6 +47,17 @@ final class ParticleFactory {
                 tileBreak.x = x;
                 tileBreak.y = ps.lineY;
                 expandNetParticle(tileBreak, out, rng);
+            }
+        } else if (ps.spawnerType == ParticleSpawner.TYPE_HARD_DROP_CELLS) {
+            if (ps.cellXs == null || ps.cellYs == null) return;
+            int n = Math.min(ps.cellXs.length, ps.cellYs.length);
+            for (int i = 0; i < n; i++) {
+                NetParticle flash = new NetParticle();
+                flash.boardIndex = ps.boardIndex;
+                flash.kind = NetParticle.KIND_FLASH;
+                flash.x = ps.cellXs[i];
+                flash.y = ps.cellYs[i];
+                expandNetParticle(flash, out, rng);
             }
         }
     }

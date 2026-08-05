@@ -17,6 +17,8 @@ public class UIImage extends UIElement {
     public boolean grayscale;
     /** When {@link #texture} is null, optionally fill the rect with a dim placeholder. */
     public boolean showEmptyPlaceholder = true;
+    /** Draws a white outline square around the texture (victory-grant popup). */
+    public boolean drawWhiteBox;
 
     public UIImage(double x, double y, double size) {
         this(x, y, size, size);
@@ -34,14 +36,22 @@ public class UIImage extends UIElement {
         float pxX = MenuScreen.convertFromRelCoordsX((float) centerX) - 0.5f * pxW;
         float pxY = MenuScreen.toScreenYBottom((float) centerY) - 0.5f * pxH;
 
+        if (drawWhiteBox) {
+            shapes.begin(ShapeRenderer.ShapeType.Line);
+            shapes.setColor(Color.WHITE);
+            shapes.rect(pxX, pxY, pxW, pxH);
+            shapes.end();
+        }
+
         if (texture != null) {
+            float inset = drawWhiteBox ? Math.min(pxW, pxH) * 0.08f : 0f;
             Color tint = grayscale ? new Color(0.4f, 0.4f, 0.4f, 1f) : Color.WHITE;
             sprites.begin();
             sprites.setColor(tint);
-            sprites.draw(texture, pxX, pxY, pxW, pxH);
+            sprites.draw(texture, pxX + inset, pxY + inset, pxW - 2f * inset, pxH - 2f * inset);
             sprites.setColor(Color.WHITE);
             sprites.end();
-        } else if (showEmptyPlaceholder) {
+        } else if (showEmptyPlaceholder && !drawWhiteBox) {
             shapes.begin(ShapeRenderer.ShapeType.Filled);
             shapes.setColor(0.15f, 0.15f, 0.18f, 1f);
             shapes.rect(pxX, pxY, pxW, pxH);

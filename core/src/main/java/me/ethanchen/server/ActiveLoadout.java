@@ -21,7 +21,9 @@ public final class ActiveLoadout {
 
     public float scoreBonusPercent(byte pieceType, boolean lineClear, boolean spin) {
         return ArtifactEffects.scoreBonusPercent(artifactA, pieceType, lineClear, spin)
-             + ArtifactEffects.scoreBonusPercent(artifactB, pieceType, lineClear, spin);
+             + ArtifactEffects.scoreBonusPercent(artifactB, pieceType, lineClear, spin)
+             + ArtifactEffects.equippedScoreBonusPercent(artifactA, lineClear, spin)
+             + ArtifactEffects.equippedScoreBonusPercent(artifactB, lineClear, spin);
     }
 
     public float pieceMeterBonusPercent(byte pieceType, boolean lineClear, boolean spin) {

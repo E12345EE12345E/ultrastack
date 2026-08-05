@@ -8,7 +8,9 @@
     SPIN_METER: "D",
     EQUIPPED_LINE_CLEAR_METER: "E",
     EQUIPPED_SPIN_METER: "F",
-    EQUIPPED_PASSIVE_FILL_SPEED: "G",
+    EQUIPPED_PASSIVE_FILL_SPEED: "—",
+    EQUIPPED_LINE_CLEAR_SCORE: "G",
+    EQUIPPED_SPIN_SCORE: "H",
   };
 
   const PIECE_NAME = {
@@ -478,10 +480,19 @@
       return;
     }
     const fd = new FormData(el.addArtifactForm);
+    const level = Math.max(1, Math.floor(Number(fd.get("level")) || 1));
+    const effectType = fd.get("effectType");
+    const quality = Number(fd.get("quality"));
+    // One effect entry per level (same starter type/q; edit individually after create).
+    const effects = Array.from({ length: level }, () => ({
+      type: effectType,
+      quality,
+    }));
     const body = {
       pieceType: Number(fd.get("pieceType")),
       baseQuality: Number(fd.get("baseQuality")),
-      effects: [{ type: fd.get("effectType"), quality: Number(fd.get("quality")) }],
+      level,
+      effects,
     };
     try {
       const data = await api(
@@ -495,7 +506,7 @@
       applyAccountUpdate(data.account);
       state.selectedArtifactId = data.artifact.id;
       renderArtifactEditor(data.artifact);
-      setStatus(`Added artifact ${data.artifact.id.slice(0, 8)}… (remember to Save DB)`);
+      setStatus(`Added Lv${data.artifact.level} artifact ${data.artifact.id.slice(0, 8)}… (remember to Save DB)`);
     } catch (err) {
       alert(err.message);
     }

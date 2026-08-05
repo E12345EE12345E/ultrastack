@@ -39,7 +39,7 @@ public class PlayerProfile {
         return null;
     }
 
-    /** Sorts {@link #inventory} by star count (desc), then level (desc). */
+    /** Sorts {@link #inventory} by level (desc), then base quality (desc). */
     public void sortInventory() {
         inventory.sort(Artifact::compareForInventory);
     }

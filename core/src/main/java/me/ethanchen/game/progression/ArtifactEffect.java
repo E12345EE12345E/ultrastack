@@ -9,7 +9,7 @@ package me.ethanchen.game.progression;
 public class ArtifactEffect {
     /** libGDX BitmapFont markup gold for piece letters. */
     private static final String COLOR_PIECE = "FFD700";
-    /** Percent tiers: 0–30 yellow, 30–70 lime, 70+ cyan. */
+    /** Percent tiers: 0–100 yellow, 100-200 lime, 200+ cyan. */
     private static final String COLOR_PCT_LOW = "FFFF00";
     private static final String COLOR_PCT_MID = "32CD32";
     private static final String COLOR_PCT_HIGH = "00FFFF";
@@ -56,6 +56,10 @@ public class ArtifactEffect {
                 return "All spins meter bonus " + pct;
             case EQUIPPED_PASSIVE_FILL_SPEED:
                 return "Meter fill over time " + pct;
+            case EQUIPPED_LINE_CLEAR_SCORE:
+                return "All line clears score " + pct;
+            case EQUIPPED_SPIN_SCORE:
+                return "All spins score " + pct;
             default:
                 return type.name() + " " + pct;
         }
@@ -67,8 +71,8 @@ public class ArtifactEffect {
 
     private static String percentMarkup(float displayPercent) {
         String hex;
-        if (displayPercent < 30f) hex = COLOR_PCT_LOW;
-        else if (displayPercent < 70f) hex = COLOR_PCT_MID;
+        if (displayPercent < 100f) hex = COLOR_PCT_LOW;
+        else if (displayPercent < 200f) hex = COLOR_PCT_MID;
         else hex = COLOR_PCT_HIGH;
         String body = displayPercent == Math.rint(displayPercent)
                 ? String.format("+%.0f%%", displayPercent)

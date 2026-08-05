@@ -53,7 +53,6 @@ public class ServerGame {
     private final BlockedSpawnController blocked = new BlockedSpawnController();
     private final GameEndController endCtrl = new GameEndController();
     private final MeterController meterController = new MeterController();
-    private final java.util.Random abilityRng = new java.util.Random();
     private ActiveLoadout[] loadouts;
 
     public ServerGame(GameRoomContext room) {
@@ -125,8 +124,9 @@ public class ServerGame {
     }
 
     /**
-     * Combines the placer's equipped artifact score bonuses (effects a/b) with their character's
-     * flat passive score bonus (e.g. 3-Mino's +50% on I3/L3 clears) into one percentage.
+     * Combines the placer's equipped artifact score bonuses (piece-specific a/b and equipped
+     * any-piece score effects) with their character's flat passive score bonus (e.g. 3-Mino's
+     * +50% on I3/L3 clears) into one percentage.
      */
     private float characterScoreBonusPercent(int playerId, byte pieceType, boolean lineClear, boolean spin) {
         if (loadouts == null || playerId < 0 || playerId >= loadouts.length) return 0f;
@@ -430,28 +430,44 @@ public class ServerGame {
 
     /**
      * Activates {@code playerId}'s character ability if their meter is full (implementation.md,
-     * Part 1/4): 3-Mino swaps in a random I3/L3, Wizard forces an I. No-op (returns false) for
-     * non-character modes, an unready meter, or an invalid player.
+     * Part 1/4): 3-Mino fills skyline gaps with garbage, Wizard forces an I. No-op (returns false)
+     * for non-character modes, an unready meter, or an invalid player.
      */
     public synchronized boolean activateAbility(int playerId) {
-        if (loadouts == null || !canSwapActivePiece(playerId)) return false;
+        if (loadouts == null || !canActivateAbility(playerId)) return false;
         if (playerId < 0 || playerId >= loadouts.length || loadouts[playerId] == null) return false;
         CharacterDef character = loadouts[playerId].character;
         if (character == null) return false;
-        if (!meterController.tryConsume(playerId)) return false;
 
-        byte type;
         switch (character.ability) {
-            case RANDOM_I3_OR_L3:
-                type = abilityRng.nextBoolean() ? Piece.I3 : Piece.L3;
-                break;
+            case FILL_SKYLINE_GAPS:
+                if (!meterController.tryConsume(playerId)) return false;
+                return activateFillSkylineGaps();
             case FORCE_I:
-                type = Piece.I;
-                break;
+                if (!canSwapActivePiece(playerId)) return false;
+                if (!meterController.tryConsume(playerId)) return false;
+                return swapActivePiece(playerId, Piece.I);
             default:
                 return false;
         }
-        return swapActivePiece(playerId, type);
+    }
+
+    /** True when the game is running and {@code playerId} is a valid seated slot. */
+    private boolean canActivateAbility(int playerId) {
+        if (!inProgress || endCtrl.isGameEnded() || game == null) return false;
+        if (playerId < 0 || playerId >= players) return false;
+        return !game.getBoards().isEmpty();
+    }
+
+    /**
+     * Fills skyline-band gaps with garbage and queues hard-drop flash particles for each filled
+     * cell. Always returns true after a successful meter consume (even if no cells were filled).
+     */
+    private boolean activateFillSkylineGaps() {
+        Board board = game.getBoards().get(0);
+        int[][] filled = board.fillSkylineGaps();
+        effects.queueHardDropCellFlashes(filled);
+        return true;
     }
 
     public void sendNetUpdates() {

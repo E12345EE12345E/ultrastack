@@ -116,6 +116,72 @@ public class Board {
         }
     }
 
+    /**
+     * 3-Mino active ability: records the highest solid board tile per column, then fills empty
+     * playable cells in the band between the global min and max of those heights. Columns with
+     * no solid tiles pull the band down to {@code y=0} but are never filled themselves (nothing
+     * sits above those cells). A cell is filled only when it is strictly below that column's own
+     * peak, not covered by any active player piece, and currently empty. Filled cells become
+     * garbage with {@link Tile#SINGLE_TILE}.
+     *
+     * @return packed {@code [x, y]} pairs of every cell that was filled (empty if nothing changed)
+     */
+    public int[][] fillSkylineGaps() {
+        int[] highest = new int[width];
+        Arrays.fill(highest, -1);
+        boolean anySolid = false;
+        boolean anyEmptyColumn = false;
+        for (int x = 0; x < width; x++) {
+            for (int y = height - 1; y >= 0; y--) {
+                if (!allowedTiles[y][x]) continue;
+                if (board[y][x].get() != Tile.EMPTY) {
+                    highest[x] = y;
+                    anySolid = true;
+                    break;
+                }
+            }
+            if (highest[x] < 0) anyEmptyColumn = true;
+        }
+        if (!anySolid) return new int[0][];
+
+        int minH = anyEmptyColumn ? 0 : Integer.MAX_VALUE;
+        int maxH = Integer.MIN_VALUE;
+        for (int h : highest) {
+            if (h < 0) continue;
+            if (h < minH) minH = h;
+            if (h > maxH) maxH = h;
+        }
+
+        boolean[][] occupiedByPiece = buildActivePieceOccupancy();
+        ArrayList<int[]> filled = new ArrayList<>();
+        for (int y = minH; y <= maxH; y++) {
+            for (int x = 0; x < width; x++) {
+                if (highest[x] < 0 || y >= highest[x]) continue;
+                if (!allowedTiles[y][x]) continue;
+                if (board[y][x].get() != Tile.EMPTY) continue;
+                if (occupiedByPiece[y][x]) continue;
+                board[y][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+                filled.add(new int[]{x, y});
+            }
+        }
+        return filled.toArray(new int[filled.size()][]);
+    }
+
+    /** Marks every board cell currently covered by an active player piece. */
+    private boolean[][] buildActivePieceOccupancy() {
+        boolean[][] occupied = new boolean[height][width];
+        for (Piece p : activePieces) {
+            if (p == null || p.tiles == null) continue;
+            for (Vector2 t : p.tiles) {
+                int mx = (int) Math.floor(p.location.x + t.x);
+                int my = (int) Math.floor(p.location.y + t.y);
+                if (mx < 0 || my < 0 || mx >= width || my >= height) continue;
+                occupied[my][mx] = true;
+            }
+        }
+        return occupied;
+    }
+
     public void spawnInitialPieces() {
         if (activePieces.size() > 0) return;
         for (PieceQueue q : pieceQueues) {

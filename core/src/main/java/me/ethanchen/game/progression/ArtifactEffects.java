@@ -41,6 +41,17 @@ public final class ArtifactEffects {
         return total;
     }
 
+    /** Non-piece-specific "while equipped" score bonus, applied to the wearer's own score on any piece. */
+    public static float equippedScoreBonusPercent(Artifact artifact, boolean lineClear, boolean spin) {
+        if (artifact == null) return 0f;
+        float total = 0f;
+        for (ArtifactEffect e : artifact.effects) {
+            if (e.type == ArtifactEffectType.EQUIPPED_LINE_CLEAR_SCORE && lineClear) total += e.percent();
+            else if (e.type == ArtifactEffectType.EQUIPPED_SPIN_SCORE && spin) total += e.percent();
+        }
+        return total;
+    }
+
     /** Passive time-based fill speed bonus (effect g); wired for completeness even though currently unreachable. */
     public static float equippedPassiveFillBonusPercent(Artifact artifact) {
         if (artifact == null) return 0f;

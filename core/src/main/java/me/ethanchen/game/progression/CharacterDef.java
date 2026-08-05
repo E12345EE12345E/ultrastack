@@ -22,7 +22,7 @@ public final class CharacterDef {
     public final float meterRequired;
     public final CharacterAbility ability;
 
-    /** Non-null if this character forces a specific piece queue bag (e.g. Wizard). */
+    /** Non-null if this character forces a specific piece queue bag (e.g. 3-Mino, Wizard). */
     public final PieceQueue.BagTypes bagOverride;
 
     /** Piece types (if any) that receive a flat passive score bonus on line clears, e.g. 3-Mino's I3/L3. */
@@ -62,16 +62,16 @@ public final class CharacterDef {
     /** id 0: (Placeholder Name) 3-Mino. */
     public static final CharacterDef THREE_MINO = new CharacterDef(
             0, "3-Mino",
-            1.0f, 300f, 3000f,
-            CharacterAbility.RANDOM_I3_OR_L3, null,
-            new byte[]{Piece.I3, Piece.L3}, 50f,
-            4.0f, 1.0f);
+            0.25f, 100f, 6000f,
+            CharacterAbility.FILL_SKYLINE_GAPS, PieceQueue.BagTypes.BAG_3MINO,
+            new byte[]{Piece.L3}, 100f,
+            4.0f, 2.0f);
 
     /** id 1: (Placeholder Name) Wizard. */
     public static final CharacterDef WIZARD = new CharacterDef(
             1, "Wizard",
-            1.0f, 25f, 3000f,
+            1.0f, 20f, 3000f,
             CharacterAbility.FORCE_I, PieceQueue.BagTypes.BAG_WIZARD,
-            null, 0f,
-            1.0f, 1.0f);
+            new byte[]{Piece.I}, 50f,
+            4.0f, 0.0f);
 }

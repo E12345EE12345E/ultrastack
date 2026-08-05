@@ -33,32 +33,34 @@ public final class ArtifactTables {
     private static final ArtifactEffectType D = ArtifactEffectType.SPIN_METER;
     private static final ArtifactEffectType E = ArtifactEffectType.EQUIPPED_LINE_CLEAR_METER;
     private static final ArtifactEffectType F = ArtifactEffectType.EQUIPPED_SPIN_METER;
+    private static final ArtifactEffectType G = ArtifactEffectType.EQUIPPED_LINE_CLEAR_SCORE;
+    private static final ArtifactEffectType H = ArtifactEffectType.EQUIPPED_SPIN_SCORE;
 
-    // 20% a,c [q=8], 10% b,d [q=15], 20% e,f [q=10]  → 100%
     private static final Chance[] I_TABLE = {
-            new Chance(20f, 8f, A), new Chance(20f, 8f, C),
-            new Chance(10f, 15f, B), new Chance(10f, 15f, D),
-            new Chance(20f, 10f, E), new Chance(20f, 10f, F),
+            new Chance(20f, 20f, A), new Chance(20f, 20f, C),
+            new Chance(10f, 60f, B), new Chance(10f, 60f, D),
+            new Chance(10f, 30f, E), new Chance(10f, 30f, F),
+            new Chance(10f, 30f, G), new Chance(10f, 30f, H),
     };
 
-    // 15% a,b,c,d [q=8], 20% e,f [q=10]  → 100%
     private static final Chance[] T_TABLE = {
-            new Chance(15f, 8f, A), new Chance(15f, 8f, B),
-            new Chance(15f, 8f, C), new Chance(15f, 8f, D),
-            new Chance(20f, 10f, E), new Chance(20f, 10f, F),
+            new Chance(15f, 20f, A), new Chance(15f, 20f, B),
+            new Chance(15f, 20f, C), new Chance(15f, 20f, D),
+            new Chance(10f, 30f, E), new Chance(10f, 30f, F),
+            new Chance(10f, 30f, G), new Chance(10f, 30f, H),
     };
 
-    // 45% a,c [q=18], 5% e,f [q=20]  → 100%
     private static final Chance[] O_TABLE = {
-            new Chance(45f, 28f, A), new Chance(45f, 28f, C),
-            new Chance(5f, 25f, E), new Chance(5f, 25f, F),
+            new Chance(40f, 100f, A), new Chance(40f, 100f, C),
+            new Chance(5f, 75f, E), new Chance(5f, 75f, F),
+            new Chance(5f, 75f, G), new Chance(5f, 75f, H),
     };
 
-    // 10% a,c [q=14], 20% b,d [q=16], 20% e,f [q=10]  → 100%
     private static final Chance[] SZLJ_TABLE = {
-            new Chance(10f, 24f, A), new Chance(10f, 24f, C),
-            new Chance(20f, 30f, B), new Chance(20f, 30f, D),
-            new Chance(20f, 10f, E), new Chance(20f, 10f, F),
+            new Chance(10f, 60f, A), new Chance(10f, 60f, C),
+            new Chance(20f, 80f, B), new Chance(20f, 80f, D),
+            new Chance(10f, 30f, E), new Chance(10f, 30f, F),
+            new Chance(10f, 30f, G), new Chance(10f, 30f, H),
     };
 
     private ArtifactTables() {}

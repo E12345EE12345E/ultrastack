@@ -81,13 +81,13 @@ public class Artifact {
     }
 
     /**
-     * Inventory sort: higher {@link #levelStarCount()} first, then higher {@link #level}.
-     * Stable for equal stars/level (returns 0).
+     * Inventory sort: higher {@link #level} first, then higher {@link #baseQuality}
+     * within the same level. Stable for equal level/quality (returns 0).
      */
     public static int compareForInventory(Artifact a, Artifact b) {
-        int starCmp = Integer.compare(b.levelStarCount(), a.levelStarCount());
-        if (starCmp != 0) return starCmp;
-        return Integer.compare(b.level, a.level);
+        int levelCmp = Integer.compare(b.level, a.level);
+        if (levelCmp != 0) return levelCmp;
+        return Float.compare(b.baseQuality, a.baseQuality);
     }
 
     /**

@@ -59,6 +59,7 @@ import me.ethanchen.network.packets.other.DisconnectPacket;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
 import me.ethanchen.network.packets.s2c.ProfileSyncBroadcast;
 import me.ethanchen.network.packets.s2c.ArtifactGrantBroadcast;
+import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.server.ServerCore;
 
@@ -127,6 +128,8 @@ public class ClientApp extends ApplicationAdapter {
     // Character and leveling system (session cache, populated by ProfileSyncBroadcast)
     private volatile PlayerProfile profile;
     private volatile boolean profileReadOnly;
+    /** Most recent victory-granted artifact, consumed by {@link me.ethanchen.lwjgl3.menuscreens.EndGameScreen}. */
+    private volatile Artifact pendingVictoryArtifact;
 
     @Override
     public void create() {
@@ -205,6 +208,8 @@ public class ClientApp extends ApplicationAdapter {
                     profile.inventory.add(g.artifact);
                     profile.sortInventory();
                 }
+                // Stash for the end-game popup (grant is sent after EndGameBroadcast).
+                if (g.artifact != null) pendingVictoryArtifact = g.artifact;
             }
 
             menuScreen.passClientPacket(wrapper);
@@ -720,6 +725,16 @@ public class ClientApp extends ApplicationAdapter {
 
     public boolean isProfileReadOnly() {
         return profileReadOnly;
+    }
+
+    /**
+     * Returns and clears the artifact from the latest {@link ArtifactGrantBroadcast}, if any.
+     * Used by the victory screen popup.
+     */
+    public Artifact consumePendingVictoryArtifact() {
+        Artifact a = pendingVictoryArtifact;
+        pendingVictoryArtifact = null;
+        return a;
     }
 
     /** Requests a character/artifact loadout change; the server echoes back a {@code ProfileSyncBroadcast}. */
