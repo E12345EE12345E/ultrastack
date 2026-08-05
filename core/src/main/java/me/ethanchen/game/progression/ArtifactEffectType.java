@@ -59,13 +59,13 @@ public enum ArtifactEffectType {
         switch (this) {
             case LINE_CLEAR_SCORE:            return "line clears score";
             case SPIN_SCORE:                   return "spins score";
-            case LINE_CLEAR_METER:             return "line clear meter bonus";
-            case SPIN_METER:                   return "spin meter bonus";
-            case EQUIPPED_LINE_CLEAR_METER:    return "All line clears meter bonus";
-            case EQUIPPED_SPIN_METER:          return "All spins meter bonus";
+            case LINE_CLEAR_METER:             return "line clear meter";
+            case SPIN_METER:                   return "spin meter";
+            case EQUIPPED_LINE_CLEAR_METER:    return "All line clears meter";
+            case EQUIPPED_SPIN_METER:          return "Any spins meter";
             case EQUIPPED_PASSIVE_FILL_SPEED:  return "Meter fill over time";
             case EQUIPPED_LINE_CLEAR_SCORE:    return "All line clears score";
-            case EQUIPPED_SPIN_SCORE:          return "All spins score";
+            case EQUIPPED_SPIN_SCORE:          return "Any spins score";
             default: return name();
         }
     }

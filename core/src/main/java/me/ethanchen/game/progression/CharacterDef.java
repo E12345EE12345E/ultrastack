@@ -70,7 +70,7 @@ public final class CharacterDef {
     /** id 1: (Placeholder Name) Wizard. */
     public static final CharacterDef WIZARD = new CharacterDef(
             1, "Wizard",
-            1.0f, 20f, 3000f,
+            2.0f, 20f, 2000f,
             CharacterAbility.FORCE_I, PieceQueue.BagTypes.BAG_WIZARD,
             new byte[]{Piece.I}, 50f,
             4.0f, 0.0f);
