@@ -74,7 +74,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
         }
         walSync = new SqliteWalSync("account-store-wal-sync", this::checkpointWal);
         load();
-        migrateNoobUnlocks();
+        migrateProfiles();
         Runtime.getRuntime().addShutdownHook(new Thread(this::close, "account-store-shutdown"));
     }
 
@@ -157,10 +157,6 @@ public class AccountStore implements XpAwarder, ProfileStore {
 
         PlayerProfile profile = readProfileFromExtraJson(acct);
         profile.sortInventory();
-        if (profile.ensureNoobUnlocked()) {
-            // Persist migration for accounts that somehow skipped the startup sweep.
-            writeProfileExtraJson(acct, profile);
-        }
         profileCache.put(accountUuid, profile);
         return profile;
     }
@@ -208,20 +204,26 @@ public class AccountStore implements XpAwarder, ProfileStore {
     }
 
     /**
-     * One-time-per-process sweep: unlock The Noob on every persisted profile that predates that
-     * character, writing updated {@code extra_json} back to SQLite.
+     * Startup sweep over every persisted account profile. Kept as a hook for future one-shot
+     * migrations (e.g. unlocking a newly shipped starter character). Currently a no-op — the
+     * Noob unlock already ran successfully and is disabled below.
      */
-    private void migrateNoobUnlocks() {
+    private void migrateProfiles() {
         int updated = 0;
         for (Account acct : byUuid.values()) {
             PlayerProfile profile = readProfileFromExtraJson(acct);
-            if (!profile.ensureNoobUnlocked()) continue;
+            boolean changed = false;
+
+            // Disabled: The Noob unlock migration (already applied to existing accounts).
+            // if (profile.ensureNoobUnlocked()) changed = true;
+
+            if (!changed) continue;
             profileCache.put(acct.uuid, profile);
             writeProfileExtraJson(acct, profile);
             updated++;
         }
         if (updated > 0) {
-            System.out.println("[AccountStore] Unlocked The Noob for " + updated + " existing profile(s).");
+            System.out.println("[AccountStore] Migrated " + updated + " existing profile(s).");
         }
     }
 
