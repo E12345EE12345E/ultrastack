@@ -12,6 +12,7 @@ import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.menuscreens.ui.InventoryPaging;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIGrid;
+import me.ethanchen.lwjgl3.menuscreens.ui.UIImage;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIInventoryButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 import me.ethanchen.network.ClientPacketWrapper;
@@ -28,12 +29,15 @@ public class FusionScreen extends AspectLockedMenuScreen {
     private static final int INV_ROWS = 6;
     /** Packed grid filling the left bottom under Add/Remove; first-cell center at design px. */
     private static final UIGrid INVENTORY_GRID = UIGrid.designSquare(125, 640, INV_COLUMNS, 90, 0);
+    /** Name + this many effect lines → 7 total lines in the stats block. */
+    private static final int MAX_EFFECT_LINES = 6;
 
     private final CharacterScreen parent;
     private final Supplier<Boolean> charactersEnabled;
 
     private final UIInventoryButton[] fusionSlots = new UIInventoryButton[5];
     private final UIInventoryButton resultSlot;
+    private final UIImage statsIcon;
     private final UIText statsText;
     private final UIText messageText;
 
@@ -59,12 +63,17 @@ public class FusionScreen extends AspectLockedMenuScreen {
                 DesignUi.nx(140), DesignUi.ny(1020), DesignUi.nw(200), DesignUi.nh(64),
                 "Back", () -> app.switchMenu(parent)));
 
+        // Stable shortcuts: read boundId so clear/show never drops the click wiring.
         for (int i = 0; i < fusionSlots.length; i++) {
-            final int idx = i;
-            fusionSlots[i] = DesignUi.inventoryButton(
-                    200 + i * 160, 860, 120, null, () -> highlightSlot(idx));
-            fusionSlots[i].secondaryAction = () -> quickToggleFusionFromSlot(idx);
-            elements.add(fusionSlots[i]);
+            UIInventoryButton slot = DesignUi.inventoryButton(200 + i * 160, 860, 120, null, null);
+            slot.action = () -> {
+                if (slot.boundId != null) highlightArtifact(slot.boundId);
+            };
+            slot.secondaryAction = () -> {
+                if (slot.boundId != null) quickToggleFusion(slot.boundId);
+            };
+            fusionSlots[i] = slot;
+            elements.add(slot);
         }
         elements.add(new UIButton(
                 DesignUi.nx(200), DesignUi.ny(720), DesignUi.nw(260), DesignUi.nh(60),
@@ -73,16 +82,24 @@ public class FusionScreen extends AspectLockedMenuScreen {
                 DesignUi.nx(520), DesignUi.ny(720), DesignUi.nw(300), DesignUi.nh(60),
                 "Remove from Fusion", this::removeFromFusion));
 
-        resultSlot = DesignUi.inventoryButton(1500, 860, 140, null, () -> {
-            if (resultId != null) highlightedId = resultId;
-        });
+        resultSlot = DesignUi.inventoryButton(1500, 860, 140, null, null);
+        resultSlot.action = () -> {
+            if (resultSlot.boundId != null) highlightArtifact(resultSlot.boundId);
+        };
+        resultSlot.secondaryAction = () -> {
+            if (resultSlot.boundId != null) quickToggleFusion(resultSlot.boundId);
+        };
         elements.add(resultSlot);
         elements.add(new UIButton(
                 DesignUi.nx(1500), DesignUi.ny(700), DesignUi.nw(260), DesignUi.nh(64),
                 "Perform Fusion", this::performFusion));
 
+        // Icon left of the stats block; larger text to fill the open right panel.
+        statsIcon = new UIImage(DesignUi.nx(1100), DesignUi.ny(430), DesignUi.nw(110));
+        statsIcon.showEmptyPlaceholder = false;
         statsText = new UIText(
-                DesignUi.nx(1180), DesignUi.ny(480), "Select an artifact", 1.0, UIText.TextAlign.TOP_LEFT);
+                DesignUi.nx(1200), DesignUi.ny(490), "Select an artifact", 1.5, UIText.TextAlign.TOP_LEFT);
+        elements.add(statsIcon);
         elements.add(statsText);
 
         int pageSize = INV_COLUMNS * INV_ROWS;
@@ -107,9 +124,26 @@ public class FusionScreen extends AspectLockedMenuScreen {
         else paging.next(cachedItemCount);
     }
 
-    private void highlightSlot(int index) {
-        String id = fusionIds[index];
-        if (id != null) highlightedId = id;
+    /** Select an artifact and reveal its inventory tile (same as clicking that inventory slot). */
+    private void highlightArtifact(String artifactId) {
+        highlightedId = artifactId;
+        PlayerProfile profile = app.getProfile();
+        if (profile == null) return;
+        List<Artifact> items = fusableInventory(profile);
+        for (int i = 0; i < items.size(); i++) {
+            if (artifactId.equals(items.get(i).id)) {
+                paging.showIndex(i, items.size());
+                return;
+            }
+        }
+    }
+
+    private List<Artifact> fusableInventory(PlayerProfile profile) {
+        List<Artifact> items = new ArrayList<>();
+        for (Artifact artifact : profile.inventory) {
+            if (!isEquipped(profile, artifact.id)) items.add(artifact);
+        }
+        return items;
     }
 
     private void addToFusion() {
@@ -130,9 +164,9 @@ public class FusionScreen extends AspectLockedMenuScreen {
         }
     }
 
-    /** Right-click / double-click on an inventory tile: queue for fusion or unqueue. */
+    /** Right-click / double-click on an inventory (or fusion-slot shortcut) tile: queue or unqueue. */
     private void quickToggleFusion(String artifactId) {
-        highlightedId = artifactId;
+        highlightArtifact(artifactId);
         PlayerProfile profile = app.getProfile();
         if (profile == null || isEquipped(profile, artifactId)) return;
         for (int i = 0; i < fusionIds.length; i++) {
@@ -148,14 +182,6 @@ public class FusionScreen extends AspectLockedMenuScreen {
             }
         }
         messageText.textin.set("All 5 fusion slots are full.");
-    }
-
-    /** Right-click / double-click on a fusion slot: clear that reference. */
-    private void quickToggleFusionFromSlot(int index) {
-        String id = fusionIds[index];
-        if (id == null) return;
-        highlightedId = id;
-        fusionIds[index] = null;
     }
 
     private void performFusion() {
@@ -175,7 +201,8 @@ public class FusionScreen extends AspectLockedMenuScreen {
         }
         for (int i = 0; i < fusionIds.length; i++) fusionIds[i] = null;
         resultId = p.result != null ? p.result.id : null;
-        highlightedId = resultId;
+        if (resultId != null) highlightArtifact(resultId);
+        else highlightedId = null;
         messageText.textin.set("Fusion successful!");
     }
 
@@ -214,16 +241,13 @@ public class FusionScreen extends AspectLockedMenuScreen {
         resultSlot.selected = result != null && result.id.equals(highlightedId);
 
         Artifact highlighted = profile != null ? profile.findArtifact(highlightedId) : null;
-        statsText.textin.set(highlighted != null ? highlighted.describeForUi(5) : "Select an artifact");
+        statsIcon.texture = CharacterAssets.artifactIconFor(highlighted);
+        statsText.textin.set(highlighted != null
+                ? highlighted.describeForUi(MAX_EFFECT_LINES) : "Select an artifact");
     }
 
     private void refreshInventoryPage(PlayerProfile profile, boolean enabled) {
-        List<Artifact> items = new ArrayList<>();
-        if (profile != null) {
-            for (Artifact artifact : profile.inventory) {
-                if (!isEquipped(profile, artifact.id)) items.add(artifact);
-            }
-        }
+        List<Artifact> items = profile != null ? fusableInventory(profile) : List.of();
         cachedItemCount = items.size();
         paging.updateLabel(cachedItemCount);
 
@@ -234,7 +258,7 @@ public class FusionScreen extends AspectLockedMenuScreen {
             if (index < items.size()) {
                 Artifact artifact = items.get(index);
                 slot.showArtifact(CharacterAssets.artifactIconFor(artifact), artifact);
-                slot.action = () -> highlightedId = artifact.id;
+                slot.action = () -> highlightArtifact(artifact.id);
                 slot.secondaryAction = () -> quickToggleFusion(artifact.id);
                 slot.grayscale = !enabled;
                 slot.selected = artifact.id.equals(highlightedId);
@@ -243,6 +267,8 @@ public class FusionScreen extends AspectLockedMenuScreen {
                 slot.overlayColor = queued ? UIInventoryButton.OVERLAY_FUSION_QUEUED : null;
             } else {
                 slot.clearSlot(null);
+                slot.action = null;
+                slot.secondaryAction = null;
                 slot.grayscale = !enabled;
                 slot.selected = false;
                 slot.overlayColor = null;

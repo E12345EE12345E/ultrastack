@@ -1,6 +1,7 @@
 package me.ethanchen.game.progression;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,7 +19,8 @@ class PlayerProfileTest {
 
         assertTrue(profile.isCharacterUnlocked(0));
         assertTrue(profile.isCharacterUnlocked(1));
-        assertEquals(0, profile.selectedCharacterId);
+        assertTrue(profile.isCharacterUnlocked(2));
+        assertEquals(2, profile.selectedCharacterId);
         assertEquals(3, profile.inventory.size());
 
         Artifact i = findByType(profile, Piece.I);
@@ -50,6 +52,21 @@ class PlayerProfileTest {
         assertTrue(profile.inventory.isEmpty());
         assertEquals(null, profile.equippedArtifactIds[0]);
         assertEquals(null, profile.equippedArtifactIds[1]);
+        assertTrue(profile.isCharacterUnlocked(2));
+        assertEquals(2, profile.selectedCharacterId);
+    }
+
+    @Test
+    void ensureNoobUnlocked_unlocksLegacyTwoCharacterProfiles() {
+        PlayerProfile legacy = new PlayerProfile();
+        legacy.unlockCharacter(0);
+        legacy.unlockCharacter(1);
+        legacy.selectedCharacterId = 0;
+
+        assertTrue(legacy.ensureNoobUnlocked());
+        assertTrue(legacy.isCharacterUnlocked(2));
+        assertEquals(0, legacy.selectedCharacterId);
+        assertFalse(legacy.ensureNoobUnlocked());
     }
 
     private static Artifact findByType(PlayerProfile profile, byte pieceType) {

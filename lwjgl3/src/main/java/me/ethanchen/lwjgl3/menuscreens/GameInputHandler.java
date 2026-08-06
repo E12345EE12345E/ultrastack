@@ -177,7 +177,7 @@ class GameInputHandler {
         if (game.isStarted() && game.getGravity() > SOFT_DROP_INTERVAL_MS) {
             if (board.getActivePieces().size() > playerId) {
                 predictor.queueMove(MoveType.SOFT_DROP, board, game, holdAvailable);
-                game.resetGravityTimer();
+                game.resetGravityTimer(playerId);
             }
         }
         return true;
@@ -214,7 +214,7 @@ class GameInputHandler {
         while (softDropTimer >= SOFT_DROP_INTERVAL_MS) {
             softDropTimer -= SOFT_DROP_INTERVAL_MS;
             predictor.queueMove(MoveType.SOFT_DROP, board, game, holdAvailable);
-            game.resetGravityTimer();
+            game.resetGravityTimer(playerId);
         }
     }
 

@@ -49,6 +49,13 @@ public final class InventoryPaging {
         if (page < pageCount(itemCount) - 1) page++;
     }
 
+    /** Jumps so {@code itemIndex} (0-based in the full list) is on the current page. */
+    public void showIndex(int itemIndex, int itemCount) {
+        if (itemIndex < 0 || itemCount <= 0) return;
+        page = itemIndex / pageSize();
+        clamp(itemCount);
+    }
+
     public void updateLabel(int itemCount) {
         clamp(itemCount);
         pageText.textin.set((page + 1) + "/" + pageCount(itemCount));

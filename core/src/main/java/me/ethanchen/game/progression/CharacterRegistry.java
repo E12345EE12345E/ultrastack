@@ -8,6 +8,7 @@ public final class CharacterRegistry {
     public static final CharacterDef[] ALL = {
             CharacterDef.THREE_MINO,
             CharacterDef.WIZARD,
+            CharacterDef.NOOB,
     };
 
     private CharacterRegistry() {}

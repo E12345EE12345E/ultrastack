@@ -21,10 +21,13 @@ public class LightGameStateBroadcast extends NetworkPacket {
     public boolean[] ownPieceHoldGlow = new boolean[0];
 
     // Gravity sync (used for client-side prediction accuracy)
-    /** Current gravity interval in ms (server-authoritative). */
+    /** Current base gravity interval in ms (server-authoritative, before per-player speed factors). */
     public int gravity;
-    /** Server's gravity tick accumulator at broadcast time (ms). */
-    public int gravityTickCounter;
+    /**
+     * Per seated-slot gravity tick accumulator (ms) at broadcast time. Required because each
+     * player has an independent timer (different fall-speed multipliers and soft-drop resets).
+     */
+    public int[] gravityTickCounters;
 
     // Mode-specific (null in all modes except the corresponding one)
     public ScoreModeData scoreMode;

@@ -40,26 +40,34 @@ public class ArtifactEffect {
      * and tiered percent color (yellow / lime / cyan).
      */
     public String describe(byte pieceType) {
-        String pct = percentMarkup(displayPercent());
+        return describe(type, pieceType, displayPercent());
+    }
+
+    /**
+     * Shared describe path for rolled {@link ArtifactEffect}s and derived
+     * {@link ArtifactUniqueEffect}s (same wording and color markup).
+     */
+    public static String describe(ArtifactEffectType type, byte pieceType, float displayPercent) {
+        String pct = percentMarkup(displayPercent);
         switch (type) {
             case LINE_CLEAR_SCORE:
-                return pieceMarkup(pieceType) + "-piece line clears score " + pct;
+                return pieceMarkup(pieceType) + " clears score " + pct;
             case SPIN_SCORE:
-                return pieceMarkup(pieceType) + "-piece spins score " + pct;
+                return pieceMarkup(pieceType) + " spins score " + pct;
             case LINE_CLEAR_METER:
-                return pieceMarkup(pieceType) + "-piece line clear meter bonus " + pct;
+                return pieceMarkup(pieceType) + " clear meter " + pct;
             case SPIN_METER:
-                return pieceMarkup(pieceType) + "-piece spin meter bonus " + pct;
+                return pieceMarkup(pieceType) + " spin meter " + pct;
             case EQUIPPED_LINE_CLEAR_METER:
-                return "All line clears meter bonus " + pct;
+                return "Line clears meter " + pct;
             case EQUIPPED_SPIN_METER:
-                return "All spins meter bonus " + pct;
+                return "Spins meter " + pct;
             case EQUIPPED_PASSIVE_FILL_SPEED:
-                return "Meter fill over time " + pct;
+                return "Meter passive fill " + pct;
             case EQUIPPED_LINE_CLEAR_SCORE:
-                return "All line clears score " + pct;
+                return "Line clears score " + pct;
             case EQUIPPED_SPIN_SCORE:
-                return "All spins score " + pct;
+                return "Spins score " + pct;
             default:
                 return type.name() + " " + pct;
         }

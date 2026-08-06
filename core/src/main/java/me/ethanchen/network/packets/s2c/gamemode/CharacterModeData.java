@@ -5,4 +5,9 @@ public class CharacterModeData {
     public int[] characterIds;
     public float[] meterFill;
     public float[] meterMax;
+    /**
+     * Global fall-speed factor from abilities such as The Noob's disable/ramp
+     * ({@code 0} = frozen, {@code 1} = normal). Defaults to {@code 1} when unset.
+     */
+    public float globalGravitySpeedFactor = 1f;
 }

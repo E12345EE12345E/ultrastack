@@ -620,8 +620,11 @@ public class GameRoom implements Runnable, GameRoomContext {
             }
             b.piecesPlaced = serverGame.getPiecesPlaced();
             b.explodeProgress = serverGame.getExplodeProgress();
+            // Base gravity for prediction; CHARACTER_SCORE also syncs per-player / global
+            // speed factors via CharacterModeData so the client can reconstruct effective fall rates.
+            // Every seat's gravity accumulator is sent so remote pieces predict with the correct phase.
             b.gravity = serverGame.getGame().getGravity();
-            b.gravityTickCounter = serverGame.getGame().getGravityTickCounter();
+            b.gravityTickCounters = serverGame.getGravityTickCounters();
             b.gameEnded = serverGame.isGameEnded();
             serverGame.populateModeData(b);
             sender.sendUDP(m.connId, b);

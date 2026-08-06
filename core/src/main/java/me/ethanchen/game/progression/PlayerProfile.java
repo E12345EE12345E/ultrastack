@@ -34,6 +34,17 @@ public class PlayerProfile {
         unlockedCharacterBits |= (1L << characterId);
     }
 
+    /**
+     * Unlocks The Noob (id 2) if missing. Used to migrate profiles created before that character
+     * existed. Returns {@code true} when bits changed and the profile should be re-persisted.
+     */
+    public boolean ensureNoobUnlocked() {
+        int noobId = CharacterDef.NOOB.id;
+        if (isCharacterUnlocked(noobId)) return false;
+        unlockCharacter(noobId);
+        return true;
+    }
+
     public Artifact findArtifact(String artifactId) {
         if (artifactId == null) return null;
         for (Artifact a : inventory) {
@@ -48,20 +59,22 @@ public class PlayerProfile {
     }
 
     /**
-     * Fallback for blank/legacy {@code extra_json} rows: characters 0 and 1 unlocked, empty
-     * inventory, no loadout. New registrations use {@link #newAccountProfile(Random)} instead.
+     * Fallback for blank/legacy {@code extra_json} rows: characters 0–2 unlocked (The Noob
+     * selected), empty inventory, no loadout. New registrations use
+     * {@link #newAccountProfile(Random)} instead.
      */
     public static PlayerProfile defaultProfile() {
         PlayerProfile p = new PlayerProfile();
         p.unlockCharacter(0);
         p.unlockCharacter(1);
-        p.selectedCharacterId = 0;
+        p.unlockCharacter(2);
+        p.selectedCharacterId = 2;
         return p;
     }
 
     /**
-     * Profile written for a freshly registered account: characters 0 and 1 unlocked, three
-     * level-2 starter artifacts (I/O/T) with rolled effects, I and O equipped.
+     * Profile written for a freshly registered account: characters 0–2 unlocked with The Noob
+     * selected, three level-2 starter artifacts (I/O/T) with rolled effects, I and O equipped.
      */
     public static PlayerProfile newAccountProfile(Random rng) {
         PlayerProfile p = defaultProfile();

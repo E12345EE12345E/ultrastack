@@ -74,15 +74,18 @@ public class UIInventoryButton extends UIElement {
                 icon, action);
     }
 
-    /** Clears icon / labels / binding; optionally sets a placeholder. */
+    /**
+     * Clears icon / labels / binding; optionally sets a placeholder.
+     * Does not touch {@link #action} / {@link #secondaryAction} — those are interaction wiring
+     * owned by the screen, not displayed content (callers that want a dead empty tile must
+     * null the runnables themselves).
+     */
     public void clearSlot(String placeholder) {
         icon = null;
         boundId = null;
         cornerLabelLeft = null;
         cornerStars = 0;
         placeholderText = placeholder;
-        action = null;
-        secondaryAction = null;
     }
 
     /** Binds this tile to an icon with an optional bottom-left text badge (no stars). */
@@ -235,7 +238,10 @@ public class UIInventoryButton extends UIElement {
 
     @Override
     public void handleClick(int screenX, int screenY, int button) {
-        if (!isClicked(screenX, screenY)) return;
+        // Use the same screen-space rect as hover drawing. {@link #isClicked} goes through
+        // relative+HDPI conversion which can disagree with that rect (especially near the top
+        // of an aspect-locked canvas), so hover would light up but the click would miss.
+        if (!containsScreenPoint(screenX, screenY)) return;
         if (button == Input.Buttons.RIGHT) {
             if (secondaryAction != null) secondaryAction.run();
             return;
@@ -251,6 +257,25 @@ public class UIInventoryButton extends UIElement {
             return;
         }
         onClick();
+    }
+
+    /** Screen-space hit test matching the rectangle used for hover in {@link #render}. */
+    private boolean containsScreenPoint(int screenX, int screenY) {
+        float pxW;
+        float pxH;
+        AspectLockedViewport vp = AspectLockedViewport.current();
+        if (vp != null) {
+            pxW = MenuScreen.toScreenWidth((float) width);
+            pxH = MenuScreen.toScreenHeight((float) height);
+        } else {
+            pxW = MenuScreen.toScreenWidth((float) width);
+            pxH = pxW;
+        }
+        float pxX = MenuScreen.convertFromRelCoordsX((float) centerX) - 0.5f * pxW;
+        float pxY = MenuScreen.toScreenYBottom((float) centerY) - 0.5f * pxH;
+        float mouseX = screenX;
+        float mouseY = Gdx.graphics.getHeight() - screenY;
+        return mouseX >= pxX && mouseX <= pxX + pxW && mouseY >= pxY && mouseY <= pxY + pxH;
     }
 
     @Override

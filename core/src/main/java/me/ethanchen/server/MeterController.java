@@ -13,11 +13,18 @@ class MeterController {
     private int players;
     private ActiveLoadout[] loadouts;
     private float[] meter;
+    /** Extra multiplier on passive (time-based) fill, e.g. from The Noob's ability. */
+    private float externalPassiveFillMultiplier = 1f;
 
     void reset(int players, ActiveLoadout[] loadouts) {
         this.players = players;
         this.loadouts = loadouts;
         this.meter = new float[players];
+        this.externalPassiveFillMultiplier = 1f;
+    }
+
+    void setExternalPassiveFillMultiplier(float multiplier) {
+        this.externalPassiveFillMultiplier = multiplier > 0f ? multiplier : 1f;
     }
 
     private ActiveLoadout loadoutFor(int playerId) {
@@ -33,6 +40,7 @@ class MeterController {
             if (loadout == null || loadout.character == null) continue;
             float fill = loadout.character.perSecondMeterFill;
             fill *= (1f + loadout.equippedPassiveFillBonusPercent() / 100f);
+            fill *= externalPassiveFillMultiplier;
             addToMeter(i, fill * deltaSeconds);
         }
     }

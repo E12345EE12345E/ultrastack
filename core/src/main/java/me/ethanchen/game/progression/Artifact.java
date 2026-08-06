@@ -7,8 +7,9 @@ import me.ethanchen.game.board.Piece;
 
 /**
  * A single acquired artifact instance: a piece-typed item with a hidden {@code baseQuality} that
- * biases future effect rolls, and a list of independently-rolled effect entries -- exactly one
- * per level (implementation.md, Parts 1 and 3).
+ * biases future effect rolls, a list of independently-rolled effect entries -- exactly one per
+ * level -- and a built-in {@linkplain #uniqueEffect() unique effect} derived from type and level
+ * only (never stored; implementation.md, Parts 1 and 3).
  */
 public class Artifact {
     public String id;
@@ -91,12 +92,26 @@ public class Artifact {
     }
 
     /**
-     * UI stats block: display name, then up to {@code maxEffects} effect lines
-     * (name + 5 effects = 6 lines total when fully filled). Effect lines use libGDX color markup.
+     * Built-in unique effect for this artifact's type, derived from {@link #pieceType} and
+     * {@link #level} only -- never stored on the instance or in account JSON.
+     */
+    public ArtifactUniqueEffect uniqueEffect() {
+        return ArtifactUniqueEffects.forPieceType(pieceType);
+    }
+
+    /**
+     * UI stats block: display name, unique effect (if any), then up to {@code maxEffects}
+     * remaining rolled-effect lines. Effect lines use libGDX color markup.
      */
     public String describeForUi(int maxEffects) {
         StringBuilder sb = new StringBuilder(displayName());
-        int n = Math.min(Math.max(0, maxEffects), effects.size());
+        int remaining = Math.max(0, maxEffects);
+        ArtifactUniqueEffect unique = uniqueEffect();
+        if (unique != null && remaining > 0) {
+            sb.append('\n').append(unique.describe(pieceType, level));
+            remaining--;
+        }
+        int n = Math.min(remaining, effects.size());
         for (int i = 0; i < n; i++) {
             sb.append('\n').append(effects.get(i).describe(pieceType));
         }

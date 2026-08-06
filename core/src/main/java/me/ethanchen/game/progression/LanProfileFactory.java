@@ -21,11 +21,11 @@ public final class LanProfileFactory {
         for (int i = 0; i < CharacterRegistry.count(); i++) {
             profile.unlockCharacter(i);
         }
-        profile.selectedCharacterId = 0;
+        profile.selectedCharacterId = CharacterDef.NOOB.id;
 
         Random rng = new Random();
-        Artifact a = ArtifactRoller.roll(randomTetromino(rng), 1, 60f, rng);
-        Artifact b = ArtifactRoller.roll(randomTetromino(rng), 1, 60f, rng);
+        Artifact a = ArtifactRoller.roll(randomTetromino(rng), 3, 60f, rng);
+        Artifact b = ArtifactRoller.roll(randomTetromino(rng), 3, 60f, rng);
         profile.inventory.add(a);
         profile.inventory.add(b);
         profile.sortInventory();

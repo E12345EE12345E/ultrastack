@@ -74,6 +74,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
         }
         walSync = new SqliteWalSync("account-store-wal-sync", this::checkpointWal);
         load();
+        migrateNoobUnlocks();
         Runtime.getRuntime().addShutdownHook(new Thread(this::close, "account-store-shutdown"));
     }
 
@@ -156,6 +157,10 @@ public class AccountStore implements XpAwarder, ProfileStore {
 
         PlayerProfile profile = readProfileFromExtraJson(acct);
         profile.sortInventory();
+        if (profile.ensureNoobUnlocked()) {
+            // Persist migration for accounts that somehow skipped the startup sweep.
+            writeProfileExtraJson(acct, profile);
+        }
         profileCache.put(accountUuid, profile);
         return profile;
     }
@@ -181,6 +186,10 @@ public class AccountStore implements XpAwarder, ProfileStore {
         Account acct = byUuid.get(accountUuid);
         if (acct == null) return;
         profileCache.put(accountUuid, profile);
+        writeProfileExtraJson(acct, profile);
+    }
+
+    private void writeProfileExtraJson(Account acct, PlayerProfile profile) {
         AccountExtra extra = new AccountExtra();
         extra.profile = profile;
         Json json = new Json();
@@ -190,11 +199,29 @@ public class AccountStore implements XpAwarder, ProfileStore {
         String sql = "UPDATE accounts SET extra_json = ? WHERE uuid = ?";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, extraJson);
-            ps.setString(2, accountUuid);
+            ps.setString(2, acct.uuid);
             ps.executeUpdate();
             acct.extraJson = extraJson;
         } catch (SQLException e) {
             System.err.println("[AccountStore] Failed to save profile: " + e.getMessage());
+        }
+    }
+
+    /**
+     * One-time-per-process sweep: unlock The Noob on every persisted profile that predates that
+     * character, writing updated {@code extra_json} back to SQLite.
+     */
+    private void migrateNoobUnlocks() {
+        int updated = 0;
+        for (Account acct : byUuid.values()) {
+            PlayerProfile profile = readProfileFromExtraJson(acct);
+            if (!profile.ensureNoobUnlocked()) continue;
+            profileCache.put(acct.uuid, profile);
+            writeProfileExtraJson(acct, profile);
+            updated++;
+        }
+        if (updated > 0) {
+            System.out.println("[AccountStore] Unlocked The Noob for " + updated + " existing profile(s).");
         }
     }
 

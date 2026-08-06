@@ -53,6 +53,7 @@ public class ServerGame {
     private final BlockedSpawnController blocked = new BlockedSpawnController();
     private final GameEndController endCtrl = new GameEndController();
     private final MeterController meterController = new MeterController();
+    private final NoobGravityController noobGravity = new NoobGravityController();
     private ActiveLoadout[] loadouts;
 
     public ServerGame(GameRoomContext room) {
@@ -104,9 +105,12 @@ public class ServerGame {
         if (this.loadouts != null) {
             scorer.setBonusProvider(this::characterScoreBonusPercent);
             meterController.reset(players, this.loadouts);
+            noobGravity.reset();
             applyBagOverrides();
+            applyGravityPassives();
         } else {
             scorer.setBonusProvider(null);
+            noobGravity.reset();
         }
         return true;
     }
@@ -120,6 +124,16 @@ public class ServerGame {
             if (loadout == null || loadout.character == null || loadout.character.bagOverride == null) continue;
             PieceQueue.BagTypes bag = loadout.character.bagOverride;
             board.setPieceQueue(i, new PieceQueue(new java.util.Random().nextInt(), bag));
+        }
+    }
+
+    /** Applies always-on per-player gravity multipliers from character passives (e.g. The Noob). */
+    private void applyGravityPassives() {
+        for (int i = 0; i < loadouts.length; i++) {
+            ActiveLoadout loadout = loadouts[i];
+            float mult = (loadout != null && loadout.character != null)
+                    ? loadout.character.passiveGravitySpeedMultiplier : 1f;
+            game.setPlayerGravitySpeedMult(i, mult);
         }
     }
 
@@ -145,6 +159,7 @@ public class ServerGame {
         this.players = 0;
         this.highestMoveId = null;
         this.loadouts = null;
+        noobGravity.reset();
         scorer.setBonusProvider(null);
         inProgress = false;
         room.onGameStopped();
@@ -318,6 +333,11 @@ public class ServerGame {
             case MULTIPLAYER_SCORE:
             case MULTIPLAYER_PUZZLE:
             case CHARACTER_SCORE:
+                if (loadouts != null && game != null && !endCtrl.isGameEnded()) {
+                    noobGravity.tick(deltaTime);
+                    game.setGlobalGravitySpeedFactor(noobGravity.gravitySpeedFactor());
+                    meterController.setExternalPassiveFillMultiplier(noobGravity.passiveMeterFillMultiplier());
+                }
                 updateGameTick();
                 if (loadouts != null && game != null && game.isStarted() && !endCtrl.isGameEnded()) {
                     meterController.tickPassive(deltaTime / 1000f);
@@ -424,14 +444,17 @@ public class ServerGame {
             b.puzzleMode = getPuzzleModeData();
         } else if (gameMode == me.ethanchen.game.GameMode.CHARACTER_SCORE) {
             b.scoreMode = scorer.getScoreModeData();
-            if (loadouts != null) b.characterMode = meterController.getCharacterModeData();
+            if (loadouts != null) {
+                b.characterMode = meterController.getCharacterModeData();
+                b.characterMode.globalGravitySpeedFactor = noobGravity.gravitySpeedFactor();
+            }
         }
     }
 
     /**
      * Activates {@code playerId}'s character ability if their meter is full (implementation.md,
-     * Part 1/4): 3-Mino fills skyline gaps with garbage, Wizard forces an I. No-op (returns false)
-     * for non-character modes, an unready meter, or an invalid player.
+     * Part 1/4): 3-Mino fills skyline gaps with garbage, Wizard forces an I, The Noob disables
+     * gravity. No-op (returns false) for non-character modes, an unready meter, or an invalid player.
      */
     public synchronized boolean activateAbility(int playerId) {
         if (loadouts == null || !canActivateAbility(playerId)) return false;
@@ -447,6 +470,14 @@ public class ServerGame {
                 if (!canSwapActivePiece(playerId)) return false;
                 if (!meterController.tryConsume(playerId)) return false;
                 return swapActivePiece(playerId, Piece.I);
+            case DISABLE_AND_RAMP_GRAVITY:
+                if (!meterController.tryConsume(playerId)) return false;
+                noobGravity.activate();
+                if (game != null) {
+                    game.setGlobalGravitySpeedFactor(noobGravity.gravitySpeedFactor());
+                }
+                meterController.setExternalPassiveFillMultiplier(noobGravity.passiveMeterFillMultiplier());
+                return true;
             default:
                 return false;
         }
@@ -478,6 +509,24 @@ public class ServerGame {
 
     public GameHandler getGame() {
         return game;
+    }
+
+    /** Effective gravity interval for network prediction, including character/ability modifiers. */
+    public int getEffectiveGravityMs(int playerId) {
+        if (game == null) return 0;
+        return game.getEffectiveGravityMs(playerId);
+    }
+
+    /** Per-player gravity accumulator for network prediction. */
+    public int getGravityTickCounter(int playerId) {
+        if (game == null) return 0;
+        return game.getGravityTickCounter(playerId);
+    }
+
+    /** Snapshot of every seated slot's gravity accumulator for {@link LightGameStateBroadcast}. */
+    public int[] getGravityTickCounters() {
+        if (game == null) return new int[0];
+        return game.copyGravityTickCounters();
     }
 
     public GameMode getGameMode() {

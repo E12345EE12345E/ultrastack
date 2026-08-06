@@ -377,9 +377,15 @@ public class Board {
 
     public void doGravityTick() {
         for (int i=0; i<activePieces.size(); i++) {
-            if (activePieces.get(i).isBlockedFromSpawning) continue;
-            moveDown(i);
+            doGravityTick(i);
         }
+    }
+
+    /** Applies one gravity step to a single player's active piece, if present and spawnable. */
+    public void doGravityTick(int playerId) {
+        if (playerId < 0 || playerId >= activePieces.size()) return;
+        if (activePieces.get(playerId).isBlockedFromSpawning) return;
+        moveDown(playerId);
     }
 
     private static int[] rotateOffset(int x, int y, int r) {

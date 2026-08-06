@@ -16,6 +16,8 @@ import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.Piece;
+import me.ethanchen.game.progression.CharacterDef;
+import me.ethanchen.game.progression.CharacterRegistry;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.input.LocalPlayerRoster;
 import me.ethanchen.lwjgl3.music.AudioManager;
@@ -503,7 +505,40 @@ public class GameScreen extends MenuScreen {
         if (p.characterMode != null) latestCharacterMode = p.characterMode;
 
         game.setGravity(p.gravity);
-        game.setGravityTickCounter(p.gravityTickCounter);
+        applyCharacterGravityPrediction(p);
+        if (p.gravityTickCounters != null) {
+            int n = Math.min(p.gravityTickCounters.length, game.getNumPlayers());
+            for (int i = 0; i < n; i++) {
+                game.setGravityTickCounter(i, p.gravityTickCounters[i]);
+            }
+        }
+    }
+
+    /**
+     * Applies server character gravity modifiers for client-side prediction: per-slot passive
+     * fall-speed multipliers and The Noob's global disable/ramp factor.
+     */
+    private void applyCharacterGravityPrediction(LightGameStateBroadcast p) {
+        if (p.characterMode == null || p.characterMode.characterIds == null) {
+            game.setGlobalGravitySpeedFactor(1f);
+            for (int i = 0; i < game.getNumPlayers(); i++) {
+                game.setPlayerGravitySpeedMult(i, 1f);
+            }
+            return;
+        }
+        float global = p.characterMode.globalGravitySpeedFactor;
+        // Legacy packets / unset float default to 0; treat non-positive as "no override" only when
+        // the effect is truly inactive — server always sends an explicit [0,1] factor.
+        game.setGlobalGravitySpeedFactor(global);
+        int[] ids = p.characterMode.characterIds;
+        for (int i = 0; i < game.getNumPlayers(); i++) {
+            float mult = 1f;
+            if (i < ids.length && ids[i] >= 0) {
+                CharacterDef def = CharacterRegistry.byId(ids[i]);
+                if (def != null) mult = def.passiveGravitySpeedMultiplier;
+            }
+            game.setPlayerGravitySpeedMult(i, mult);
+        }
     }
 
     private void handleEndGame(EndGameBroadcast egp) {
