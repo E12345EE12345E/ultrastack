@@ -47,6 +47,10 @@ public class CharacterScreen extends AspectLockedMenuScreen {
     private final UIInventoryButton bigPortrait;
     private final UIText nameText;
     private final List<UIInventoryButton> characterButtons = new ArrayList<>();
+    private final UIText abilityHeading;
+    private final UIText abilityBody;
+    private final UIText descriptionHeading;
+    private final UIText descriptionBody;
     private final UIInventoryButton[] equipSlots = new UIInventoryButton[2];
     private final UIImage highlightedStatsIcon;
     private final UIText highlightedStatsText;
@@ -72,26 +76,48 @@ public class CharacterScreen extends AspectLockedMenuScreen {
                 "Back", () -> app.switchMenu(returnScreen)));
 
         // ---- Top half: character selection (compressed above the raised divider) ----
-        bigPortrait = DesignUi.inventoryButton(340, 820, 230, null, null);
-        nameText = new UIText(DesignUi.nx(340), DesignUi.ny(670), "", 1.3);
+        final float bigPortraitX = 340f;
+        final float bigPortraitY = 820f;
+        final float bigPortraitSize = 230f;
+        // 2 rows flush with the big portrait's top and bottom edges (no gaps between tiles).
+        final int charRows = 2;
+        final float charSize = bigPortraitSize / charRows;
+        final float charStartX = 580f;
+        final float charTopCenterY = bigPortraitY + bigPortraitSize * 0.5f - charSize * 0.5f;
+
+        bigPortrait = DesignUi.inventoryButton(bigPortraitX, bigPortraitY, bigPortraitSize, null, null);
+        nameText = new UIText(DesignUi.nx(bigPortraitX), DesignUi.ny(670), "", 1.3);
         elements.add(bigPortrait);
         elements.add(nameText);
 
-        // Character grid: 2 rows per column, then advance right (avoids spilling into the artifact half).
-        final float charStartX = 580f;
-        final float charStartY = 900f;
-        final float charStride = 140f;
         for (CharacterDef def : CharacterRegistry.ALL) {
             int id = def.id;
             int index = characterButtons.size();
-            int col = index / 2;
-            int row = index % 2;
+            int col = index / charRows;
+            int row = index % charRows;
             UIInventoryButton btn = DesignUi.inventoryButton(
-                    charStartX + col * charStride, charStartY - row * charStride, 110,
+                    charStartX + col * charSize, charTopCenterY - row * charSize, charSize,
                     CharacterAssets.portraitFor(id), () -> selectCharacter(id));
             characterButtons.add(btn);
             elements.add(btn);
         }
+
+        // Character blurbs to the right of the portrait grid.
+        final float blurbX = 850f;
+        abilityHeading = new UIText(
+                DesignUi.nx(blurbX), DesignUi.ny(935), "Ability Description", 1.2, UIText.TextAlign.TOP_LEFT);
+        abilityBody = new UIText(
+                DesignUi.nx(blurbX), DesignUi.ny(900), "", 1.0, UIText.TextAlign.TOP_LEFT);
+        abilityBody.wrapDesignWidth = 1000f;
+        descriptionHeading = new UIText(
+                DesignUi.nx(blurbX), DesignUi.ny(790), "Description", 1.2, UIText.TextAlign.TOP_LEFT);
+        descriptionBody = new UIText(
+                DesignUi.nx(blurbX), DesignUi.ny(755), "", 1.0, UIText.TextAlign.TOP_LEFT);
+        descriptionBody.wrapDesignWidth = 1000f;
+        elements.add(abilityHeading);
+        elements.add(abilityBody);
+        elements.add(descriptionHeading);
+        elements.add(descriptionBody);
 
         // ---- Bottom half: reference equip slots + Use/Remove + stats + inventory ----
         // Stable shortcuts: read boundId so clear/show never drops the click wiring.
@@ -142,6 +168,9 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         elements.add(new UIButton(
                 DesignUi.nx(1780), DesignUi.ny(180), DesignUi.nw(220), DesignUi.nh(70),
                 "Fusion", () -> app.switchMenu(new FusionScreen(app, this, charactersEnabled))));
+        elements.add(new UIButton(
+                DesignUi.nx(1780), DesignUi.ny(90), DesignUi.nw(220), DesignUi.nh(70),
+                "Loadout", () -> app.switchMenu(new ArtifactLoadoutScreen(app, this))));
 
         warningText = new UIText(DesignUi.nx(1600), DesignUi.ny(50), "", 0.75);
         elements.add(warningText);
@@ -267,6 +296,8 @@ public class CharacterScreen extends AspectLockedMenuScreen {
         }
         bigPortrait.grayscale = !enabled;
         nameText.textin.set(selected != null ? selected.name : "");
+        abilityBody.textin.set(selected != null ? selected.abilityDescription : "");
+        descriptionBody.textin.set(selected != null ? selected.description : "");
 
         for (int i = 0; i < characterButtons.size(); i++) {
             CharacterDef def = CharacterRegistry.ALL[i];

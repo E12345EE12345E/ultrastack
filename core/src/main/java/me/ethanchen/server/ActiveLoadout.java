@@ -36,8 +36,35 @@ public final class ActiveLoadout {
              + ArtifactEffects.equippedMeterBonusPercent(artifactB, lineClear, spin);
     }
 
+    public float equippedScoreBonusPercent(boolean lineClear, boolean spin) {
+        return ArtifactEffects.equippedScoreBonusPercent(artifactA, lineClear, spin)
+             + ArtifactEffects.equippedScoreBonusPercent(artifactB, lineClear, spin);
+    }
+
     public float equippedPassiveFillBonusPercent() {
         return ArtifactEffects.equippedPassiveFillBonusPercent(artifactA)
              + ArtifactEffects.equippedPassiveFillBonusPercent(artifactB);
+    }
+
+    /** Piece card: piece-specific + "all line clears" score bonuses (artifacts only). */
+    public float clearScoreBonusPercent(byte pieceType) {
+        return scoreBonusPercent(pieceType, true, false);
+    }
+
+    /** Piece card: piece-specific + "all spins" score bonuses (artifacts only). */
+    public float spinScoreBonusPercent(byte pieceType) {
+        return scoreBonusPercent(pieceType, false, true);
+    }
+
+    /** Piece card: piece-specific + equipped line-clear meter bonuses (artifacts only). */
+    public float clearMeterBonusPercent(byte pieceType) {
+        return pieceMeterBonusPercent(pieceType, true, false)
+             + equippedMeterBonusPercent(true, false);
+    }
+
+    /** Piece card: piece-specific + equipped spin meter bonuses (artifacts only). */
+    public float spinMeterBonusPercent(byte pieceType) {
+        return pieceMeterBonusPercent(pieceType, false, true)
+             + equippedMeterBonusPercent(false, true);
     }
 }

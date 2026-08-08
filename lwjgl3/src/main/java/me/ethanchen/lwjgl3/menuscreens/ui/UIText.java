@@ -24,6 +24,11 @@ public class UIText extends UIElement {
     public TextInput textin;
     public float size;
     public TextAlign align = TextAlign.CENTER;
+    /**
+     * When {@code > 0}, wrap text to this design-pixel width (1920×1080 canvas). Zero means
+     * single-line / explicit-{@code \n} layout only.
+     */
+    public float wrapDesignWidth;
 
     public UIText(double x, double y, String text) {
         this(x, y, text, 1.0f);
@@ -87,7 +92,13 @@ public class UIText extends UIElement {
         boolean prevMarkup = font.getData().markupEnabled;
         font.getData().markupEnabled = useMarkup;
 
-        GlyphLayout layout = new GlyphLayout(font, text);
+        GlyphLayout layout = new GlyphLayout();
+        if (wrapDesignWidth > 0f) {
+            float targetW = MenuScreen.toScreenWidth((float) DesignUi.nw(wrapDesignWidth));
+            layout.setText(font, text, Color.WHITE, targetW, com.badlogic.gdx.utils.Align.left, true);
+        } else {
+            layout.setText(font, text);
+        }
         AspectLockedViewport vp = AspectLockedViewport.current();
         float refW = vp != null ? vp.viewW : Gdx.graphics.getWidth();
         float refH = vp != null ? vp.viewH : Gdx.graphics.getHeight();

@@ -77,6 +77,15 @@ public class ArtifactEffect {
         return "[#" + COLOR_PIECE + "]" + Artifact.pieceTypeName(pieceType) + "[]";
     }
 
+    /**
+     * Formats an exact percentage total for UI (rounds to nearest tenth, same tiered markup
+     * as individual effect lines).
+     */
+    public static String formatBonusPercent(float exactPercent) {
+        float display = Math.round(exactPercent * 10f) / 10f;
+        return percentMarkup(display);
+    }
+
     private static String percentMarkup(float displayPercent) {
         String hex;
         if (displayPercent < 100f) hex = COLOR_PCT_LOW;
