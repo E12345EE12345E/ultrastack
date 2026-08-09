@@ -48,6 +48,7 @@ public class ServerGame {
     private long[] hardDropBlockedUntilMs;
     private int[] bumpCounts;
     private int[] blockedCounts;
+    private ClearSpinStats clearSpinStats;
 
     private final PlacementEffects effects = new PlacementEffects();
     private final ScoreModeScorer scorer = new ScoreModeScorer();
@@ -96,6 +97,7 @@ public class ServerGame {
         this.hardDropBlockedUntilMs = new long[players];
         this.bumpCounts = new int[players];
         this.blockedCounts = new int[players];
+        this.clearSpinStats = new ClearSpinStats(players);
         Arrays.fill(this.highestMoveId, -1);
 
         scorer.reset(players, game);
@@ -274,6 +276,7 @@ public class ServerGame {
      */
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
+        clearSpinStats.record(result);
         int priorCombo = game.getCombo();
         if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
             long points = scorer.scoreHardDrop(result, effects);
@@ -372,8 +375,8 @@ public class ServerGame {
         }
         if (game.isStarted() && !endCtrl.isGameEnded()) {
             blocked.update(deltaTime / 1000f, players, game,
-                    () -> endCtrl.beginGameEndLoss(gameMode, scorer, bumpCounts, blockedCounts));
-            endCtrl.checkWinCondition(gameMode, game, scorer, bumpCounts, blockedCounts);
+                    () -> endCtrl.beginGameEndLoss(gameMode, scorer, bumpCounts, blockedCounts, clearSpinStats));
+            endCtrl.checkWinCondition(gameMode, game, scorer, bumpCounts, blockedCounts, clearSpinStats);
         }
     }
 
@@ -556,6 +559,6 @@ public class ServerGame {
      * Called when a player disconnects mid-game.
      */
     public synchronized void handleDisconnectedPlayer(int id) {
-        endCtrl.beginGameEndDisconnect(gameMode, scorer, bumpCounts, blockedCounts);
+        endCtrl.beginGameEndDisconnect(gameMode, scorer, bumpCounts, blockedCounts, clearSpinStats);
     }
 }

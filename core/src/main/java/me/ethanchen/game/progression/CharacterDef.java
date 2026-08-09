@@ -77,10 +77,10 @@ public final class CharacterDef {
     public static final CharacterDef THREE_MINO = new CharacterDef(
             0, "3-Mino",
             "Fills overhangs.",
-            "Queue {L3, L3, I3, I3}. Meter and score bonus each x2.",
+            "Queue {L3, L3, I3, I3}. Fills other meters 2x on line clears.",
             0.25f, 100f, 6000f,
             CharacterAbility.FILL_SKYLINE_GAPS, PieceQueue.BagTypes.BAG_3MINO,
-            new byte[]{Piece.L3, Piece.I3}, 100f,
+            new byte[]{Piece.L3, Piece.I3}, 0f,
             2.0f, 1.0f, 1.0f);
 
     /** id 1: (Placeholder Name) Wizard. */

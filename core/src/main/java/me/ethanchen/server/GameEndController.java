@@ -54,11 +54,12 @@ class GameEndController {
      * {@link #beginGameEnd} if met. Must only be called when
      * {@code game.isStarted() && !isGameEnded()}.
      */
-    void checkWinCondition(GameMode mode, GameHandler game, ScoreModeScorer scorer, int[] bumpCounts, int[] blockedCounts) {
+    void checkWinCondition(GameMode mode, GameHandler game, ScoreModeScorer scorer,
+                            int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
         if (mode == GameMode.NONE) return;
         GameModeRules rules = mode.rules();
         if (rules.isWinConditionMet(game, gameEndTargetMs)) {
-            beginGameEnd(true, false, mode, scorer, bumpCounts, blockedCounts);
+            beginGameEnd(true, false, mode, scorer, bumpCounts, blockedCounts, clearSpinStats);
         }
     }
 
@@ -67,17 +68,19 @@ class GameEndController {
     // -------------------------------------------------------------------------
 
     /** Called by {@link BlockedSpawnController} when the explode countdown expires. */
-    void beginGameEndLoss(GameMode mode, ScoreModeScorer scorer, int[] bumpCounts, int[] blockedCounts) {
-        beginGameEnd(false, false, mode, scorer, bumpCounts, blockedCounts);
+    void beginGameEndLoss(GameMode mode, ScoreModeScorer scorer,
+                          int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
+        beginGameEnd(false, false, mode, scorer, bumpCounts, blockedCounts, clearSpinStats);
     }
 
     /** Called when a player disconnects mid-game. */
-    void beginGameEndDisconnect(GameMode mode, ScoreModeScorer scorer, int[] bumpCounts, int[] blockedCounts) {
-        beginGameEnd(false, true, mode, scorer, bumpCounts, blockedCounts);
+    void beginGameEndDisconnect(GameMode mode, ScoreModeScorer scorer,
+                                int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
+        beginGameEnd(false, true, mode, scorer, bumpCounts, blockedCounts, clearSpinStats);
     }
 
     private void beginGameEnd(boolean win, boolean disconnected, GameMode mode, ScoreModeScorer scorer,
-                               int[] bumpCounts, int[] blockedCounts) {
+                               int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
         if (gameEnded) return;
         gameEnded = true;
         pendingWin = win;
@@ -87,12 +90,14 @@ class GameEndController {
 
         frozenScoreEnd  = null;
         frozenPuzzleEnd = null;
+        ClearSpinStats frozenClears = clearSpinStats != null ? clearSpinStats.copy() : null;
         if (mode == GameMode.MULTIPLAYER_SCORE || mode == GameMode.CHARACTER_SCORE) {
             frozenScoreEnd = new ScoreModeEndData();
             frozenScoreEnd.finalScore = scorer != null ? scorer.getTotalScore() : 0;
             frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
             frozenScoreEnd.bumpCounts = copyOf(bumpCounts);
             frozenScoreEnd.blockedCounts = copyOf(blockedCounts);
+            applyClearSpinStats(frozenScoreEnd, frozenClears);
         } else if (mode == GameMode.MULTIPLAYER_PUZZLE) {
             frozenPuzzleElapsedMs = System.currentTimeMillis() - gameStartMs;
             frozenPuzzleEnd = new PuzzleModeEndData();
@@ -100,7 +105,26 @@ class GameEndController {
             frozenPuzzleEnd.score = (int)(Integer.MAX_VALUE - Math.min(frozenPuzzleElapsedMs, Integer.MAX_VALUE));
             frozenPuzzleEnd.bumpCounts = copyOf(bumpCounts);
             frozenPuzzleEnd.blockedCounts = copyOf(blockedCounts);
+            applyClearSpinStats(frozenPuzzleEnd, frozenClears);
         }
+    }
+
+    private static void applyClearSpinStats(ScoreModeEndData end, ClearSpinStats stats) {
+        if (stats == null) return;
+        end.fourLineClears = stats.fourLineClears;
+        end.tSpinSingles = stats.tSpinSingles;
+        end.tSpinDoubles = stats.tSpinDoubles;
+        end.tSpinTriples = stats.tSpinTriples;
+        end.allSpinClears = stats.allSpinClears;
+    }
+
+    private static void applyClearSpinStats(PuzzleModeEndData end, ClearSpinStats stats) {
+        if (stats == null) return;
+        end.fourLineClears = stats.fourLineClears;
+        end.tSpinSingles = stats.tSpinSingles;
+        end.tSpinDoubles = stats.tSpinDoubles;
+        end.tSpinTriples = stats.tSpinTriples;
+        end.allSpinClears = stats.allSpinClears;
     }
 
     private static int[] copyOf(int[] arr) {
