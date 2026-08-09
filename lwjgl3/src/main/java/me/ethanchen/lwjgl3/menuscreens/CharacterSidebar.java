@@ -20,9 +20,8 @@ import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
  * (implementation.md, Part 5). Shared by the room browser and both lobby screens.
  *
  * <p>{@code charactersEnabled} reports whether the current room's gamemode supports characters;
- * when false, the images render desaturated. Non-host clients can't currently see the host's
- * pending gamemode choice before a game starts, so this only reflects the host's local
- * {@code LobbySettings} — see {@link ClientApp#getLobbySettings()}.
+ * when false, the images render desaturated. Pending mode is kept in sync via
+ * {@code LobbySettingsBroadcast} into {@link ClientApp#getLobbySettings()}.
  */
 public class CharacterSidebar {
     private final ClientApp app;

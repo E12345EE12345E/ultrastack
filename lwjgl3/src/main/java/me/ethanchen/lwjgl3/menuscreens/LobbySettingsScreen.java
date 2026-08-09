@@ -6,6 +6,7 @@ import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 import me.ethanchen.lwjgl3.settings.LobbySettings;
 import me.ethanchen.network.ClientPacketWrapper;
+import me.ethanchen.network.packets.c2s.LobbySettingsRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 
 /**
@@ -29,6 +30,9 @@ public class LobbySettingsScreen extends MenuScreen {
         modeButton.action = () -> {
             settings.gamemode = nextMode(settings.gamemode);
             modeButton.text = modeLabel(settings.gamemode);
+            LobbySettingsRequest req = new LobbySettingsRequest();
+            req.gamemode = settings.gamemode;
+            app.sendTCP(req);
         };
         elements.add(modeButton);
 

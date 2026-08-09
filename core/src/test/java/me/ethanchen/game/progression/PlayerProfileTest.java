@@ -54,19 +54,55 @@ class PlayerProfileTest {
         assertEquals(null, profile.equippedArtifactIds[1]);
         assertTrue(profile.isCharacterUnlocked(2));
         assertEquals(2, profile.selectedCharacterId);
+        assertEquals(0L, profile.tokens);
     }
 
     @Test
-    void ensureNoobUnlocked_unlocksLegacyTwoCharacterProfiles() {
+    void ensureStarterCharactersUnlocked_unlocksAllThreeStarters() {
+        PlayerProfile empty = new PlayerProfile();
+        assertTrue(empty.ensureStarterCharactersUnlocked());
+        assertTrue(empty.isCharacterUnlocked(CharacterDef.THREE_MINO.id));
+        assertTrue(empty.isCharacterUnlocked(CharacterDef.WIZARD.id));
+        assertTrue(empty.isCharacterUnlocked(CharacterDef.NOOB.id));
+        assertFalse(empty.ensureStarterCharactersUnlocked());
+    }
+
+    @Test
+    void ensureStarterCharactersUnlocked_addsMissingNoobToLegacyTwoCharacterProfiles() {
         PlayerProfile legacy = new PlayerProfile();
-        legacy.unlockCharacter(0);
-        legacy.unlockCharacter(1);
+        legacy.unlockCharacter(CharacterDef.THREE_MINO.id);
+        legacy.unlockCharacter(CharacterDef.WIZARD.id);
         legacy.selectedCharacterId = 0;
 
-        assertTrue(legacy.ensureNoobUnlocked());
-        assertTrue(legacy.isCharacterUnlocked(2));
+        assertTrue(legacy.ensureStarterCharactersUnlocked());
+        assertTrue(legacy.isCharacterUnlocked(CharacterDef.NOOB.id));
         assertEquals(0, legacy.selectedCharacterId);
-        assertFalse(legacy.ensureNoobUnlocked());
+        assertFalse(legacy.ensureStarterCharactersUnlocked());
+    }
+
+    @Test
+    void ensureTokensFromXp_seedsMissingTokensOnce() {
+        PlayerProfile legacy = new PlayerProfile();
+        assertEquals(null, legacy.tokens);
+
+        assertTrue(legacy.ensureTokensFromXp(1500L));
+        assertEquals(1500L, legacy.tokens);
+        assertFalse(legacy.ensureTokensFromXp(9999L));
+        assertEquals(1500L, legacy.tokens);
+    }
+
+    @Test
+    void addTokens_incrementsSpendableBalance() {
+        PlayerProfile profile = PlayerProfile.defaultProfile();
+        profile.addTokens(40L);
+        profile.addTokens(10L);
+        assertEquals(50L, profile.tokens);
+    }
+
+    @Test
+    void newAccountProfile_startsWithZeroTokens() {
+        PlayerProfile profile = PlayerProfile.newAccountProfile(new Random(1L));
+        assertEquals(0L, profile.tokens);
     }
 
     private static Artifact findByType(PlayerProfile profile, byte pieceType) {

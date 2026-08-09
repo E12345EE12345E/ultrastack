@@ -29,6 +29,7 @@ import me.ethanchen.lwjgl3.render.shader.PlayerRipples;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.dto.HardDropEffect;
+import me.ethanchen.network.packets.s2c.AbilityActivateBroadcast;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.EndGameBroadcast;
 import me.ethanchen.network.packets.s2c.HardDropEffectsBroadcast;
@@ -71,6 +72,8 @@ public class GameScreen extends MenuScreen {
     private ScoreModeData latestScoreMode;
     private PuzzleModeData latestPuzzleMode;
     private CharacterModeData latestCharacterMode;
+    /** Per-slot previous "meter full / ability ready" state for rising-edge available SFX. */
+    private boolean[] abilityWasReady;
 
     private long gameEndTargetMs;
     private long startTimeMS;
@@ -86,6 +89,7 @@ public class GameScreen extends MenuScreen {
                 .on(HardDropEffectsBroadcast.class, w -> handleHardDropEffects((HardDropEffectsBroadcast) w.packet))
                 .on(HoldSoundBroadcast.class,       w -> handleHoldSound((HoldSoundBroadcast) w.packet))
                 .on(BumpSoundBroadcast.class,       w -> handleBumpSound((BumpSoundBroadcast) w.packet))
+                .on(AbilityActivateBroadcast.class, w -> handleAbilityActivate((AbilityActivateBroadcast) w.packet))
                 .on(PieceSwapBroadcast.class,       w -> handlePieceSwap((PieceSwapBroadcast) w.packet));
     }
 
@@ -109,6 +113,7 @@ public class GameScreen extends MenuScreen {
         drawMode = (b.mode != GameMode.NONE) ? GameDrawMode.SINGLE_BOARD : GameDrawMode.NONE;
 
         isLocalSlot = new boolean[Math.max(1, b.totalPlayers & 0xFF)];
+        abilityWasReady = new boolean[isLocalSlot.length];
         LocalPlayerRoster roster = app.computeLocalPlayerRoster();
         byte[] ids = b.localPlayerIds != null ? b.localPlayerIds : new byte[0];
         int n = Math.min(ids.length, roster.size());
@@ -502,7 +507,10 @@ public class GameScreen extends MenuScreen {
         }
         if (p.scoreMode  != null) latestScoreMode  = p.scoreMode;
         if (p.puzzleMode != null) latestPuzzleMode = p.puzzleMode;
-        if (p.characterMode != null) latestCharacterMode = p.characterMode;
+        if (p.characterMode != null) {
+            latestCharacterMode = p.characterMode;
+            updateAbilityAvailableSounds(p.characterMode);
+        }
 
         game.setGravity(p.gravity);
         applyCharacterGravityPrediction(p);
@@ -596,6 +604,7 @@ public class GameScreen extends MenuScreen {
                         || e.spinType == HardDropEffect.SPIN_ALL_SPIN) {
                     AudioManager.getInstance().playSpinClearSound();
                 }
+                if (e.allClear) AudioManager.getInstance().playAllClearSound();
             }
             ParticleFactory.expandHardDropFlash(e.pieceType, e.doubledX, e.doubledY, e.pieceRotation,
                     particles, particleRng);
@@ -614,6 +623,32 @@ public class GameScreen extends MenuScreen {
             AudioManager.getInstance().playHoldSound(isLocalSlot(p.playerId), true);
         } else if (isLocalSlot(p.playerId)) {
             AudioManager.getInstance().playHoldSound(true, false);
+        }
+    }
+
+    private void handleAbilityActivate(AbilityActivateBroadcast p) {
+        AudioManager.getInstance().playAbilityActivateSound();
+    }
+
+    /**
+     * Plays {@code sfx_abilityavailable} once per local seat when that seat's meter first
+     * reaches full (rising edge). Remote seats are ignored.
+     */
+    private void updateAbilityAvailableSounds(CharacterModeData mode) {
+        if (mode.meterFill == null || mode.meterMax == null) return;
+        int n = Math.min(abilityWasReady.length,
+                Math.min(mode.meterFill.length, mode.meterMax.length));
+        for (int i = 0; i < n; i++) {
+            if (!isLocalSlot(i)) {
+                abilityWasReady[i] = false;
+                continue;
+            }
+            float max = mode.meterMax[i];
+            boolean ready = max > 0f && mode.meterFill[i] >= max;
+            if (ready && !abilityWasReady[i]) {
+                AudioManager.getInstance().playAbilityAvailableSound();
+            }
+            abilityWasReady[i] = ready;
         }
     }
 

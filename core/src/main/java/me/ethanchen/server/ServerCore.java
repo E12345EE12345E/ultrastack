@@ -113,6 +113,7 @@ public class ServerCore implements PacketSender, Runnable {
         Consumer<ServerPacketWrapper> forward = w -> forwardToRoom(w, sessionFor(w));
         d.on(TextMessageRequest.class, forward);
         d.on(StartGameRequest.class, forward);
+        d.on(LobbySettingsRequest.class, forward);
         d.on(MoveListRequest.class, forward);
         d.on(LocalPlayerCountRequest.class, forward);
         d.on(AbilityRequest.class, forward);

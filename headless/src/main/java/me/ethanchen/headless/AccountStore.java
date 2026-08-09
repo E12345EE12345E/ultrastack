@@ -122,13 +122,14 @@ public class AccountStore implements XpAwarder, ProfileStore {
         return null;
     }
 
-    /** Adds {@code xp} to the account's total, persisting the update immediately. No-op if the account is unknown. */
+    /** Adds {@code xp} to the account's total and mirrors the same amount into spendable profile tokens. Persists immediately. No-op if the account is unknown. */
     @Override
     public synchronized void awardXp(String accountUuid, long xp) {
         if (accountUuid == null || xp == 0) return;
         Account acct = byUuid.get(accountUuid);
         if (acct == null) return;
-        long newXp = acct.xp + xp;
+        long oldXp = acct.xp;
+        long newXp = oldXp + xp;
         String sql = "UPDATE accounts SET xp = ? WHERE uuid = ?";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setLong(1, newXp);
@@ -137,7 +138,15 @@ public class AccountStore implements XpAwarder, ProfileStore {
             acct.xp = newXp;
         } catch (SQLException e) {
             System.err.println("[AccountStore] Failed to award XP: " + e.getMessage());
+            return;
         }
+
+        // Tokens are the spendable mirror of XP gains (1:1). Seed legacy profiles from prior
+        // lifetime XP first so a skipped startup migration cannot leave tokens null.
+        PlayerProfile profile = loadProfile(accountUuid);
+        profile.ensureTokensFromXp(oldXp);
+        profile.addTokens(xp);
+        saveProfile(accountUuid, profile);
     }
 
     /**
@@ -176,6 +185,18 @@ public class AccountStore implements XpAwarder, ProfileStore {
         }
     }
 
+    /** True when {@code extra_json} has no usable {@link PlayerProfile} (blank, null profile, or unparseable). */
+    private static boolean isMissingPersistedProfile(Account acct) {
+        if (acct.extraJson == null || acct.extraJson.isEmpty()) return true;
+        try {
+            Json json = new Json();
+            AccountExtra extra = json.fromJson(AccountExtra.class, acct.extraJson);
+            return extra == null || extra.profile == null;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
     /** Persists {@code profile} into {@code extra_json}, immediately committing to disk. */
     @Override
     public synchronized void saveProfile(String accountUuid, PlayerProfile profile) {
@@ -205,17 +226,27 @@ public class AccountStore implements XpAwarder, ProfileStore {
 
     /**
      * Startup sweep over every persisted account profile. Kept as a hook for future one-shot
-     * migrations (e.g. unlocking a newly shipped starter character). Currently a no-op — the
-     * Noob unlock already ran successfully and is disabled below.
+     * migrations (e.g. unlocking a newly shipped starter character).
      */
     private void migrateProfiles() {
         int updated = 0;
         for (Account acct : byUuid.values()) {
+            boolean missingProfile = isMissingPersistedProfile(acct);
             PlayerProfile profile = readProfileFromExtraJson(acct);
             boolean changed = false;
 
-            // Disabled: The Noob unlock migration (already applied to existing accounts).
-            // if (profile.ensureNoobUnlocked()) changed = true;
+            // Very legacy rows with no character JSON: persist a real profile. Clear the
+            // synthesized tokens=0 so ensureTokensFromXp can seed from lifetime xp.
+            if (missingProfile) {
+                profile.tokens = null;
+                changed = true;
+            }
+
+            // TODO: remove after a future update once all accounts have starter unlocks persisted.
+            if (profile.ensureStarterCharactersUnlocked()) changed = true;
+
+            // TODO: remove after a future update once all accounts have tokens in extra_json.
+            if (profile.ensureTokensFromXp(acct.xp)) changed = true;
 
             if (!changed) continue;
             profileCache.put(acct.uuid, profile);

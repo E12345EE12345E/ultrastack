@@ -14,6 +14,7 @@ import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.AbilityRequest;
+import me.ethanchen.network.packets.c2s.LobbySettingsRequest;
 import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
@@ -111,6 +112,9 @@ public class GameRoom implements Runnable, GameRoomContext {
     private final XpAwarder xpAwarder;
     private final ProfileStore profileStore;
 
+    /** Pending lobby gamemode chosen by the host; applied at {@link #startGame}. */
+    private GameMode pendingGamemode = GameMode.MULTIPLAYER_SCORE;
+
     private volatile ServerGame serverGame;
     private volatile boolean running;
     private volatile boolean roomEmpty;
@@ -149,6 +153,7 @@ public class GameRoom implements Runnable, GameRoomContext {
         return new PacketDispatcher<ServerPacketWrapper>()
                 .on(TextMessageRequest.class, this::handleTextMessage)
                 .on(StartGameRequest.class, this::handleStartGameRequest)
+                .on(LobbySettingsRequest.class, this::handleLobbySettingsRequest)
                 .on(MoveListRequest.class, this::handleMoveListRequest)
                 .on(LocalPlayerCountRequest.class, this::handleLocalPlayerCountRequest)
                 .on(AbilityRequest.class, this::handleAbilityRequest);
@@ -173,6 +178,7 @@ public class GameRoom implements Runnable, GameRoomContext {
         boolean inProgress = serverGame != null && serverGame.isInProgress();
         addMemberUnconditional(connId, name, uuid, requestedLocalPlayers);
         RoomMember m = connToMember.get(connId);
+        sendLobbySettings(connId);
         if (inProgress) {
             sendSpectatorStartGame(connId);
         }
@@ -388,7 +394,30 @@ public class GameRoom implements Runnable, GameRoomContext {
         if (w.connectionID != hostConnId) return; // only host can start
         if (serverGame != null && serverGame.isInProgress()) return;
         StartGameRequest req = (StartGameRequest) w.packet;
-        startGame(req.gamemode);
+        if (req.gamemode != null && req.gamemode != GameMode.NONE) {
+            pendingGamemode = req.gamemode;
+        }
+        startGame(pendingGamemode);
+    }
+
+    private void handleLobbySettingsRequest(ServerPacketWrapper w) {
+        if (w.connectionID != hostConnId) return; // only host can change lobby settings
+        LobbySettingsRequest req = (LobbySettingsRequest) w.packet;
+        if (req.gamemode == null || req.gamemode == GameMode.NONE) return;
+        pendingGamemode = req.gamemode;
+        broadcastLobbySettings();
+    }
+
+    private void broadcastLobbySettings() {
+        LobbySettingsBroadcast b = new LobbySettingsBroadcast();
+        b.gamemode = pendingGamemode;
+        broadcastMembersTCP(b);
+    }
+
+    private void sendLobbySettings(int connId) {
+        LobbySettingsBroadcast b = new LobbySettingsBroadcast();
+        b.gamemode = pendingGamemode;
+        sender.sendTCP(connId, b);
     }
 
     private void handleMoveListRequest(ServerPacketWrapper w) {
@@ -578,6 +607,13 @@ public class GameRoom implements Runnable, GameRoomContext {
         if (holdSounds != null) {
             for (HoldSoundBroadcast hsb : holdSounds) {
                 broadcastMembersTCP(hsb);
+            }
+        }
+        ArrayList<AbilityActivateBroadcast> abilityActivateSounds =
+                serverGame.getAndClearPendingAbilityActivateSounds();
+        if (abilityActivateSounds != null) {
+            for (AbilityActivateBroadcast aab : abilityActivateSounds) {
+                broadcastMembersTCP(aab);
             }
         }
         ArrayList<PieceSwapBroadcast> pieceSwaps = serverGame.getAndClearPendingPieceSwaps();

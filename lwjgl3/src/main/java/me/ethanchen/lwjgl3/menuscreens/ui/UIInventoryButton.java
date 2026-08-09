@@ -12,6 +12,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 
 import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
+import me.ethanchen.lwjgl3.music.AudioManager;
 
 /**
  * Icon tile built for character portraits, equip/fusion reference slots, and inventory grids.
@@ -123,7 +124,11 @@ public class UIInventoryButton extends UIElement {
 
         float mouseX = Gdx.input.getX();
         float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();
+        boolean wasHovered = hovered;
         hovered = mouseX >= pxX && mouseX <= pxX + pxW && mouseY >= pxY && mouseY <= pxY + pxH;
+        if (hovered && !wasHovered) {
+            AudioManager.getInstance().playMenuSelectSound();
+        }
 
         shapes.begin(ShapeRenderer.ShapeType.Filled);
         shapes.setColor(0.12f, 0.12f, 0.15f, 1f);
@@ -243,7 +248,10 @@ public class UIInventoryButton extends UIElement {
         // of an aspect-locked canvas), so hover would light up but the click would miss.
         if (!containsScreenPoint(screenX, screenY)) return;
         if (button == Input.Buttons.RIGHT) {
-            if (secondaryAction != null) secondaryAction.run();
+            if (secondaryAction != null) {
+                AudioManager.getInstance().playMenuPressSound();
+                secondaryAction.run();
+            }
             return;
         }
         if (button != Input.Buttons.LEFT) return;
@@ -252,10 +260,12 @@ public class UIInventoryButton extends UIElement {
         boolean isDouble = lastLeftClickMs > 0 && (now - lastLeftClickMs) <= DOUBLE_CLICK_MS;
         lastLeftClickMs = now;
         if (isDouble && secondaryAction != null) {
+            AudioManager.getInstance().playMenuPressSound();
             secondaryAction.run();
             lastLeftClickMs = 0; // require a fresh pair for the next double-click
             return;
         }
+        AudioManager.getInstance().playMenuPressSound();
         onClick();
     }
 

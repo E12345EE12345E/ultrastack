@@ -57,6 +57,7 @@ import me.ethanchen.network.packets.other.ConnectFailedPacket;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.other.DisconnectPacket;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
+import me.ethanchen.network.packets.s2c.LobbySettingsBroadcast;
 import me.ethanchen.network.packets.s2c.ProfileSyncBroadcast;
 import me.ethanchen.network.packets.s2c.ArtifactGrantBroadcast;
 import me.ethanchen.game.progression.Artifact;
@@ -191,6 +192,13 @@ public class ClientApp extends ApplicationAdapter {
 
             if (wrapper.packet instanceof HostChangedBroadcast) {
                 roomHost = ((HostChangedBroadcast) wrapper.packet).youAreHost;
+            }
+
+            if (wrapper.packet instanceof LobbySettingsBroadcast) {
+                LobbySettingsBroadcast p = (LobbySettingsBroadcast) wrapper.packet;
+                if (p.gamemode != null) {
+                    lobbySettings.gamemode = p.gamemode;
+                }
             }
 
             if (wrapper.packet instanceof ProfileSyncBroadcast) {

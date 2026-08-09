@@ -8,8 +8,9 @@ import me.ethanchen.game.board.Piece;
 
 /**
  * A player's persisted character-and-leveling state: which characters are unlocked, which
- * character/two artifacts are currently equipped, and the full artifact inventory
- * (implementation.md, Part 1 and Part 4). Stored server-side and synced to the owning client.
+ * character/two artifacts are currently equipped, the full artifact inventory, and spendable
+ * tokens (implementation.md, Part 1 and Part 4). Stored server-side and synced to the owning
+ * client.
  */
 public class PlayerProfile {
     /** Bit {@code i} set means character id {@code i} is unlocked. */
@@ -18,6 +19,12 @@ public class PlayerProfile {
     /** Equipped artifact ids, length always 2; a null entry means that slot is empty. */
     public String[] equippedArtifactIds;
     public List<Artifact> inventory;
+    /**
+     * Spendable currency mirrored from XP gains (1:1). Lifetime XP stays in the account column
+     * and only increases; tokens can be spent by later mechanics. {@code null} means a legacy
+     * profile that has not received the tokens field yet (see {@link #ensureTokensFromXp(long)}).
+     */
+    public Long tokens;
 
     /** No-arg constructor required for libGDX Json and Kryo deserialization. */
     public PlayerProfile() {
@@ -35,14 +42,44 @@ public class PlayerProfile {
     }
 
     /**
-     * Unlocks The Noob (id 2) if missing. Used to migrate profiles created before that character
-     * existed. Returns {@code true} when bits changed and the profile should be re-persisted.
+     * Unlocks the three starter characters (3-Mino, Wizard, The Noob) if any are missing.
+     * Used by account migration for legacy profiles, including rows with no character JSON.
+     * Returns {@code true} when bits changed and the profile should be re-persisted.
+     *
+     * <p>TODO: remove after a future update once all accounts have starter unlocks persisted.
      */
-    public boolean ensureNoobUnlocked() {
-        int noobId = CharacterDef.NOOB.id;
-        if (isCharacterUnlocked(noobId)) return false;
-        unlockCharacter(noobId);
+    public boolean ensureStarterCharactersUnlocked() {
+        boolean changed = false;
+        int[] starters = {
+                CharacterDef.THREE_MINO.id,
+                CharacterDef.WIZARD.id,
+                CharacterDef.NOOB.id
+        };
+        for (int id : starters) {
+            if (isCharacterUnlocked(id)) continue;
+            unlockCharacter(id);
+            changed = true;
+        }
+        return changed;
+    }
+
+    /**
+     * One-shot migration for profiles serialized before tokens existed: seeds
+     * {@link #tokens} to the account's lifetime {@code xp}. Returns {@code true} when the
+     * profile changed and should be re-persisted.
+     *
+     * <p>TODO: remove after a future update once all accounts have been migrated.
+     */
+    public boolean ensureTokensFromXp(long xp) {
+        if (tokens != null) return false;
+        tokens = Math.max(0L, xp);
         return true;
+    }
+
+    /** Adds {@code amount} to {@link #tokens}, treating a still-null balance as zero. */
+    public void addTokens(long amount) {
+        if (amount == 0) return;
+        tokens = (tokens == null ? 0L : tokens) + amount;
     }
 
     public Artifact findArtifact(String artifactId) {
@@ -69,6 +106,7 @@ public class PlayerProfile {
         p.unlockCharacter(1);
         p.unlockCharacter(2);
         p.selectedCharacterId = 2;
+        p.tokens = 0L;
         return p;
     }
 

@@ -6,6 +6,7 @@ import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
+import me.ethanchen.network.packets.c2s.LobbySettingsRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
@@ -64,6 +65,10 @@ public class MultiplayerLobby extends MenuScreen {
         elements.add(chatInput);
         if (isHost) {
             addHostButtons();
+            // Sync host's local pending settings into the room so peers (and late joiners) match.
+            LobbySettingsRequest req = new LobbySettingsRequest();
+            req.gamemode = app.getLobbySettings().gamemode;
+            app.sendTCP(req);
         }
 
         sidebar = new LocalPlayerSidebar(app, elements, app::sendLocalPlayerCount);
@@ -91,6 +96,9 @@ public class MultiplayerLobby extends MenuScreen {
         app.setRoomHost(p.youAreHost);
         if (p.youAreHost) {
             addHostButtons();
+            LobbySettingsRequest req = new LobbySettingsRequest();
+            req.gamemode = app.getLobbySettings().gamemode;
+            app.sendTCP(req);
         }
     }
 

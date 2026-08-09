@@ -14,6 +14,7 @@ import me.ethanchen.game.board.PieceQueue;
 import me.ethanchen.game.board.SpinType;
 import me.ethanchen.game.progression.CharacterDef;
 import me.ethanchen.network.dto.HardDropEffect;
+import me.ethanchen.network.packets.s2c.AbilityActivateBroadcast;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
@@ -404,6 +405,10 @@ public class ServerGame {
         return effects.getAndClearPendingPieceSwaps();
     }
 
+    public ArrayList<AbilityActivateBroadcast> getAndClearPendingAbilityActivateSounds() {
+        return effects.getAndClearPendingAbilityActivateSounds();
+    }
+
     public boolean computeHoldAvailable(int playerId) {
         if (game == null || game.getBoards().isEmpty()) return true;
         return blocked.computeHoldAvailable(playerId, game.getBoards().get(0));
@@ -462,14 +467,17 @@ public class ServerGame {
         CharacterDef character = loadouts[playerId].character;
         if (character == null) return false;
 
+        boolean activated;
         switch (character.ability) {
             case FILL_SKYLINE_GAPS:
                 if (!meterController.tryConsume(playerId)) return false;
-                return activateFillSkylineGaps();
+                activated = activateFillSkylineGaps();
+                break;
             case FORCE_I:
                 if (!canSwapActivePiece(playerId)) return false;
                 if (!meterController.tryConsume(playerId)) return false;
-                return swapActivePiece(playerId, Piece.I);
+                activated = swapActivePiece(playerId, Piece.I);
+                break;
             case DISABLE_AND_RAMP_GRAVITY:
                 if (!meterController.tryConsume(playerId)) return false;
                 noobGravity.activate();
@@ -477,10 +485,13 @@ public class ServerGame {
                     game.setGlobalGravitySpeedFactor(noobGravity.gravitySpeedFactor());
                 }
                 meterController.setExternalPassiveFillMultiplier(noobGravity.passiveMeterFillMultiplier());
-                return true;
+                activated = true;
+                break;
             default:
                 return false;
         }
+        if (activated) effects.addAbilityActivateSound((byte) playerId);
+        return activated;
     }
 
     /** True when the game is running and {@code playerId} is a valid seated slot. */

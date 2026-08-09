@@ -22,6 +22,7 @@ public final class LanProfileFactory {
             profile.unlockCharacter(i);
         }
         profile.selectedCharacterId = CharacterDef.NOOB.id;
+        profile.tokens = 0L;
 
         Random rng = new Random();
         Artifact a = ArtifactRoller.roll(randomTetromino(rng), 3, 60f, rng);

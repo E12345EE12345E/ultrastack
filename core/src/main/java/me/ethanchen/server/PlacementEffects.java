@@ -5,6 +5,7 @@ import java.util.Arrays;
 
 import me.ethanchen.game.board.LineClearResult;
 import me.ethanchen.network.dto.HardDropEffect;
+import me.ethanchen.network.packets.s2c.AbilityActivateBroadcast;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
 import me.ethanchen.network.packets.s2c.HoldSoundBroadcast;
 import me.ethanchen.network.packets.s2c.NetParticle;
@@ -24,6 +25,7 @@ class PlacementEffects {
     final ArrayList<HoldSoundBroadcast> pendingHoldSounds = new ArrayList<>();
     final ArrayList<BumpSoundBroadcast> pendingBumpSounds = new ArrayList<>();
     final ArrayList<PieceSwapBroadcast> pendingPieceSwaps = new ArrayList<>();
+    final ArrayList<AbilityActivateBroadcast> pendingAbilityActivateSounds = new ArrayList<>();
 
     // -------------------------------------------------------------------------
     // Queueing
@@ -63,6 +65,7 @@ class PlacementEffects {
 
         hde.combo = (lines > 0) ? (byte) priorCombo : (byte) -1;
         hde.lines = (byte) lines;
+        hde.allClear = result.allClear;
         pendingHardDropEffects.add(hde);
     }
 
@@ -131,6 +134,13 @@ class PlacementEffects {
         pendingPieceSwaps.add(psb);
     }
 
+    /** Queues an {@link AbilityActivateBroadcast}. */
+    void addAbilityActivateSound(byte playerId) {
+        AbilityActivateBroadcast aab = new AbilityActivateBroadcast();
+        aab.playerId = playerId;
+        pendingAbilityActivateSounds.add(aab);
+    }
+
     /**
      * Queues a {@link ParticleSpawner#TYPE_HARD_DROP_CELLS} spawner that flashes every filled
      * cell from 3-Mino's skyline-fill ability. No-op when {@code cells} is null/empty.
@@ -196,6 +206,13 @@ class PlacementEffects {
         if (pendingPieceSwaps.isEmpty()) return null;
         ArrayList<PieceSwapBroadcast> copy = new ArrayList<>(pendingPieceSwaps);
         pendingPieceSwaps.clear();
+        return copy;
+    }
+
+    ArrayList<AbilityActivateBroadcast> getAndClearPendingAbilityActivateSounds() {
+        if (pendingAbilityActivateSounds.isEmpty()) return null;
+        ArrayList<AbilityActivateBroadcast> copy = new ArrayList<>(pendingAbilityActivateSounds);
+        pendingAbilityActivateSounds.clear();
         return copy;
     }
 }

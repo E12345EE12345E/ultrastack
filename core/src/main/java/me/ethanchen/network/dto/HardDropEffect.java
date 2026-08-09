@@ -57,4 +57,7 @@ public class HardDropEffect {
      *    1 = second consecutive, etc.
      */
     public byte combo;
+
+    /** True when this placement emptied the board (All Clear / Perfect Clear). */
+    public boolean allClear;
 }

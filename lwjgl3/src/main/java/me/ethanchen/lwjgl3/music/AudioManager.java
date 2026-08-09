@@ -21,10 +21,15 @@ public class AudioManager {
     private static final float PLACE_OTHER_BASE = 0.5f;
     private static final float CLEAR_TETRIS_BASE = 1.0f;
     private static final float SPIN_CLEAR_BASE  = 1.0f;
+    private static final float ALL_CLEAR_BASE   = 1.0f;
+    private static final float ABILITY_ACTIVATE_BASE = 1.0f;
+    private static final float ABILITY_AVAILABLE_BASE = 1.0f;
     private static final float DIE_BASE         = 1.0f;
     private static final float HOLD_BASE        = 1.0f;
     private static final float BUMP_SELF_BASE   = 1.0f;
     private static final float BUMP_OTHER_BASE  = 0.5f;
+    private static final float MENU_SELECT_BASE = 0.0f;
+    private static final float MENU_PRESS_BASE  = 0.5f;
     private static final float MUSIC_BASE       = 0.5f;
 
     // -------------------------------------------------------------------------
@@ -37,9 +42,14 @@ public class AudioManager {
     private Sound[] clearSound;
     private Sound clearTetrisSound;
     private Sound spinClearSound;
+    private Sound allClearSound;
+    private Sound abilityActivateSound;
+    private Sound abilityAvailableSound;
     private Sound dieSound;
     private Sound[] holdSound;
     private Sound bumpSound;
+    private Sound menuSelectSound;
+    private Sound menuPressSound;
 
     // -------------------------------------------------------------------------
     // Music registry
@@ -72,6 +82,9 @@ public class AudioManager {
         };
         clearTetrisSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_cleartetris.wav"));
         spinClearSound   = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_spinclear.wav"));
+        allClearSound    = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_allclear.wav"));
+        abilityActivateSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_abilityactivate.wav"));
+        abilityAvailableSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_abilityavailable.wav"));
         dieSound         = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_die.wav"));
         holdSound   = new Sound[]{
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_extra.wav")),
@@ -79,6 +92,8 @@ public class AudioManager {
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_holdunable.wav")),
         };
         bumpSound   = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_bump.wav"));
+        menuSelectSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_menuselect.wav"));
+        menuPressSound  = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_menuselect.wav"));
     }
 
     public static AudioManager getInstance() {
@@ -165,6 +180,18 @@ public class AudioManager {
         spinClearSound.play(sfxVol(SPIN_CLEAR_BASE));
     }
 
+    public void playAllClearSound() {
+        allClearSound.play(sfxVol(ALL_CLEAR_BASE));
+    }
+
+    public void playAbilityActivateSound() {
+        abilityActivateSound.play(sfxVol(ABILITY_ACTIVATE_BASE));
+    }
+
+    public void playAbilityAvailableSound() {
+        abilityAvailableSound.play(sfxVol(ABILITY_AVAILABLE_BASE));
+    }
+
     public void playDieSound() {
         dieSound.play(sfxVol(DIE_BASE));
     }
@@ -179,6 +206,14 @@ public class AudioManager {
 
     public void playBumpSound(boolean self) {
         bumpSound.play(sfxVol(self ? BUMP_SELF_BASE : BUMP_OTHER_BASE));
+    }
+
+    public void playMenuSelectSound() {
+        menuSelectSound.play(sfxVol(MENU_SELECT_BASE));
+    }
+
+    public void playMenuPressSound() {
+        menuPressSound.play(sfxVol(MENU_PRESS_BASE));
     }
 
     // -------------------------------------------------------------------------
@@ -226,9 +261,14 @@ public class AudioManager {
         for (Sound s : clearSound) s.dispose();
         clearTetrisSound.dispose();
         spinClearSound.dispose();
+        allClearSound.dispose();
+        abilityActivateSound.dispose();
+        abilityAvailableSound.dispose();
         dieSound.dispose();
         for (Sound s : holdSound) s.dispose();
         bumpSound.dispose();
+        menuSelectSound.dispose();
+        menuPressSound.dispose();
         for (MusicContainer c : registeredMusic) {
             c.dispose();
         }

@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
+import me.ethanchen.lwjgl3.music.AudioManager;
 
 public class UIButton extends UIElement {
     public String   text;
@@ -76,9 +77,13 @@ public class UIButton extends UIElement {
 
         float mouseX = Gdx.input.getX();
         float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();
+        boolean wasHovered = hovered;
         hovered = !suppressHover()
                 && mouseX >= pxX && mouseX <= pxX + pxWidth
                 && mouseY >= pxY && mouseY <= pxY + pxHeight;
+        if (hovered && !wasHovered) {
+            AudioManager.getInstance().playMenuSelectSound();
+        }
 
         if (glow > 0f) glow = Math.max(0f, glow - 0.05f);
 
@@ -125,7 +130,10 @@ public class UIButton extends UIElement {
 
     @Override
     public void handleClick(int screenX, int screenY) {
-        if (isClicked(screenX, screenY)) onClick();
+        if (isClicked(screenX, screenY)) {
+            AudioManager.getInstance().playMenuPressSound();
+            onClick();
+        }
     }
 
     @Override
