@@ -109,6 +109,22 @@ class PlacementEffects {
         }
     }
 
+    /**
+     * Queues a {@link NetParticle#KIND_FLASH} at each cell a falling column just landed on.
+     */
+    void queueFallingLandingFlash(LineClearResult result) {
+        if (result.placedCells == null) return;
+        for (int[] cell : result.placedCells) {
+            NetParticle np = new NetParticle();
+            np.boardIndex = 0;
+            np.kind = NetParticle.KIND_FLASH;
+            np.tileType = result.pieceType;
+            np.x = cell[0];
+            np.y = cell[1];
+            pendingParticles.add(np);
+        }
+    }
+
     /** Queues a {@link HoldSoundBroadcast}. */
     void addHoldSound(byte playerId, boolean success) {
         HoldSoundBroadcast hsb = new HoldSoundBroadcast();

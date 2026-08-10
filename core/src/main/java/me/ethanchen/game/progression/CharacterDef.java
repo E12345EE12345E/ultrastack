@@ -88,7 +88,7 @@ public final class CharacterDef {
             1, "Wizard",
             "Replaces current piece with an I.",
             "Queue {J, L, S, T, Z}. I clears score 50% more and fills other meters 4x.",
-            2.0f, 20f, 2000f,
+            2.0f, 2000f, 2000f,
             CharacterAbility.FORCE_I, PieceQueue.BagTypes.BAG_WIZARD,
             new byte[]{Piece.I}, 50f,
             4.0f, 0.0f, 1.0f);

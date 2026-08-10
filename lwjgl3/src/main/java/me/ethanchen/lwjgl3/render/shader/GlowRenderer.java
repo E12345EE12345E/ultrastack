@@ -96,7 +96,10 @@ public class GlowRenderer implements ShaderRenderer {
             float strength = strengthAt(glowStrengths, i);
             if (piece.tiles == null || piece.location == null || strength <= 0f) continue;
             float r, g, b;
-            if (strength > 1f) {
+            if (piece.fallTrigger) {
+                // Fall-trigger pieces are drawn white; match the glow.
+                r = g = b = strength > 1f ? 1f : strength;
+            } else if (strength > 1f) {
                 float whiteBlend = Math.min(strength - 1f, 1f);
                 Color c = PieceTints.forGlow(piece.type);
                 r = c.r + (1f - c.r) * whiteBlend;

@@ -7,4 +7,5 @@ public class NetBoardLight {
     public NetPiece[] pieces;
     public byte heldPieceType;
     public boolean[] playerHoldUsed;
+    public NetFallingColumn[] falling;
 }

@@ -12,6 +12,7 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import me.ethanchen.game.board.Board;
+import me.ethanchen.game.board.FallingColumn;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.Tile;
 import me.ethanchen.lwjgl3.render.shader.GlowRenderer;
@@ -45,6 +46,9 @@ public class BoardRenderer {
     private static final Color SHADOW_GRAY   = new Color(0.6f, 0.6f, 0.6f, 0.5f);
     private static final Color BLOCKED_GRAY  = new Color(PieceTints.GRAYSCALE_VALUE, PieceTints.GRAYSCALE_VALUE, PieceTints.GRAYSCALE_VALUE, 1f);
     private static final Color BLOCKED_WHITE = new Color(1f, 1f, 1f, 1f);
+    /** Fall-trigger / piece-trigger tiles: override piece HSV with solid white. */
+    private static final Color FALL_TRIGGER_WHITE = new Color(1f, 1f, 1f, 1f);
+    private static final Color FALL_TRIGGER_BG    = new Color(0.8f, 0.8f, 0.8f, 1f);
 
     private final GlowRenderer glowRenderer;
 
@@ -140,6 +144,7 @@ public class BoardRenderer {
         if (drawActivePieces) drawGlow(board, originX, originY, tileSize, glowStrengths);
         sprites.begin();
         drawLockedTiles(board, originX, originY, tileSize, sprites);
+        drawFallingColumns(board, originX, originY, tileSize, sprites);
         if (drawActivePieces) {
             drawShadowPieces(board, shadows, originX, originY, tileSize, sprites,
                     isLocalPlayer, otherPlayerGrayscaleAmt);
@@ -371,12 +376,17 @@ public class BoardRenderer {
             boolean local = isLocalPlayer != null && i < isLocalPlayer.length && isLocalPlayer[i];
             boolean otherPlayer = isLocalPlayer != null && !local;
             if (shadow.wouldPlace) {
-                // When isLocalPlayer is null, treat as "no grayscale" (legacy / spectator).
-                float colorAmt = otherPlayer ? 1f - grayscaleAmt : 1f;
-                Color c = PieceTints.blendGrayscale(piece.type, colorAmt, false);
                 // Other players' shadows are more transparent; local stays more opaque.
                 float alpha = otherPlayer ? 0.25f : 0.75f;
-                baseColor = new Color(c.r, c.g, c.b, alpha);
+                if (piece.fallTrigger) {
+                    baseColor = new Color(FALL_TRIGGER_WHITE.r, FALL_TRIGGER_WHITE.g,
+                            FALL_TRIGGER_WHITE.b, alpha);
+                } else {
+                    // When isLocalPlayer is null, treat as "no grayscale" (legacy / spectator).
+                    float colorAmt = otherPlayer ? 1f - grayscaleAmt : 1f;
+                    Color c = PieceTints.blendGrayscale(piece.type, colorAmt, false);
+                    baseColor = new Color(c.r, c.g, c.b, alpha);
+                }
             } else {
                 baseColor = SHADOW_GRAY;
             }
@@ -407,6 +417,25 @@ public class BoardRenderer {
         }
     }
 
+    /** Draws airborne falling columns at their interpolated sub-tile Y positions. */
+    private void drawFallingColumns(Board board, float originX, float originY, float tileSize,
+                                    SpriteBatch sprites) {
+        for (FallingColumn col : board.getFallingColumns()) {
+            if (col.types == null) continue;
+            for (int i = 0; i < col.types.length; i++) {
+                if (col.types[i] == Tile.EMPTY) continue;
+                float sx = originX + col.x * tileSize;
+                float sy = originY + (col.bottomY + i) * tileSize;
+                if (col.pieceTrigger) {
+                    drawFallTriggerTile(sprites, sx, sy, tileSize, Tile.SINGLE_TILE);
+                } else {
+                    drawTileBackground(sprites, sx, sy, tileSize, col.types[i]);
+                    drawTile(sprites, sx, sy, tileSize, col.types[i], Tile.SINGLE_TILE);
+                }
+            }
+        }
+    }
+
     private void drawActivePiecesWithBlocked(Board board, float originX, float originY, float tileSize,
                                              SpriteBatch sprites, float blockedWhiteAmt) {
         for (Piece piece : board.getActivePieces()) {
@@ -426,12 +455,23 @@ public class BoardRenderer {
                     sprites.draw(tileBackground, sx, sy, tileSize, tileSize);
                     sprites.setColor(r, g, bv, 1f);
                     sprites.draw(tileRegions[connection & 0xF], sx, sy, tileSize, tileSize);
+                } else if (piece.fallTrigger) {
+                    drawFallTriggerTile(sprites, sx, sy, tileSize, connection);
                 } else {
                     drawTileBackground(sprites, sx, sy, tileSize, piece.type);
                     drawTile(sprites, sx, sy, tileSize, piece.type, connection);
                 }
             }
         }
+    }
+
+    /** White override for fall-trigger active minoes and piece-trigger falling minoes. */
+    private void drawFallTriggerTile(SpriteBatch sprites, float sx, float sy, float tileSize,
+                                     byte connectionstate) {
+        sprites.setColor(FALL_TRIGGER_BG);
+        sprites.draw(tileBackground, sx, sy, tileSize, tileSize);
+        sprites.setColor(FALL_TRIGGER_WHITE);
+        sprites.draw(tileRegions[connectionstate & 0xF], sx, sy, tileSize, tileSize);
     }
 
     private void drawTile(SpriteBatch sprites, float sx, float sy, float tileSize,

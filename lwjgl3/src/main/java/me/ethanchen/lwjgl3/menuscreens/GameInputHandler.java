@@ -174,7 +174,7 @@ class GameInputHandler {
     private boolean handleSoftDropDown(Board board, boolean holdAvailable) {
         softDropHeld  = true;
         softDropTimer = 0;
-        if (game.isStarted() && game.getGravity() > SOFT_DROP_INTERVAL_MS) {
+        if (game.isStarted() && isSoftDropFasterThanGravity()) {
             if (board.getActivePieces().size() > playerId) {
                 predictor.queueMove(MoveType.SOFT_DROP, board, game, holdAvailable);
                 game.resetGravityTimer(playerId);
@@ -207,7 +207,7 @@ class GameInputHandler {
 
     private void tickSoftDrop(int deltaMs, Board board, boolean holdAvailable) {
         if (!softDropHeld || !game.isStarted()) return;
-        if (game.getGravity() <= SOFT_DROP_INTERVAL_MS) return;
+        if (!isSoftDropFasterThanGravity()) return;
         if (board.getActivePieces().size() <= playerId) return;
 
         softDropTimer += deltaMs;
@@ -221,6 +221,11 @@ class GameInputHandler {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /** Soft drop applies only when felt gravity (after speed modifiers) is slower than soft-drop rate. */
+    private boolean isSoftDropFasterThanGravity() {
+        return game.getEffectiveGravityMs(playerId) > SOFT_DROP_INTERVAL_MS;
+    }
 
     private boolean canAct(Board board) {
         return game.isStarted() && board.getActivePieces().size() > playerId;

@@ -76,6 +76,7 @@ public class GameHandler {
         if (mode != GameMode.NONE) {
             doGravity(deltaTime);
             doLockTimers(deltaTime);
+            doFallingBlocks(deltaTime);
             doMovementTimers(deltaTime);
             updateJustSpawnedFlags();
         }
@@ -127,6 +128,12 @@ public class GameHandler {
             pendingLockResults.addAll(b.updateLockTimers(deltaTime));
     }
 
+    private void doFallingBlocks(int deltaTime) {
+        if (!started) return;
+        for (Board b : boards)
+            pendingLockResults.addAll(b.updateFallingBlocks(deltaTime));
+    }
+
     private void doMovementTimers(int deltaTime) {
         if (!started) return;
         for (Board b : boards)
@@ -156,8 +163,8 @@ public class GameHandler {
 
     /**
      * Updates the global b2b, combo and previousComboPlayerId counters based on the
-     * result of a hard drop.  Must be called AFTER scoring so that pre-clear values
-     * can be read during score calculation.
+     * result of a hard drop or falling-column landing.  Must be called AFTER scoring so
+     * that pre-clear values can be read during score calculation.
      * <p>
      * Rules:
      * <ul>

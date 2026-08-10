@@ -28,6 +28,7 @@ final class BoardCollision {
             int ix = (int) lx, iy = (int) ly;
             if (b.board[iy][ix] == null || b.board[iy][ix].get() != 0) return false;
             if (!b.allowedTiles[iy][ix]) return false;
+            if (b.isFallingOccupied(ix, iy)) return false;
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;
                 Piece other = b.activePieces.get(j);
@@ -54,6 +55,7 @@ final class BoardCollision {
             int ix = (int) lx, iy = (int) ly;
             if (b.board[iy][ix] == null || b.board[iy][ix].get() != 0) return false;
             if (!b.allowedTiles[iy][ix]) return false;
+            if (b.isFallingOccupied(ix, iy)) return false;
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;
                 Piece other = b.activePieces.get(j);
@@ -153,6 +155,7 @@ final class BoardCollision {
             int ix = (int) lx, iy = (int) ly;
             if (!b.allowedTiles[iy][ix]) return -1;
             if (b.board[iy][ix] != null && b.board[iy][ix].get() != 0) return -1;
+            if (b.isFallingOccupied(ix, iy)) return -1;
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;
                 Piece other = b.activePieces.get(j);

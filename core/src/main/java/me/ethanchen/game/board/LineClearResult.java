@@ -83,6 +83,12 @@ public class LineClearResult {
      */
     public int blockedByPlayerId = -1;
 
+    /**
+     * True when this result came from a falling column landing (not an active-piece lock).
+     * Scored via the flat falling-clear table rather than the normal placement scorer.
+     */
+    public boolean fallingClear = false;
+
     /** Convenience: number of rows cleared by this drop. */
     public int numClearedRows() {
         return clearedRows.length;

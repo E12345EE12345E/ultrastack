@@ -9,6 +9,7 @@ import com.badlogic.gdx.math.Vector2;
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
+import me.ethanchen.network.dto.NetFallingColumn;
 import me.ethanchen.network.dto.NetPiece;
 import me.ethanchen.network.dto.NetQueue;
 
@@ -20,6 +21,10 @@ public class Board {
     protected final Vector2[] spawnPositions;
     protected final PieceQueue[] pieceQueues;
     protected final ArrayList<Piece> activePieces;
+    /** Detached vertical runs currently falling under gravity. */
+    protected final ArrayList<FallingColumn> fallingColumns = new ArrayList<>();
+    /** Monotonic id source for {@link FallingColumn#id}. */
+    protected int nextFallingId = 1;
 
     // Hold state (shared across all players on this board)
     private byte heldPieceType = 0;   // 0 = empty
@@ -37,10 +42,35 @@ public class Board {
     public void setPieceQueue(int p, PieceQueue queue) { pieceQueues[p] = queue; }
     public ArrayList<Piece> getActivePieces() { return activePieces; }
     public Piece getActivePiece(int p) { return activePieces.get(p); }
+    public ArrayList<FallingColumn> getFallingColumns() { return fallingColumns; }
     public byte getHeldPieceType() { return heldPieceType; }
     public void setHeldPieceType(byte type) { heldPieceType = type; }
     public boolean isPlayerHoldUsed(int id) {
         return playerHoldUsed != null && id >= 0 && id < playerHoldUsed.length && playerHoldUsed[id];
+    }
+
+    /**
+     * Returns true when any falling column currently covers board cell {@code (x, y)}.
+     * Mid-interpolation columns occupy both the start and end rows of the step.
+     */
+    public boolean isFallingOccupied(int x, int y) {
+        for (FallingColumn col : fallingColumns) {
+            if (col.occupies(x, y)) return true;
+        }
+        return false;
+    }
+
+    /** Clears all falling columns (board reset / game end). */
+    public void clearFallingColumns() {
+        fallingColumns.clear();
+    }
+
+    /**
+     * Advances falling-block simulation by {@code deltaMs}. Returns any line-clear results
+     * produced by landings this tick.
+     */
+    public ArrayList<LineClearResult> updateFallingBlocks(int deltaMs) {
+        return BoardFallingBlocks.update(this, deltaMs);
     }
 
     // Init
@@ -80,9 +110,11 @@ public class Board {
 
     /**
      * Returns true when every playable ({@code allowedTiles=true}) cell on the board is
-     * currently empty. Used to detect an "All Clear" (Perfect Clear) after a line clear.
+     * currently empty and no falling columns are airborne. Used to detect an "All Clear"
+     * (Perfect Clear) after a line clear.
      */
     public boolean isAllClear() {
+        if (!fallingColumns.isEmpty()) return false;
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 if (allowedTiles[y][x] && board[y][x].get() != Tile.EMPTY) return false;
@@ -91,11 +123,17 @@ public class Board {
         return true;
     }
 
-    /** Returns true if any tile on the board is currently a garbage tile. */
+    /** Returns true if any locked or falling tile is currently a garbage tile. */
     public boolean hasGarbage() {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 if (board[y][x].get() == Tile.GARBAGE) return true;
+            }
+        }
+        for (FallingColumn col : fallingColumns) {
+            if (col.types == null) continue;
+            for (byte t : col.types) {
+                if (t == Tile.GARBAGE) return true;
             }
         }
         return false;
@@ -114,6 +152,8 @@ public class Board {
                 board[y][x].set(x == gapCol ? Tile.EMPTY : Tile.GARBAGE, Tile.SINGLE_TILE);
             }
         }
+        // Push any falling columns that now intersect solid garbage up until clear.
+        BoardFallingBlocks.resolveAfterGarbage(this);
     }
 
     /**
@@ -160,6 +200,7 @@ public class Board {
                 if (!allowedTiles[y][x]) continue;
                 if (board[y][x].get() != Tile.EMPTY) continue;
                 if (occupiedByPiece[y][x]) continue;
+                if (isFallingOccupied(x, y)) continue;
                 board[y][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
                 filled.add(new int[]{x, y});
             }
@@ -484,6 +525,12 @@ public class Board {
         // Spawn replacement before clearing so the queue advances immediately
         spawnNextPiece(id);
 
+        // Fall trigger runs before line clear so converted cells read as empty
+        if (p.fallTrigger) {
+            p.fallTrigger = false;
+            BoardFallingBlocks.triggerFromLock(this, result);
+        }
+
         // Clear and settle
         BoardLineClear.clearAndSettle(this, result);
 
@@ -710,6 +757,10 @@ public class Board {
         retval.playerHoldUsed = (playerHoldUsed != null)
             ? Arrays.copyOf(playerHoldUsed, playerHoldUsed.length)
             : new boolean[spawnPositions.length];
+        retval.falling = new NetFallingColumn[fallingColumns.size()];
+        for (int i = 0; i < fallingColumns.size(); i++) {
+            retval.falling[i] = BoardFallingBlocks.toNet(fallingColumns.get(i));
+        }
         return retval;
     }
 
@@ -741,6 +792,10 @@ public class Board {
         for (int i=0; i<activePieces.size(); i++) {
             retval.pieces[i] = activePieces.get(i).convertToNetPiece();
         }
+        retval.falling = new NetFallingColumn[fallingColumns.size()];
+        for (int i = 0; i < fallingColumns.size(); i++) {
+            retval.falling[i] = BoardFallingBlocks.toNet(fallingColumns.get(i));
+        }
         return retval;
     }
 
@@ -769,6 +824,7 @@ public class Board {
         if (in.playerHoldUsed != null) {
             playerHoldUsed = Arrays.copyOf(in.playerHoldUsed, in.playerHoldUsed.length);
         }
+        BoardFallingBlocks.reconcileFromNet(this, in.falling);
     }
 
     // Static
@@ -789,6 +845,7 @@ public class Board {
         retval.pieces = full.pieces;
         retval.tileid = full.tileid;
         retval.tileconnections = full.tileconnections;
+        retval.falling = full.falling;
         return retval;
     }
 }

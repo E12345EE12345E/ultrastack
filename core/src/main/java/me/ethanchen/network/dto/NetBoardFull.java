@@ -11,4 +11,5 @@ public class NetBoardFull {
     public byte[] spawnposy;
     public NetQueue[] queues;
     public NetPiece[] pieces;
+    public NetFallingColumn[] falling;
 }

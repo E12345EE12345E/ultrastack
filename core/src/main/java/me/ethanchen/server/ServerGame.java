@@ -291,6 +291,35 @@ public class ServerGame {
         effects.queueResultParticles(result, game.getBoards().get(0).bw());
     }
 
+    /**
+     * Post-landing logic for a falling column: scores flat falling clears, updates combo/B2B
+     * counters, feeds meter/stats when attributed, and queues landing flash + clear particles.
+     */
+    private void processFallingLanding(LineClearResult result) {
+        boolean attributed = result.playerId >= 0;
+
+        if (attributed) {
+            clearSpinStats.record(result);
+        }
+
+        if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
+            long points = attributed ? scorer.scoreFallingClear(result, effects) : 0L;
+            if (!attributed) {
+                // Still update counters even when unattributed (score is zero).
+                game.applyClearToCounters(result);
+            }
+            if (loadouts != null && attributed && points > 0) {
+                meterController.onScoreEvent(result.playerId, points, result.pieceType,
+                        result.numClearedRows() > 0, false);
+            }
+        } else {
+            game.applyClearToCounters(result);
+        }
+
+        effects.queueFallingLandingFlash(result);
+        effects.queueResultParticles(result, game.getBoards().get(0).bw());
+    }
+
     // -------------------------------------------------------------------------
     // Bump / blocked events
     // -------------------------------------------------------------------------
@@ -366,7 +395,9 @@ public class ServerGame {
         if (endCtrl.isGameEnded()) return;
         game.update(deltaTime);
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
-            if (r.placed) {
+            if (r.fallingClear) {
+                processFallingLanding(r);
+            } else if (r.placed) {
                 processPlacement(r);
                 if (!r.manual) {
                     hardDropBlockedUntilMs[r.playerId] = System.currentTimeMillis() + GameConstants.HARD_DROP_SUPPRESS_MS;
@@ -480,6 +511,10 @@ public class ServerGame {
                 if (!canSwapActivePiece(playerId)) return false;
                 if (!meterController.tryConsume(playerId)) return false;
                 activated = swapActivePiece(playerId, Piece.I);
+                if (activated) {
+                    Board board = game.getBoards().get(0);
+                    board.getActivePiece(playerId).fallTrigger = true;
+                }
                 break;
             case DISABLE_AND_RAMP_GRAVITY:
                 if (!meterController.tryConsume(playerId)) return false;
@@ -497,11 +532,17 @@ public class ServerGame {
         return activated;
     }
 
-    /** True when the game is running and {@code playerId} is a valid seated slot. */
+    /**
+     * True when the game is running, {@code playerId} is a valid seated slot, and their piece
+     * is not in blocked-cycling (abilities are unavailable while spawn-blocked).
+     */
     private boolean canActivateAbility(int playerId) {
         if (!inProgress || endCtrl.isGameEnded() || game == null) return false;
         if (playerId < 0 || playerId >= players) return false;
-        return !game.getBoards().isEmpty();
+        if (game.getBoards().isEmpty()) return false;
+        Board board = game.getBoards().get(0);
+        if (board.getActivePieces().size() <= playerId) return false;
+        return !board.getActivePieces().get(playerId).isBlockedFromSpawning;
     }
 
     /**

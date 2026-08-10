@@ -137,6 +137,45 @@ class ScoreModeScorer {
         return points;
     }
 
+    /**
+     * Scores a falling-column landing: flat {@link GameConstants#SCORE_FALLING_PER_LINE} per
+     * cleared row, plus the all-clear bonus when applicable. No combo/B2B/glow/diff-column
+     * multipliers. Still updates combo/B2B counters via {@code game.applyClearToCounters}.
+     */
+    long scoreFallingClear(LineClearResult result, PlacementEffects effects) {
+        int lines = result.numClearedRows();
+        if (lines == 0) {
+            game.applyClearToCounters(result);
+            return 0L;
+        }
+
+        long points = GameConstants.SCORE_FALLING_PER_LINE * lines;
+        if (result.allClear) points += GameConstants.SCORE_ALL_CLEAR_BONUS;
+        totalScore += points;
+
+        float cx = result.restingCenterX;
+        float cy = result.restingCenterY;
+
+        NetParticle scoreParticle = new NetParticle();
+        scoreParticle.boardIndex = 0;
+        scoreParticle.kind = NetParticle.KIND_POPUP_SCORE;
+        scoreParticle.tileType = result.pieceType;
+        scoreParticle.x = cx;
+        scoreParticle.y = cy;
+        scoreParticle.value = (int) Math.min(points, Integer.MAX_VALUE);
+        effects.pendingParticles.add(scoreParticle);
+
+        game.applyClearToCounters(result);
+
+        int newGravity = game.getGravity();
+        for (int i = 0; i < lines; i++) {
+            newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
+        }
+        game.setGravity(newGravity);
+
+        return points;
+    }
+
     ScoreModeData getScoreModeData() {
         ScoreModeData d = new ScoreModeData();
         d.glowingValues = (glowValues != null) ? Arrays.copyOf(glowValues, glowValues.length) : new float[0];

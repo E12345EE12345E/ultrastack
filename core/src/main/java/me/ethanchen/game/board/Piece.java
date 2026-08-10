@@ -108,6 +108,12 @@ public class Piece {
      * movement. Re-evaluated every frame by {@link Board#updateJustSpawnedFlags()}.
      */
     public boolean justSpawned = false;
+    /**
+     * When true, locking this piece converts grounded columns into falling blocks (and
+     * airborne minoes into piece-trigger falling columns). Cleared after the lock scan;
+     * set by abilities such as Wizard FORCE_I.
+     */
+    public boolean fallTrigger = false;
     public float lockTime = 0f;
     public int lockedMovementCounter = 0;
     public float movementTimer = 0f;
@@ -216,6 +222,7 @@ public class Piece {
         np.rotation = rotation;
         np.blocked = isBlockedFromSpawning;
         np.justSpawned = justSpawned;
+        np.fallTrigger = fallTrigger;
         return np;
     }
 
@@ -224,6 +231,7 @@ public class Piece {
         location.set(p.doubledlocationx*0.5f, p.doubledlocationy*0.5f);
         isBlockedFromSpawning = p.blocked;
         justSpawned = p.justSpawned;
+        fallTrigger = p.fallTrigger;
         if (p.rotation != rotation) {
             int a = p.rotation - rotation;
             if (a < 0) a += 4;
@@ -249,6 +257,7 @@ public class Piece {
         retval.location = new Vector2(p.doubledlocationx*0.5f, p.doubledlocationy*0.5f);
         retval.isBlockedFromSpawning = p.blocked;
         retval.justSpawned = p.justSpawned;
+        retval.fallTrigger = p.fallTrigger;
         switch (p.rotation) {
             case 1:
                 retval.rotateCW();

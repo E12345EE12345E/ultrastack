@@ -104,4 +104,12 @@ public final class GameConstants {
      * base line-clear score. MULTIPLAYER_SCORE mode; see ScoreModeScorer#scoreHardDrop.
      */
     public static final long SCORE_ALL_CLEAR_BONUS = 1000;
+
+    // Falling-block motion (tiles/sec and tiles/sec²). Terminal ≈ 125 ms/tile; acceleration
+    // reaches terminal after ~0.2 s so the first tile ramps and later tiles are full speed.
+    public static final float FALL_TERMINAL_VELOCITY = 8f;
+    public static final float FALL_ACCELERATION = 40f;
+
+    /** Flat score per cleared row for a falling-block line clear (no multipliers). */
+    public static final long SCORE_FALLING_PER_LINE = 150;
 }

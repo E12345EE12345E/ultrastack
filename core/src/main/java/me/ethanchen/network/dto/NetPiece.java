@@ -13,4 +13,5 @@ public class NetPiece {
     public byte rotation;
     public boolean blocked;
     public boolean justSpawned;
+    public boolean fallTrigger;
 }
