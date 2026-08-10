@@ -7,6 +7,8 @@ public class ScoreModeEndData {
     public int[] bumpCounts;
     /** Per-player count of hard drops blocked by resting on another player's piece, indexed by player slot. */
     public int[] blockedCounts;
+    /** Per-player count of pieces locked this game, indexed by player slot. */
+    public int[] piecesPlaced;
     /** Per-player count of 4-line clears, indexed by player slot. */
     public int[] fourLineClears;
     /** Per-player count of full T-spin singles (not mini), indexed by player slot. */

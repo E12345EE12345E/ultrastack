@@ -375,8 +375,8 @@ public class ServerGame {
         }
         if (game.isStarted() && !endCtrl.isGameEnded()) {
             blocked.update(deltaTime / 1000f, players, game,
-                    () -> endCtrl.beginGameEndLoss(gameMode, scorer, bumpCounts, blockedCounts, clearSpinStats));
-            endCtrl.checkWinCondition(gameMode, game, scorer, bumpCounts, blockedCounts, clearSpinStats);
+                    () -> endCtrl.beginGameEndLoss(gameMode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats));
+            endCtrl.checkWinCondition(gameMode, game, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
         }
     }
 
@@ -559,6 +559,6 @@ public class ServerGame {
      * Called when a player disconnects mid-game.
      */
     public synchronized void handleDisconnectedPlayer(int id) {
-        endCtrl.beginGameEndDisconnect(gameMode, scorer, bumpCounts, blockedCounts, clearSpinStats);
+        endCtrl.beginGameEndDisconnect(gameMode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
     }
 }

@@ -55,11 +55,12 @@ class GameEndController {
      * {@code game.isStarted() && !isGameEnded()}.
      */
     void checkWinCondition(GameMode mode, GameHandler game, ScoreModeScorer scorer,
-                            int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
+                            int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
+                            ClearSpinStats clearSpinStats) {
         if (mode == GameMode.NONE) return;
         GameModeRules rules = mode.rules();
         if (rules.isWinConditionMet(game, gameEndTargetMs)) {
-            beginGameEnd(true, false, mode, scorer, bumpCounts, blockedCounts, clearSpinStats);
+            beginGameEnd(true, false, mode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
         }
     }
 
@@ -69,18 +70,21 @@ class GameEndController {
 
     /** Called by {@link BlockedSpawnController} when the explode countdown expires. */
     void beginGameEndLoss(GameMode mode, ScoreModeScorer scorer,
-                          int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
-        beginGameEnd(false, false, mode, scorer, bumpCounts, blockedCounts, clearSpinStats);
+                          int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
+                          ClearSpinStats clearSpinStats) {
+        beginGameEnd(false, false, mode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
     }
 
     /** Called when a player disconnects mid-game. */
     void beginGameEndDisconnect(GameMode mode, ScoreModeScorer scorer,
-                                int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
-        beginGameEnd(false, true, mode, scorer, bumpCounts, blockedCounts, clearSpinStats);
+                                int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
+                                ClearSpinStats clearSpinStats) {
+        beginGameEnd(false, true, mode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
     }
 
     private void beginGameEnd(boolean win, boolean disconnected, GameMode mode, ScoreModeScorer scorer,
-                               int[] bumpCounts, int[] blockedCounts, ClearSpinStats clearSpinStats) {
+                               int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
+                               ClearSpinStats clearSpinStats) {
         if (gameEnded) return;
         gameEnded = true;
         pendingWin = win;
@@ -97,6 +101,7 @@ class GameEndController {
             frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
             frozenScoreEnd.bumpCounts = copyOf(bumpCounts);
             frozenScoreEnd.blockedCounts = copyOf(blockedCounts);
+            frozenScoreEnd.piecesPlaced = copyOf(piecesPlaced);
             applyClearSpinStats(frozenScoreEnd, frozenClears);
         } else if (mode == GameMode.MULTIPLAYER_PUZZLE) {
             frozenPuzzleElapsedMs = System.currentTimeMillis() - gameStartMs;
@@ -105,6 +110,7 @@ class GameEndController {
             frozenPuzzleEnd.score = (int)(Integer.MAX_VALUE - Math.min(frozenPuzzleElapsedMs, Integer.MAX_VALUE));
             frozenPuzzleEnd.bumpCounts = copyOf(bumpCounts);
             frozenPuzzleEnd.blockedCounts = copyOf(blockedCounts);
+            frozenPuzzleEnd.piecesPlaced = copyOf(piecesPlaced);
             applyClearSpinStats(frozenPuzzleEnd, frozenClears);
         }
     }

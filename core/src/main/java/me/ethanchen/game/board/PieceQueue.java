@@ -41,11 +41,20 @@ public class PieceQueue {
         return (byte)(int)this.pieceIDs.remove(0);
     }
 
+    private static final byte[] BAG_3MINO_EXTRAS = {
+        Piece.J, Piece.L, Piece.S, Piece.Z, Piece.O
+    };
+
     private ArrayList<Integer> generateNextBag() {
         ArrayList<Integer> shuffleBag = new ArrayList<Integer>();
         for (byte b : bag.get()) shuffleBag.add((int)b);
 
-        Collections.shuffle(shuffleBag, new Random(this.random.nextInt()));
+        // One nextInt() per bag keeps NetQueue reconstruction in sync (see ctor that burns RNG).
+        Random bagRng = new Random(this.random.nextInt());
+        if (bag == BagTypes.BAG_3MINO) {
+            shuffleBag.add((int) BAG_3MINO_EXTRAS[bagRng.nextInt(BAG_3MINO_EXTRAS.length)]);
+        }
+        Collections.shuffle(shuffleBag, bagRng);
 
         this.generationNumber++;
         return shuffleBag;

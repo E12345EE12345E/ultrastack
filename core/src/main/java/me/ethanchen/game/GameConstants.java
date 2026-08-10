@@ -103,5 +103,5 @@ public final class GameConstants {
      * Applied post-multiplication, i.e. after all other bonuses have been applied to the
      * base line-clear score. MULTIPLAYER_SCORE mode; see ScoreModeScorer#scoreHardDrop.
      */
-    public static final long SCORE_ALL_CLEAR_BONUS = 2000;
+    public static final long SCORE_ALL_CLEAR_BONUS = 1000;
 }
