@@ -7,6 +7,8 @@ public class BumpSoundBroadcast extends NetworkPacket {
     public byte playerId;
     /** Player index of the other player involved in the bump or block. */
     public byte otherPlayerId;
+    /** Index of the board both players share. */
+    public byte boardIndex;
     /** False = bumpedEvent (mutual lateral block); true = blockedEvent (hard-drop blocked by player). */
     public boolean blocked;
 }

@@ -549,6 +549,13 @@ public class GameRoom implements Runnable, GameRoomContext {
         }
         b.localPlayerIds = new byte[ids.size()];
         for (int i = 0; i < ids.size(); i++) b.localPlayerIds[i] = ids.get(i);
+        // Slot -> board/seat mapping, so clients can resolve which of b.boards each slot belongs to.
+        b.slotBoardIndex = new byte[playerCount];
+        b.slotSeatIndex = new byte[playerCount];
+        for (int slot = 0; slot < playerCount; slot++) {
+            b.slotBoardIndex[slot] = (byte) serverGame.getGame().boardIndexOf(slot);
+            b.slotSeatIndex[slot] = (byte) serverGame.getGame().seatOf(slot);
+        }
         return b;
     }
 
@@ -703,20 +710,26 @@ public class GameRoom implements Runnable, GameRoomContext {
             if (resultRecorder != null) {
                 resultRecorder.recordGameResult(GameResultData.from(info, players));
             }
-            long xp = XpCalculator.computeXp(info.mode, info.score);
-            if (xpAwarder != null && xp > 0) {
-                for (PlayerResultInfo player : players) {
-                    if (player.accountUuid != null && !player.accountUuid.isEmpty()) {
-                        xpAwarder.awardXp(player.accountUuid, xp);
-                    }
+            // XP uses each player's own board score (their personal result), not the
+            // session-wide aggregate in info.score, so a player is rewarded for their own board.
+            long maxXp = 0;
+            for (int slot = 0; slot < players.length; slot++) {
+                PlayerResultInfo player = players[slot];
+                if (player.accountUuid == null || player.accountUuid.isEmpty()) continue;
+                long personalScore = (info.scorePerPlayer != null && slot < info.scorePerPlayer.length)
+                        ? info.scorePerPlayer[slot] : info.score;
+                long xp = XpCalculator.computeXp(info.mode, personalScore);
+                if (xp > 0 && xpAwarder != null) {
+                    xpAwarder.awardXp(player.accountUuid, xp);
                 }
+                maxXp = Math.max(maxXp, xp);
             }
 
             // Artifact acquisition: only on victories in modes that grant xp, and only for real
             // (non-LAN) accounts -- LAN never persists xp (xpAwarder == null there) and must not
             // grant artifacts either (implementation.md, Part 5).
-            if (info.win && xp > 0 && profileStore != null && xpAwarder != null) {
-                grantVictoryArtifacts(xp);
+            if (info.win && maxXp > 0 && profileStore != null && xpAwarder != null) {
+                grantVictoryArtifacts(maxXp);
             }
         }
 

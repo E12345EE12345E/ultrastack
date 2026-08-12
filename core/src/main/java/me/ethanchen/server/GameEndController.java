@@ -11,13 +11,25 @@ import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 /**
- * Manages the game-end state machine: detecting the win condition, freezing end-game payloads,
- * observing the grace period, and broadcasting {@link GameEndInfo} via the room. Extracted from
- * {@link ServerGame}.
+ * Manages the game-end state machine across every board: detecting each board's own win
+ * condition, tracking elimination when a board's explode countdown expires, freezing end-game
+ * payloads, observing the grace period, and broadcasting {@link GameEndInfo} via the room.
+ * Extracted from {@link ServerGame}.
+ * <p>
+ * A board is <em>resolved</em> once it has won or been eliminated; the session as a whole ends
+ * once every board is resolved, or immediately when a session-wide win condition (e.g. the
+ * score-mode timer) fires and resolves every still-running board at once.
  */
 class GameEndController {
 
-    private boolean gameEnded = false;
+    private int numBoards;
+    /** True once a board has won or been eliminated. */
+    private boolean[] boardResolved;
+    private boolean[] boardWon;
+    /** Elapsed ms (from game start) at the moment each board resolved. */
+    private long[] boardElapsedMs;
+
+    private boolean sessionEnded = false;
     private boolean pendingWin;
     private boolean pendingDisconnected;
     private long    gameEndGraceUntilMs;
@@ -30,37 +42,48 @@ class GameEndController {
 
     GameEndController() {}
 
-    /** Initialises timing fields for a new game. */
-    void reset(long gameStartMs, long gameEndTargetMs) {
+    /** Initialises timing and per-board resolution state for a new game. */
+    void reset(long gameStartMs, long gameEndTargetMs, int numBoards) {
         this.gameStartMs = gameStartMs;
         this.gameEndTargetMs = gameEndTargetMs;
-        gameEnded            = false;
-        pendingWin           = false;
-        pendingDisconnected  = false;
-        gameEndGraceUntilMs  = 0;
-        frozenScoreEnd       = null;
-        frozenPuzzleEnd      = null;
+        this.numBoards = numBoards;
+        boardResolved = new boolean[numBoards];
+        boardWon = new boolean[numBoards];
+        boardElapsedMs = new long[numBoards];
+        sessionEnded = false;
+        pendingWin = false;
+        pendingDisconnected = false;
+        gameEndGraceUntilMs = 0;
+        frozenScoreEnd = null;
+        frozenPuzzleEnd = null;
         frozenPuzzleElapsedMs = 0;
     }
 
-    boolean isGameEnded() { return gameEnded; }
+    boolean isGameEnded() { return sessionEnded; }
+
+    /** True while board {@code boardIndex} is still being played (not yet won/eliminated) and the session hasn't ended. */
+    boolean isBoardRunning(int boardIndex) {
+        if (sessionEnded) return false;
+        return boardResolved != null && boardIndex >= 0 && boardIndex < boardResolved.length && !boardResolved[boardIndex];
+    }
 
     // -------------------------------------------------------------------------
-    // Win-condition check (called each tick while game is running)
+    // Win-condition check (called each tick, per running board)
     // -------------------------------------------------------------------------
 
     /**
-     * Checks the mode-specific win condition via {@link GameModeRules} and calls
-     * {@link #beginGameEnd} if met. Must only be called when
-     * {@code game.isStarted() && !isGameEnded()}.
+     * Checks the mode-specific win condition for {@code boardIndex} via {@link GameModeRules}
+     * and resolves that board (as a win) if met. Must only be called when
+     * {@code game.isStarted() && isBoardRunning(boardIndex)}.
      */
-    void checkWinCondition(GameMode mode, GameHandler game, ScoreModeScorer scorer,
-                            int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
-                            ClearSpinStats clearSpinStats) {
-        if (mode == GameMode.NONE) return;
+    void checkWinCondition(int boardIndex, GameMode mode, GameHandler game, long globalScore,
+                            long[] boardScorePerPlayer, int[] bumpCounts, int[] blockedCounts,
+                            int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+        if (mode == GameMode.NONE || sessionEnded) return;
         GameModeRules rules = mode.rules();
-        if (rules.isWinConditionMet(game, gameEndTargetMs)) {
-            beginGameEnd(true, false, mode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+        if (rules.isWinConditionMet(game, boardIndex, gameEndTargetMs)) {
+            resolveBoard(boardIndex, true, mode, globalScore, boardScorePerPlayer,
+                    bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
         }
     }
 
@@ -68,27 +91,49 @@ class GameEndController {
     // Begin / finalize
     // -------------------------------------------------------------------------
 
-    /** Called by {@link BlockedSpawnController} when the explode countdown expires. */
-    void beginGameEndLoss(GameMode mode, ScoreModeScorer scorer,
-                          int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
-                          ClearSpinStats clearSpinStats) {
-        beginGameEnd(false, false, mode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+    /** Called by a board's {@link BlockedSpawnController} when that board's explode countdown expires. */
+    void beginBoardLoss(int boardIndex, GameMode mode, long globalScore, long[] boardScorePerPlayer,
+                         int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+        resolveBoard(boardIndex, false, mode, globalScore, boardScorePerPlayer,
+                bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
     }
 
-    /** Called when a player disconnects mid-game. */
-    void beginGameEndDisconnect(GameMode mode, ScoreModeScorer scorer,
-                                int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
-                                ClearSpinStats clearSpinStats) {
-        beginGameEnd(false, true, mode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+    /** Called when a player disconnects mid-game: ends the whole session immediately (no board keeps running). */
+    void beginGameEndDisconnect(GameMode mode, long globalScore, long[] boardScorePerPlayer,
+                                 int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+        if (sessionEnded) return;
+        pendingDisconnected = true;
+        for (int b = 0; b < numBoards; b++) {
+            if (!boardResolved[b]) markResolved(b, false);
+        }
+        finalizeSession(mode, globalScore, boardScorePerPlayer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
     }
 
-    private void beginGameEnd(boolean win, boolean disconnected, GameMode mode, ScoreModeScorer scorer,
-                               int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced,
-                               ClearSpinStats clearSpinStats) {
-        if (gameEnded) return;
-        gameEnded = true;
-        pendingWin = win;
-        pendingDisconnected = disconnected;
+    private void resolveBoard(int boardIndex, boolean win, GameMode mode, long globalScore, long[] boardScorePerPlayer,
+                               int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+        if (sessionEnded || boardIndex < 0 || boardIndex >= boardResolved.length || boardResolved[boardIndex]) return;
+        markResolved(boardIndex, win);
+        // A session-wide win condition (e.g. score mode's shared timer) resolves every
+        // still-running board identically in the same tick, so this loop naturally also
+        // finalizes the session the instant that fires, matching pre-refactor behaviour.
+        boolean allResolved = true;
+        for (boolean r : boardResolved) if (!r) { allResolved = false; break; }
+        if (allResolved) {
+            finalizeSession(mode, globalScore, boardScorePerPlayer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+        }
+    }
+
+    private void markResolved(int boardIndex, boolean win) {
+        boardResolved[boardIndex] = true;
+        boardWon[boardIndex] = win;
+        boardElapsedMs[boardIndex] = System.currentTimeMillis() - gameStartMs;
+    }
+
+    private void finalizeSession(GameMode mode, long globalScore, long[] boardScorePerPlayer,
+                                  int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+        sessionEnded = true;
+        pendingWin = false;
+        for (boolean w : boardWon) if (w) { pendingWin = true; break; }
         long graceMs = (mode == GameMode.MULTIPLAYER_PUZZLE) ? GameConstants.PUZZLE_GAME_END_GRACE_MS : 0L;
         gameEndGraceUntilMs = System.currentTimeMillis() + graceMs;
 
@@ -97,14 +142,18 @@ class GameEndController {
         ClearSpinStats frozenClears = clearSpinStats != null ? clearSpinStats.copy() : null;
         if (mode == GameMode.MULTIPLAYER_SCORE || mode == GameMode.CHARACTER_SCORE) {
             frozenScoreEnd = new ScoreModeEndData();
-            frozenScoreEnd.finalScore = scorer != null ? scorer.getTotalScore() : 0;
+            frozenScoreEnd.finalScore = globalScore;
+            frozenScoreEnd.boardScore = boardScorePerPlayer;
             frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
             frozenScoreEnd.bumpCounts = copyOf(bumpCounts);
             frozenScoreEnd.blockedCounts = copyOf(blockedCounts);
             frozenScoreEnd.piecesPlaced = copyOf(piecesPlaced);
             applyClearSpinStats(frozenScoreEnd, frozenClears);
         } else if (mode == GameMode.MULTIPLAYER_PUZZLE) {
-            frozenPuzzleElapsedMs = System.currentTimeMillis() - gameStartMs;
+            // Puzzle mode still has a single board today; boardElapsedMs[0] is that board's own
+            // finish time. A future multi-board puzzle mode would report each player's own
+            // board's time via a per-player array alongside this legacy single value.
+            frozenPuzzleElapsedMs = boardElapsedMs.length > 0 ? boardElapsedMs[0] : (System.currentTimeMillis() - gameStartMs);
             frozenPuzzleEnd = new PuzzleModeEndData();
             frozenPuzzleEnd.timeMs = frozenPuzzleElapsedMs;
             frozenPuzzleEnd.score = (int)(Integer.MAX_VALUE - Math.min(frozenPuzzleElapsedMs, Integer.MAX_VALUE));
@@ -142,18 +191,17 @@ class GameEndController {
      * period has elapsed.
      *
      * @param mode     current game mode
-     * @param scorer   score-mode scorer (may be null)
      * @param room     room context used to broadcast end-game
      * @param stopGame runnable that tears down the in-progress game state
      */
-    void tickGrace(GameMode mode, ScoreModeScorer scorer, GameRoomContext room, Runnable stopGame) {
-        if (!gameEnded) return;
+    void tickGrace(GameMode mode, GameRoomContext room, Runnable stopGame) {
+        if (!sessionEnded) return;
         if (System.currentTimeMillis() < gameEndGraceUntilMs) return;
-        finalizeGameEnd(mode, scorer, room, stopGame);
+        finalizeGameEnd(mode, room, stopGame);
     }
 
-    private void finalizeGameEnd(GameMode mode, ScoreModeScorer scorer, GameRoomContext room, Runnable stopGame) {
-        long score = computeFinalScore(mode, scorer);
+    private void finalizeGameEnd(GameMode mode, GameRoomContext room, Runnable stopGame) {
+        long score = computeFinalScore(mode);
 
         GameEndInfo info = new GameEndInfo();
         info.mode = mode;
@@ -162,6 +210,7 @@ class GameEndController {
         info.scoreModeEnd = frozenScoreEnd;
         info.puzzleModeEnd = frozenPuzzleEnd;
         info.score = score;
+        info.scorePerPlayer = frozenScoreEnd != null ? frozenScoreEnd.boardScore : null;
         info.displayScore = computeFinalDisplayScore(mode, score);
         if (frozenScoreEnd != null || frozenPuzzleEnd != null) {
             // Must use OutputType.json — default (minimal) is not valid JSON and breaks
@@ -180,7 +229,7 @@ class GameEndController {
     // -------------------------------------------------------------------------
 
     long getFrozenPuzzleElapsedMs(long gameStartMs, boolean started) {
-        if (gameEnded) return frozenPuzzleElapsedMs;
+        if (sessionEnded) return frozenPuzzleElapsedMs;
         if (!started) return 0;
         return Math.max(0, System.currentTimeMillis() - gameStartMs);
     }
@@ -191,10 +240,10 @@ class GameEndController {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private long computeFinalScore(GameMode mode, ScoreModeScorer scorer) {
+    private long computeFinalScore(GameMode mode) {
         switch (mode) {
             case MULTIPLAYER_SCORE:
-            case CHARACTER_SCORE:    return scorer != null ? scorer.getTotalScore() : 0L;
+            case CHARACTER_SCORE:    return frozenScoreEnd != null ? frozenScoreEnd.finalScore : 0L;
             case MULTIPLAYER_PUZZLE: return frozenPuzzleEnd != null ? frozenPuzzleEnd.score : 0L;
             default:                 return 0L;
         }

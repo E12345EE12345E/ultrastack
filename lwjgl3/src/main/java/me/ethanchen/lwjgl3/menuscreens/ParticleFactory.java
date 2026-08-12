@@ -68,7 +68,7 @@ final class ParticleFactory {
      * {@link me.ethanchen.network.dto.HardDropEffect}.
      */
     static void expandHardDropFlash(byte pieceType, byte doubledX, byte doubledY, byte rotation,
-                                     List<Particle> out, Random rng) {
+                                     byte boardIndex, List<Particle> out, Random rng) {
         NetPiece netPiece = new NetPiece();
         netPiece.type = pieceType;
         netPiece.doubledlocationx = doubledX;
@@ -79,7 +79,7 @@ final class ParticleFactory {
             int cx = (int) Math.floor(piece.location.x + tile.x);
             int cy = (int) Math.floor(piece.location.y + tile.y);
             NetParticle flash = new NetParticle();
-            flash.boardIndex = 0;
+            flash.boardIndex = boardIndex;
             flash.kind = NetParticle.KIND_FLASH;
             flash.tileType = pieceType;
             flash.x = cx;

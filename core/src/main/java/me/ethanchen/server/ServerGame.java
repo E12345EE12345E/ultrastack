@@ -29,10 +29,16 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
  *
  * <ul>
  *   <li>{@link PlacementEffects}       — particle/sound queuing
- *   <li>{@link ScoreModeScorer}        — MULTIPLAYER_SCORE state and scoring
- *   <li>{@link BlockedSpawnController} — blocked-piece cycling and hold-while-blocked
- *   <li>{@link GameEndController}      — win detection, grace period, and end-game broadcast
+ *   <li>{@link ScoreModeScorer}        — one instance per board, MULTIPLAYER_SCORE state and scoring
+ *   <li>{@link BlockedSpawnController} — one instance per board, blocked-piece cycling and hold-while-blocked
+ *   <li>{@link GameEndController}      — per-board win/elimination tracking, grace period, and end-game broadcast
  * </ul>
+ *
+ * <p>Board-specific mechanics (abilities, meter fill, scoring, combo/gravity, blocked/explode)
+ * are always resolved through {@link GameHandler#boardFor}/{@code seatOf}/{@code slotsOnBoard} so
+ * they act only on the acting player's own board; {@code piecesPlaced}, {@code bumpCounts},
+ * {@code blockedCounts}, {@code clearSpinStats}, and {@link #globalScore} remain session-wide
+ * (indexed by global slot) since they describe the whole game session, not a single board.
  */
 public class ServerGame {
     private volatile boolean inProgress; public boolean isInProgress() { return inProgress; }
@@ -49,13 +55,18 @@ public class ServerGame {
     private int[] bumpCounts;
     private int[] blockedCounts;
     private ClearSpinStats clearSpinStats;
+    /** Session-wide aggregate score, updated in real time as every board's scorer scores points. */
+    private long globalScore;
 
     private final PlacementEffects effects = new PlacementEffects();
-    private final ScoreModeScorer scorer = new ScoreModeScorer();
-    private final BlockedSpawnController blocked = new BlockedSpawnController();
+    /** One scorer per board; see {@link ScoreModeScorer}. */
+    private ScoreModeScorer[] scorers;
+    /** One blocked/explode controller per board; see {@link BlockedSpawnController}. */
+    private BlockedSpawnController[] blocked;
+    /** One Noob-ability gravity controller per board; see {@link NoobGravityController}. */
+    private NoobGravityController[] noobGravity;
     private final GameEndController endCtrl = new GameEndController();
     private final MeterController meterController = new MeterController();
-    private final NoobGravityController noobGravity = new NoobGravityController();
     private ActiveLoadout[] loadouts;
 
     public ServerGame(GameRoomContext room) {
@@ -99,34 +110,45 @@ public class ServerGame {
         this.blockedCounts = new int[players];
         this.clearSpinStats = new ClearSpinStats(players);
         Arrays.fill(this.highestMoveId, -1);
+        globalScore = 0;
 
-        scorer.reset(players, game);
-        blocked.reset(players);
-        endCtrl.reset(gameStartMs, gameEndTargetMs);
+        int numBoards = game.getBoards().size();
+        scorers = new ScoreModeScorer[numBoards];
+        blocked = new BlockedSpawnController[numBoards];
+        noobGravity = new NoobGravityController[numBoards];
+        for (int b = 0; b < numBoards; b++) {
+            int[] boardSlots = game.slotsOnBoard(b);
+            ScoreModeScorer scorer = new ScoreModeScorer();
+            scorer.reset(b, boardSlots, game);
+            scorers[b] = scorer;
+            BlockedSpawnController bsc = new BlockedSpawnController();
+            bsc.reset(boardSlots.length);
+            blocked[b] = bsc;
+            noobGravity[b] = new NoobGravityController();
+        }
+        endCtrl.reset(gameStartMs, gameEndTargetMs, numBoards);
         t = 0;
 
         if (this.loadouts != null) {
-            scorer.setBonusProvider(this::characterScoreBonusPercent);
-            meterController.reset(players, this.loadouts);
-            noobGravity.reset();
+            for (ScoreModeScorer scorer : scorers) scorer.setBonusProvider(this::characterScoreBonusPercent);
+            meterController.reset(players, this.loadouts, game, numBoards);
             applyBagOverrides();
             applyGravityPassives();
         } else {
-            scorer.setBonusProvider(null);
-            noobGravity.reset();
+            for (ScoreModeScorer scorer : scorers) scorer.setBonusProvider(null);
         }
         return true;
     }
 
     /** Replaces a seated player's queue with their character's bag override, if any (e.g. Wizard). */
     private void applyBagOverrides() {
-        if (game.getBoards().isEmpty()) return;
-        Board board = game.getBoards().get(0);
-        for (int i = 0; i < loadouts.length; i++) {
-            ActiveLoadout loadout = loadouts[i];
+        for (int slot = 0; slot < loadouts.length; slot++) {
+            ActiveLoadout loadout = loadouts[slot];
             if (loadout == null || loadout.character == null || loadout.character.bagOverride == null) continue;
+            Board board = game.boardFor(slot);
+            if (board == null) continue;
             PieceQueue.BagTypes bag = loadout.character.bagOverride;
-            board.setPieceQueue(i, new PieceQueue(new java.util.Random().nextInt(), bag));
+            board.setPieceQueue(game.seatOf(slot), new PieceQueue(new java.util.Random().nextInt(), bag));
         }
     }
 
@@ -162,8 +184,11 @@ public class ServerGame {
         this.players = 0;
         this.highestMoveId = null;
         this.loadouts = null;
-        noobGravity.reset();
-        scorer.setBonusProvider(null);
+        this.scorers = null;
+        this.blocked = null;
+        this.noobGravity = null;
+        this.globalScore = 0;
+        meterController.clear();
         inProgress = false;
         room.onGameStopped();
     }
@@ -177,9 +202,10 @@ public class ServerGame {
         if (!inProgress || endCtrl.isGameEnded() || game == null || ids == null || types == null) return;
         if (ids.length != types.length) return;
         if (playerId < 0 || playerId >= players) return;
-        if (game.getBoards().isEmpty()) return;
-        Board board = game.getBoards().get(0);
-        if (board.getActivePieces().size() <= playerId) return;
+        Board board = game.boardFor(playerId);
+        if (board == null) return;
+        int seat = game.seatOf(playerId);
+        if (board.getActivePieces().size() <= seat) return;
         MoveType[] moveValues = MoveType.values();
         for (int i = 0; i < ids.length; i++) {
             if (ids[i] <= highestMoveId[playerId]) continue;
@@ -190,7 +216,7 @@ public class ServerGame {
                 if (System.currentTimeMillis() < hardDropBlockedUntilMs[playerId]) {
                     // suppressed after auto-lock
                 } else {
-                    LineClearResult result = board.hardDrop(playerId);
+                    LineClearResult result = board.hardDrop(seat);
                     if (result != null && result.placed) {
                         processPlacement(result);
                     } else if (result != null && result.blockedByPlayerId >= 0) {
@@ -199,30 +225,30 @@ public class ServerGame {
                 }
             } else if (move == MoveType.HOLD) {
                 if (!computeHoldAvailable(playerId)) {
-                    effects.addHoldSound((byte) playerId, false);
+                    effects.addHoldSound((byte) playerId, (byte) game.boardIndexOf(playerId), false);
                 } else {
-                    Piece currentPiece = board.getActivePieces().size() > playerId
-                            ? board.getActivePieces().get(playerId) : null;
+                    Piece currentPiece = board.getActivePieces().size() > seat
+                            ? board.getActivePieces().get(seat) : null;
                     if (currentPiece != null && currentPiece.isBlockedFromSpawning) {
-                        blocked.applyBlockedHold(playerId, board, effects);
-                    } else if (board.useHold(playerId)) {
-                        blocked.setLastHoldUsedMs(System.currentTimeMillis());
-                        effects.addHoldSound((byte) playerId, true);
+                        blocked[game.boardIndexOf(playerId)].applyBlockedHold(seat, playerId, board, effects);
+                    } else if (board.useHold(seat)) {
+                        blocked[game.boardIndexOf(playerId)].setLastHoldUsedMs(System.currentTimeMillis());
+                        effects.addHoldSound((byte) playerId, (byte) game.boardIndexOf(playerId), true);
                     }
                 }
             } else {
-                boolean moved = board.applyMove(playerId, move);
+                boolean moved = board.applyMove(seat, move);
                 if (!moved && (move == MoveType.LEFT || move == MoveType.RIGHT)) {
-                    Piece moverPiece = board.getActivePiece(playerId);
+                    Piece moverPiece = board.getActivePiece(seat);
                     if (!moverPiece.isBlockedFromSpawning) {
                         int xdiff = (move == MoveType.LEFT) ? -1 : 1;
-                        int blockerId = board.getLateralBlocker(playerId, xdiff);
-                        if (blockerId >= 0) {
-                            checkBump(board, playerId, blockerId);
+                        int blockerSeat = board.getLateralBlocker(seat, xdiff);
+                        if (blockerSeat >= 0) {
+                            checkBump(board, playerId, board.globalSlotForSeat(blockerSeat));
                         }
                     }
                 }
-                LineClearResult lockResult = board.tryMovementLock(playerId);
+                LineClearResult lockResult = board.tryMovementLock(seat);
                 if (lockResult != null && lockResult.placed) {
                     processPlacement(lockResult);
                     if (!lockResult.manual) {
@@ -242,9 +268,9 @@ public class ServerGame {
      */
     public synchronized boolean swapActivePiece(int playerId, byte type) {
         if (!canSwapActivePiece(playerId)) return false;
-        Board board = game.getBoards().get(0);
-        board.swapActivePiece(playerId, type);
-        effects.addPieceSwap((byte) playerId, type);
+        Board board = game.boardFor(playerId);
+        board.swapActivePiece(game.seatOf(playerId), type);
+        effects.addPieceSwap((byte) playerId, type, (byte) game.boardIndexOf(playerId));
         return true;
     }
 
@@ -256,30 +282,31 @@ public class ServerGame {
      */
     public synchronized boolean swapActivePiece(int playerId, byte type, boolean holdUsed) {
         if (!canSwapActivePiece(playerId)) return false;
-        Board board = game.getBoards().get(0);
-        board.swapActivePiece(playerId, type, holdUsed);
-        effects.addPieceSwap((byte) playerId, type);
+        Board board = game.boardFor(playerId);
+        board.swapActivePiece(game.seatOf(playerId), type, holdUsed);
+        effects.addPieceSwap((byte) playerId, type, (byte) game.boardIndexOf(playerId));
         return true;
     }
 
     private boolean canSwapActivePiece(int playerId) {
         if (!inProgress || endCtrl.isGameEnded() || game == null) return false;
         if (playerId < 0 || playerId >= players) return false;
-        if (game.getBoards().isEmpty()) return false;
-        Board board = game.getBoards().get(0);
-        return board.getActivePieces().size() > playerId;
+        Board board = game.boardFor(playerId);
+        if (board == null) return false;
+        return board.getActivePieces().size() > game.seatOf(playerId);
     }
 
     /**
      * Shared post-placement logic: increments the placement counter, applies mode-specific
-     * scoring, and queues sounds/particles.
+     * scoring on the placer's own board, and queues sounds/particles.
      */
     private void processPlacement(LineClearResult result) {
         piecesPlaced[result.playerId]++;
         clearSpinStats.record(result);
-        int priorCombo = game.getCombo();
+        int priorCombo = game.getCombo(result.boardIndex);
         if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
-            long points = scorer.scoreHardDrop(result, effects);
+            long points = scorerFor(result.boardIndex).scoreHardDrop(result, effects);
+            if (points > 0) globalScore += points;
             if (loadouts != null && points > 0) {
                 meterController.onScoreEvent(result.playerId, points, result.pieceType,
                         result.numClearedRows() > 0, result.spinType != SpinType.NONE);
@@ -288,26 +315,29 @@ public class ServerGame {
             game.applyClearToCounters(result);
         }
         effects.queueHardDropEffect(result, priorCombo);
-        effects.queueResultParticles(result, game.getBoards().get(0).bw());
+        effects.queueResultParticles(result, game.getBoards().get(result.boardIndex).bw());
     }
 
     /**
-     * Post-landing logic for a falling column: scores flat falling clears, updates combo/B2B
-     * counters, feeds meter/stats when attributed, and queues landing flash + clear particles.
+     * Post-landing logic for a falling column: scores flat falling clears on the board it
+     * landed on, updates combo/B2B counters, feeds meter/stats when attributed, and queues
+     * landing flash + clear particles/SFX.
      */
     private void processFallingLanding(LineClearResult result) {
         boolean attributed = result.playerId >= 0;
+        int priorCombo = game.getCombo(result.boardIndex);
 
         if (attributed) {
             clearSpinStats.record(result);
         }
 
         if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
-            long points = attributed ? scorer.scoreFallingClear(result, effects) : 0L;
+            long points = attributed ? scorerFor(result.boardIndex).scoreFallingClear(result, effects) : 0L;
             if (!attributed) {
                 // Still update counters even when unattributed (score is zero).
                 game.applyClearToCounters(result);
             }
+            if (points > 0) globalScore += points;
             if (loadouts != null && attributed && points > 0) {
                 meterController.onScoreEvent(result.playerId, points, result.pieceType,
                         result.numClearedRows() > 0, false);
@@ -317,7 +347,12 @@ public class ServerGame {
         }
 
         effects.queueFallingLandingFlash(result);
-        effects.queueResultParticles(result, game.getBoards().get(0).bw());
+        effects.queueResultParticles(result, game.getBoards().get(result.boardIndex).bw());
+        effects.queueFallingClearEffect(result, priorCombo);
+    }
+
+    private ScoreModeScorer scorerFor(int boardIndex) {
+        return (scorers != null && boardIndex >= 0 && boardIndex < scorers.length) ? scorers[boardIndex] : null;
     }
 
     // -------------------------------------------------------------------------
@@ -328,31 +363,34 @@ public class ServerGame {
     private static final float BUMP_TIMER_THRESHOLD_MS = 800f;
 
     private void checkBump(Board board, int playerA, int playerB) {
-        if (board.getActivePiece(playerA).movementTimer < BUMP_TIMER_THRESHOLD_MS
-                && board.getActivePiece(playerB).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
-            bumpedEvent(playerA, playerB);
+        int seatA = game.seatOf(playerA);
+        int seatB = game.seatOf(playerB);
+        if (board.getActivePiece(seatA).movementTimer < BUMP_TIMER_THRESHOLD_MS
+                && board.getActivePiece(seatB).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
+            bumpedEvent(playerA, playerB, game.boardIndexOf(playerA));
         }
     }
 
     private void checkBlocked(Board board, int droppedPlayerId, int blockingPlayerId) {
-        if (board.getActivePiece(blockingPlayerId).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
-            blockedEvent(droppedPlayerId, blockingPlayerId);
+        int blockingSeat = game.seatOf(blockingPlayerId);
+        if (board.getActivePiece(blockingSeat).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
+            blockedEvent(droppedPlayerId, blockingPlayerId, game.boardIndexOf(droppedPlayerId));
         }
     }
 
     /** Stub: fired when two players mutually block each other's lateral movement while
      *  both moved/rotated/soft-dropped recently. More functionality to come later. */
-    private void bumpedEvent(int playerA, int playerB) {
+    private void bumpedEvent(int playerA, int playerB, int boardIndex) {
         if (playerA >= 0 && playerA < bumpCounts.length) bumpCounts[playerA]++;
         if (playerB >= 0 && playerB < bumpCounts.length) bumpCounts[playerB]++;
-        effects.addBumpSound((byte) playerA, (byte) playerB, false);
+        effects.addBumpSound((byte) playerA, (byte) playerB, (byte) boardIndex, false);
     }
 
     /** Stub: fired when a hard-dropped piece rests on another player's recently-moved
      *  piece without locking. More functionality to come later. */
-    private void blockedEvent(int droppedPlayerId, int blockingPlayerId) {
+    private void blockedEvent(int droppedPlayerId, int blockingPlayerId, int boardIndex) {
         if (droppedPlayerId >= 0 && droppedPlayerId < blockedCounts.length) blockedCounts[droppedPlayerId]++;
-        effects.addBumpSound((byte) droppedPlayerId, (byte) blockingPlayerId, true);
+        effects.addBumpSound((byte) droppedPlayerId, (byte) blockingPlayerId, (byte) boardIndex, true);
     }
 
     // -------------------------------------------------------------------------
@@ -366,10 +404,13 @@ public class ServerGame {
             case MULTIPLAYER_SCORE:
             case MULTIPLAYER_PUZZLE:
             case CHARACTER_SCORE:
-                if (loadouts != null && game != null && !endCtrl.isGameEnded()) {
-                    noobGravity.tick(deltaTime);
-                    game.setGlobalGravitySpeedFactor(noobGravity.gravitySpeedFactor());
-                    meterController.setExternalPassiveFillMultiplier(noobGravity.passiveMeterFillMultiplier());
+                if (loadouts != null && game != null) {
+                    for (int b = 0; b < noobGravity.length; b++) {
+                        if (!endCtrl.isBoardRunning(b)) continue;
+                        noobGravity[b].tick(deltaTime);
+                        game.setGravitySpeedFactor(b, noobGravity[b].gravitySpeedFactor());
+                        meterController.setExternalPassiveFillMultiplier(b, noobGravity[b].passiveMeterFillMultiplier());
+                    }
                 }
                 updateGameTick();
                 if (loadouts != null && game != null && game.isStarted() && !endCtrl.isGameEnded()) {
@@ -381,7 +422,7 @@ public class ServerGame {
                 break;
         }
 
-        endCtrl.tickGrace(gameMode, scorer, room, this::stopGame);
+        endCtrl.tickGrace(gameMode, room, this::stopGame);
 
         lastUpdateMs = System.currentTimeMillis();
         t++;
@@ -389,12 +430,14 @@ public class ServerGame {
 
     /**
      * Common per-tick update shared by all active game modes. The only mode-specific behaviour
-     * (the win condition) is delegated to {@link GameEndController#checkWinCondition}.
+     * (the win condition) is delegated to {@link me.ethanchen.game.GameModeRules#isWinConditionMet},
+     * evaluated independently for every still-running board.
      */
     private void updateGameTick() {
         if (endCtrl.isGameEnded()) return;
         game.update(deltaTime);
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
+            if (!endCtrl.isBoardRunning(r.boardIndex)) continue;
             if (r.fallingClear) {
                 processFallingLanding(r);
             } else if (r.placed) {
@@ -405,10 +448,31 @@ public class ServerGame {
             }
         }
         if (game.isStarted() && !endCtrl.isGameEnded()) {
-            blocked.update(deltaTime / 1000f, players, game,
-                    () -> endCtrl.beginGameEndLoss(gameMode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats));
-            endCtrl.checkWinCondition(gameMode, game, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+            long[] boardScorePerPlayer = computeBoardScorePerPlayer();
+            for (int b = 0; b < blocked.length; b++) {
+                if (!endCtrl.isBoardRunning(b)) continue;
+                int boardIndex = b;
+                blocked[b].update(deltaTime / 1000f, game.getBoards().get(b),
+                        () -> endCtrl.beginBoardLoss(boardIndex, gameMode, globalScore, boardScorePerPlayer,
+                                bumpCounts, blockedCounts, piecesPlaced, clearSpinStats));
+            }
+            for (int b = 0; b < game.getBoards().size(); b++) {
+                if (!endCtrl.isBoardRunning(b)) continue;
+                endCtrl.checkWinCondition(b, gameMode, game, globalScore, boardScorePerPlayer,
+                        bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+            }
         }
+    }
+
+    /** Each player's own board's current score, indexed by global slot; used to freeze the personal result at game end. */
+    private long[] computeBoardScorePerPlayer() {
+        long[] out = new long[players];
+        if (scorers == null) return out;
+        for (int slot = 0; slot < players; slot++) {
+            ScoreModeScorer scorer = scorerFor(game.boardIndexOf(slot));
+            out[slot] = scorer != null ? scorer.getTotalScore() : 0L;
+        }
+        return out;
     }
 
     // -------------------------------------------------------------------------
@@ -444,21 +508,39 @@ public class ServerGame {
     }
 
     public boolean computeHoldAvailable(int playerId) {
-        if (game == null || game.getBoards().isEmpty()) return true;
-        return blocked.computeHoldAvailable(playerId, game.getBoards().get(0));
+        if (game == null) return true;
+        Board board = game.boardFor(playerId);
+        if (board == null) return true;
+        return blocked[game.boardIndexOf(playerId)].computeHoldAvailable(game.seatOf(playerId), board);
     }
 
     public boolean computeOwnPieceHoldGlow(int playerId) {
-        if (game == null || game.getBoards().isEmpty()) return false;
-        return blocked.computeOwnPieceHoldGlow(playerId, game.getBoards().get(0));
+        if (game == null) return false;
+        Board board = game.boardFor(playerId);
+        if (board == null) return false;
+        return blocked[game.boardIndexOf(playerId)].computeOwnPieceHoldGlow(game.seatOf(playerId), board);
     }
 
+    /** Board 0's explode progress, for the legacy single-board broadcast. */
     public float getExplodeProgress() {
-        return blocked.getExplodeProgress();
+        return getExplodeProgress(0);
     }
 
+    public float getExplodeProgress(int boardIndex) {
+        return (blocked != null && boardIndex >= 0 && boardIndex < blocked.length)
+                ? blocked[boardIndex].getExplodeProgress() : -1f;
+    }
+
+    /** Board 0's score-mode data, for the legacy single-board broadcast. */
     public ScoreModeData getScoreModeData() {
-        return scorer.getScoreModeData();
+        return getScoreModeData(0);
+    }
+
+    public ScoreModeData getScoreModeData(int boardIndex) {
+        ScoreModeScorer scorer = scorerFor(boardIndex);
+        ScoreModeData d = scorer != null ? scorer.getScoreModeData() : new ScoreModeData();
+        d.totalScore = globalScore;
+        return d;
     }
 
     public PuzzleModeData getPuzzleModeData() {
@@ -474,18 +556,19 @@ public class ServerGame {
     /**
      * Populates the mode-specific data fields of {@code b} for the current game mode.
      * Replaces the {@code switch (gameMode)} that previously lived in
-     * {@link GameRoom#sendNetUpdates}.
+     * {@link GameRoom#sendNetUpdates}. Uses board 0's data — every client currently renders only
+     * board 0, so this matches today's single-board reality.
      */
     public void populateModeData(me.ethanchen.network.packets.s2c.LightGameStateBroadcast b) {
         if (gameMode == me.ethanchen.game.GameMode.MULTIPLAYER_SCORE) {
-            b.scoreMode = scorer.getScoreModeData();
+            b.scoreMode = getScoreModeData(0);
         } else if (gameMode == me.ethanchen.game.GameMode.MULTIPLAYER_PUZZLE) {
             b.puzzleMode = getPuzzleModeData();
         } else if (gameMode == me.ethanchen.game.GameMode.CHARACTER_SCORE) {
-            b.scoreMode = scorer.getScoreModeData();
+            b.scoreMode = getScoreModeData(0);
             if (loadouts != null) {
                 b.characterMode = meterController.getCharacterModeData();
-                b.characterMode.globalGravitySpeedFactor = noobGravity.gravitySpeedFactor();
+                b.characterMode.globalGravitySpeedFactor = game.getGravitySpeedFactor(0);
             }
         }
     }
@@ -493,7 +576,8 @@ public class ServerGame {
     /**
      * Activates {@code playerId}'s character ability if their meter is full (implementation.md,
      * Part 1/4): 3-Mino fills skyline gaps with garbage, Wizard forces an I, The Noob disables
-     * gravity. No-op (returns false) for non-character modes, an unready meter, or an invalid player.
+     * gravity. Every effect is scoped to the activator's own board. No-op (returns false) for
+     * non-character modes, an unready meter, or an invalid player.
      */
     public synchronized boolean activateAbility(int playerId) {
         if (loadouts == null || !canActivateAbility(playerId)) return false;
@@ -501,34 +585,35 @@ public class ServerGame {
         CharacterDef character = loadouts[playerId].character;
         if (character == null) return false;
 
+        int boardIndex = game.boardIndexOf(playerId);
+        Board board = game.boardFor(playerId);
+        int seat = game.seatOf(playerId);
+
         boolean activated;
         switch (character.ability) {
             case FILL_SKYLINE_GAPS:
                 if (!meterController.tryConsume(playerId)) return false;
-                activated = activateFillSkylineGaps();
+                activated = activateFillSkylineGaps(board, boardIndex);
                 break;
             case FORCE_I:
                 if (!canSwapActivePiece(playerId)) return false;
                 if (!meterController.tryConsume(playerId)) return false;
                 activated = swapActivePiece(playerId, Piece.I);
                 if (activated) {
-                    Board board = game.getBoards().get(0);
-                    board.getActivePiece(playerId).fallTrigger = true;
+                    board.getActivePiece(seat).fallTrigger = true;
                 }
                 break;
             case DISABLE_AND_RAMP_GRAVITY:
                 if (!meterController.tryConsume(playerId)) return false;
-                noobGravity.activate();
-                if (game != null) {
-                    game.setGlobalGravitySpeedFactor(noobGravity.gravitySpeedFactor());
-                }
-                meterController.setExternalPassiveFillMultiplier(noobGravity.passiveMeterFillMultiplier());
+                noobGravity[boardIndex].activate();
+                game.setGravitySpeedFactor(boardIndex, noobGravity[boardIndex].gravitySpeedFactor());
+                meterController.setExternalPassiveFillMultiplier(boardIndex, noobGravity[boardIndex].passiveMeterFillMultiplier());
                 activated = true;
                 break;
             default:
                 return false;
         }
-        if (activated) effects.addAbilityActivateSound((byte) playerId);
+        if (activated) effects.addAbilityActivateSound((byte) playerId, (byte) boardIndex);
         return activated;
     }
 
@@ -539,20 +624,21 @@ public class ServerGame {
     private boolean canActivateAbility(int playerId) {
         if (!inProgress || endCtrl.isGameEnded() || game == null) return false;
         if (playerId < 0 || playerId >= players) return false;
-        if (game.getBoards().isEmpty()) return false;
-        Board board = game.getBoards().get(0);
-        if (board.getActivePieces().size() <= playerId) return false;
-        return !board.getActivePieces().get(playerId).isBlockedFromSpawning;
+        Board board = game.boardFor(playerId);
+        if (board == null) return false;
+        int seat = game.seatOf(playerId);
+        if (board.getActivePieces().size() <= seat) return false;
+        return !board.getActivePieces().get(seat).isBlockedFromSpawning;
     }
 
     /**
-     * Fills skyline-band gaps with garbage and queues hard-drop flash particles for each filled
-     * cell. Always returns true after a successful meter consume (even if no cells were filled).
+     * Fills skyline-band gaps with garbage on {@code board} and queues hard-drop flash particles
+     * for each filled cell. Always returns true after a successful meter consume (even if no
+     * cells were filled).
      */
-    private boolean activateFillSkylineGaps() {
-        Board board = game.getBoards().get(0);
+    private boolean activateFillSkylineGaps(Board board, int boardIndex) {
         int[][] filled = board.fillSkylineGaps();
-        effects.queueHardDropCellFlashes(filled);
+        effects.queueHardDropCellFlashes(filled, boardIndex);
         return true;
     }
 
@@ -600,6 +686,7 @@ public class ServerGame {
      * Called when a player disconnects mid-game.
      */
     public synchronized void handleDisconnectedPlayer(int id) {
-        endCtrl.beginGameEndDisconnect(gameMode, scorer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+        endCtrl.beginGameEndDisconnect(gameMode, globalScore, computeBoardScorePerPlayer(),
+                bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
     }
 }

@@ -14,6 +14,29 @@ import me.ethanchen.network.dto.NetPiece;
 import me.ethanchen.network.dto.NetQueue;
 
 public class Board {
+    /** Index of this board within {@code GameHandler.getBoards()}. Defaults to 0. */
+    private int boardIndex = 0;
+    /**
+     * Maps this board's local seat index (matching {@link #activePieces}, {@link #pieceQueues},
+     * {@link #spawnPositions}) to the global session player slot. Defaults to the identity
+     * mapping so single-board games (today's only configuration) behave exactly as before.
+     * Populated by {@code GameHandler} when the board is created.
+     */
+    private int[] seatSlots;
+
+    public int getBoardIndex() { return boardIndex; }
+    public void setBoardIndex(int boardIndex) { this.boardIndex = boardIndex; }
+
+    /** Sets the seat-to-global-slot mapping; see {@link #seatSlots}. */
+    public void setSeatSlots(int[] seatSlots) { this.seatSlots = seatSlots; }
+    public int[] getSeatSlots() { return seatSlots; }
+
+    /** Resolves a board-local seat index to its global session player slot. */
+    public int globalSlotForSeat(int seat) {
+        if (seatSlots == null || seat < 0 || seat >= seatSlots.length) return seat;
+        return seatSlots[seat];
+    }
+
     protected final boolean[][] allowedTiles;
     protected final Tile[][] board;
     protected final byte width;
@@ -482,7 +505,8 @@ public class Board {
     private LineClearResult lockPieceInPlace(int id, int dropDistance, boolean manual) {
         Piece p = activePieces.get(id);
         LineClearResult result = new LineClearResult();
-        result.playerId = id;
+        result.playerId = globalSlotForSeat(id);
+        result.boardIndex = boardIndex;
         result.pieceType = p.type;
         result.restingX = (int) Math.floor(p.location.x);
         result.restingY = (int) Math.floor(p.location.y);
@@ -496,7 +520,8 @@ public class Board {
 
         if (!hasSolidSupport) {
             result.placed = false;
-            result.blockedByPlayerId = BoardCollision.findRestingBlocker(this, id);
+            int blockerSeat = BoardCollision.findRestingBlocker(this, id);
+            result.blockedByPlayerId = blockerSeat >= 0 ? globalSlotForSeat(blockerSeat) : -1;
             return result;
         }
 

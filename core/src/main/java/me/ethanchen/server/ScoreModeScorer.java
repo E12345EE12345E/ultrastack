@@ -1,5 +1,6 @@
 package me.ethanchen.server;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
 
@@ -12,18 +13,25 @@ import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 /**
- * Encapsulates all MULTIPLAYER_SCORE scoring state and logic extracted from {@link ServerGame}:
- * glow target, repeat columns, accumulated score, and the per-placement scoring algorithm.
+ * Encapsulates one board's MULTIPLAYER_SCORE scoring state and logic extracted from
+ * {@link ServerGame}: glow target, repeat columns, this board's own accumulated score, and the
+ * per-placement scoring algorithm. One instance exists per board so glow/repeat-column/gravity
+ * ramp never leak between boards; {@link ServerGame} separately tracks the session-wide
+ * aggregate score across every board's scorer.
  */
 class ScoreModeScorer {
 
     private long totalScore;
-    private int glowPlayerId;
+    /** Global slot of the currently glowing player on this board, or -1. */
+    private int glowPlayerId = -1;
     private int repeatColumn;
     private int repeatColumn2;
+    /** Indexed by position within {@link #boardSlots}, not by global slot. */
     private float[] glowValues;
     private final Random scoreRng = new Random();
-    private int players;
+    private int boardIndex;
+    /** Global slots of every player seated on this board. */
+    private int[] boardSlots = new int[0];
     private GameHandler game;
     /** Non-null only for CHARACTER_ modes: supplies the artifact/passive score bonus percent. */
     private CharacterScoreBonusProvider bonusProvider;
@@ -35,18 +43,20 @@ class ScoreModeScorer {
         this.bonusProvider = bonusProvider;
     }
 
-    /** Re-initialises scorer for a new game. */
-    void reset(int players, GameHandler game) {
-        this.players = players;
+    /** Re-initialises this board's scorer for a new game. */
+    void reset(int boardIndex, int[] boardSlots, GameHandler game) {
+        this.boardIndex = boardIndex;
+        this.boardSlots = boardSlots != null ? boardSlots : new int[0];
         this.game = game;
         totalScore = 0;
         glowPlayerId = -1;
         repeatColumn = -1;
         repeatColumn2 = -1;
-        glowValues = new float[players];
+        glowValues = new float[this.boardSlots.length];
         Arrays.fill(glowValues, 0.5f);
     }
 
+    /** This board's own accumulated score (not the session-wide aggregate). */
     long getTotalScore() { return totalScore; }
 
     // -------------------------------------------------------------------------
@@ -55,7 +65,7 @@ class ScoreModeScorer {
 
     /**
      * Scores the placement, updates glow/repeat-column state, queues score popup particles,
-     * updates combo/B2B counters via {@code game}, and ramps gravity.
+     * updates this board's combo/B2B counters via {@code game}, and ramps this board's gravity.
      * Called only in MULTIPLAYER_SCORE mode.
      */
     long scoreHardDrop(LineClearResult result, PlacementEffects effects) {
@@ -65,9 +75,9 @@ class ScoreModeScorer {
             return 0L;
         }
 
-        int priorB2b = game.getB2b();
-        int priorCombo = game.getCombo();
-        int priorComboPlayer = game.getPreviousComboPlayerId();
+        int priorB2b = game.getB2b(boardIndex);
+        int priorCombo = game.getCombo(boardIndex);
+        int priorComboPlayer = game.getPreviousComboPlayerId(boardIndex);
         boolean eligible = GameHandler.isB2BEligible(result);
 
         boolean b2bBonus    = eligible && priorB2b >= 1;
@@ -95,7 +105,7 @@ class ScoreModeScorer {
         float cy = result.restingCenterY;
 
         NetParticle scoreParticle = new NetParticle();
-        scoreParticle.boardIndex = 0;
+        scoreParticle.boardIndex = (byte) boardIndex;
         scoreParticle.kind = NetParticle.KIND_POPUP_SCORE;
         scoreParticle.tileType = result.pieceType;
         scoreParticle.x = cx;
@@ -109,7 +119,7 @@ class ScoreModeScorer {
                       | (glowBonus   ? 8 : 0);
         if (bonusBits != 0) {
             NetParticle multParticle = new NetParticle();
-            multParticle.boardIndex = 0;
+            multParticle.boardIndex = (byte) boardIndex;
             multParticle.kind = NetParticle.KIND_POPUP_SCORE_MULTIPLIER;
             multParticle.tileType = result.pieceType;
             multParticle.x = cx;
@@ -119,7 +129,7 @@ class ScoreModeScorer {
         }
 
         if (glowBonus) glowPlayerId = -1;
-        if (eligible && players > 1) {
+        if (eligible && boardSlots.length > 1) {
             glowPlayerId = randomOtherPlayer(result.playerId);
         }
         rebuildGlowValues();
@@ -128,11 +138,11 @@ class ScoreModeScorer {
 
         game.applyClearToCounters(result);
 
-        int newGravity = game.getGravity();
+        int newGravity = game.getGravity(boardIndex);
         for (int i = 0; i < lines; i++) {
             newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
         }
-        game.setGravity(newGravity);
+        game.setGravity(boardIndex, newGravity);
 
         return points;
     }
@@ -140,7 +150,7 @@ class ScoreModeScorer {
     /**
      * Scores a falling-column landing: flat {@link GameConstants#SCORE_FALLING_PER_LINE} per
      * cleared row, plus the all-clear bonus when applicable. No combo/B2B/glow/diff-column
-     * multipliers. Still updates combo/B2B counters via {@code game.applyClearToCounters}.
+     * multipliers. Still updates this board's combo/B2B counters via {@code game.applyClearToCounters}.
      */
     long scoreFallingClear(LineClearResult result, PlacementEffects effects) {
         int lines = result.numClearedRows();
@@ -157,7 +167,7 @@ class ScoreModeScorer {
         float cy = result.restingCenterY;
 
         NetParticle scoreParticle = new NetParticle();
-        scoreParticle.boardIndex = 0;
+        scoreParticle.boardIndex = (byte) boardIndex;
         scoreParticle.kind = NetParticle.KIND_POPUP_SCORE;
         scoreParticle.tileType = result.pieceType;
         scoreParticle.x = cx;
@@ -167,19 +177,20 @@ class ScoreModeScorer {
 
         game.applyClearToCounters(result);
 
-        int newGravity = game.getGravity();
+        int newGravity = game.getGravity(boardIndex);
         for (int i = 0; i < lines; i++) {
             newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
         }
-        game.setGravity(newGravity);
+        game.setGravity(boardIndex, newGravity);
 
         return points;
     }
 
+    /** Board-local data; {@code totalScore} is filled in by {@link ServerGame} with the session aggregate. */
     ScoreModeData getScoreModeData() {
         ScoreModeData d = new ScoreModeData();
         d.glowingValues = (glowValues != null) ? Arrays.copyOf(glowValues, glowValues.length) : new float[0];
-        d.totalScore    = totalScore;
+        d.boardScore    = totalScore;
         d.repeatColumn  = repeatColumn;
         d.repeatColumn2 = repeatColumn2;
         return d;
@@ -268,21 +279,30 @@ class ScoreModeScorer {
         }
     }
 
+    /** Picks a random global slot on this board other than {@code excludeId}, or -1 if none. */
     private int randomOtherPlayer(int excludeId) {
-        int count = players - 1;
-        if (count <= 0) return -1;
-        int pick = scoreRng.nextInt(count);
-        if (pick >= excludeId) pick++;
-        return pick;
+        if (boardSlots.length <= 1) return -1;
+        ArrayList<Integer> others = new ArrayList<>(boardSlots.length - 1);
+        for (int slot : boardSlots) {
+            if (slot != excludeId) others.add(slot);
+        }
+        if (others.isEmpty()) return -1;
+        return others.get(scoreRng.nextInt(others.size()));
     }
 
     private void rebuildGlowValues() {
-        if (glowValues == null || glowValues.length != players) {
-            glowValues = new float[players];
+        if (glowValues == null || glowValues.length != boardSlots.length) {
+            glowValues = new float[boardSlots.length];
         }
         Arrays.fill(glowValues, 0.25f);
-        if (glowPlayerId >= 0 && glowPlayerId < players) {
-            glowValues[glowPlayerId] = 2f;
+        int localIndex = localIndexOf(glowPlayerId);
+        if (localIndex >= 0) glowValues[localIndex] = 2f;
+    }
+
+    private int localIndexOf(int globalSlot) {
+        for (int i = 0; i < boardSlots.length; i++) {
+            if (boardSlots[i] == globalSlot) return i;
         }
+        return -1;
     }
 }

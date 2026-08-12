@@ -1,10 +1,10 @@
 package me.ethanchen.network.dto;
 
 /**
- * Compact descriptor of a single piece placement, carrying everything the client needs to
- * play the placement sound, spawn the hard-drop flash particles, and poof the player's ripple
- * circle. One entry is queued per successful lock (manual hard drop, movement auto-lock, or
- * gravity auto-lock).
+ * Compact descriptor of a single piece placement or falling-column clear, carrying everything
+ * the client needs for placement/clear sounds and hard-drop flash particles. One entry is queued
+ * per successful lock (manual hard drop, movement auto-lock, or gravity auto-lock), or per
+ * falling-column landing that clears lines ({@link #fallingClear}).
  *
  * <p><strong>Purely cosmetic:</strong> delivered unreliably over UDP inside a
  * {@link me.ethanchen.network.packets.s2c.HardDropEffectsBroadcast}, may be dropped in transit,
@@ -28,6 +28,9 @@ public class HardDropEffect {
 
     /** Player index whose piece was placed. */
     public byte playerId;
+
+    /** Index of the board this placement occurred on. */
+    public byte boardIndex;
 
     /** Piece type byte (e.g. {@code Piece.I}, {@code Piece.T}, ...) of the placed piece. */
     public byte pieceType;
@@ -60,4 +63,10 @@ public class HardDropEffect {
 
     /** True when this placement emptied the board (All Clear / Perfect Clear). */
     public boolean allClear;
+
+    /**
+     * True when this effect is from a falling-column line clear. Client plays clear sounds only
+     * (no place sound, hard-drop flash, or ripple poof).
+     */
+    public boolean fallingClear;
 }

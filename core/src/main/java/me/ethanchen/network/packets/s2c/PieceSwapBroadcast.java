@@ -12,4 +12,6 @@ public class PieceSwapBroadcast extends NetworkPacket {
     public byte playerId;
     /** Piece type that was spawned. */
     public byte pieceType;
+    /** Index of the board this swap occurred on. */
+    public byte boardIndex;
 }

@@ -1,14 +1,17 @@
 package me.ethanchen.server;
 
 import me.ethanchen.game.GameConstants;
-import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.Piece;
 
 /**
- * Manages per-player piece-cycling while blocked at spawn, hold-while-blocked mechanics,
- * and the explode countdown that ends the game once all players are simultaneously blocked.
- * Extracted from {@link ServerGame}.
+ * Manages one board's per-seat piece-cycling while blocked at spawn, hold-while-blocked
+ * mechanics, and the explode countdown that eliminates that board once every seat on it is
+ * simultaneously blocked. Extracted from {@link ServerGame}; one instance exists per board so the
+ * hold lock and explode countdown never leak between boards.
+ * <p>
+ * All indices taken by this class ({@code seat}) are board-local seat indices, matching the
+ * given {@link Board}'s own {@code activePieces} ordering — not global session slots.
  */
 class BlockedSpawnController {
 
@@ -22,13 +25,13 @@ class BlockedSpawnController {
 
     BlockedSpawnController() {}
 
-    /** Re-initialises all cycling state for a new game. */
-    void reset(int players) {
-        timeBetweenNextPiece = new float[players];
-        cycleTimer           = new float[players];
-        lastCycleSwitchMs    = new long[players];
-        previousCyclePieceId = new byte[players];
-        wasBlocked           = new boolean[players];
+    /** Re-initialises all cycling state for a new game. {@code seatCount} is this board's own seat count. */
+    void reset(int seatCount) {
+        timeBetweenNextPiece = new float[seatCount];
+        cycleTimer           = new float[seatCount];
+        lastCycleSwitchMs    = new long[seatCount];
+        previousCyclePieceId = new byte[seatCount];
+        wasBlocked           = new boolean[seatCount];
         java.util.Arrays.fill(timeBetweenNextPiece, GameConstants.CYCLE_START);
         explodeCountdown = -1f;
         lastHoldUsedMs   = 0;
@@ -41,35 +44,33 @@ class BlockedSpawnController {
     // -------------------------------------------------------------------------
 
     /**
-     * Advances all per-player blocked cycling timers and the global explode countdown.
+     * Advances this board's per-seat blocked cycling timers and its own explode countdown.
      *
      * @param dtSec       elapsed seconds since last tick
-     * @param players     number of active players
-     * @param game        live game handler
-     * @param onGameEnd   called with {@code (win=false)} when the explode countdown expires
+     * @param board       this controller's board
+     * @param onBoardLost called with once this board's explode countdown expires (that board is eliminated)
      */
-    void update(float dtSec, int players, GameHandler game, Runnable onGameEnd) {
-        if (game == null || game.getBoards().isEmpty()) return;
-        Board board = game.getBoards().get(0);
-        if (board.getActivePieces().isEmpty()) return;
+    void update(float dtSec, Board board, Runnable onBoardLost) {
+        if (board == null || board.getActivePieces().isEmpty()) return;
+        int seats = timeBetweenNextPiece.length;
 
         long now = System.currentTimeMillis();
 
-        for (int i = 0; i < players; i++) {
+        for (int i = 0; i < seats; i++) {
             if (i >= board.getActivePieces().size()) continue;
             Piece piece = board.getActivePieces().get(i);
-            boolean blocked = piece.isBlockedFromSpawning;
+            boolean blockedNow = piece.isBlockedFromSpawning;
 
-            if (blocked && !wasBlocked[i]) {
+            if (blockedNow && !wasBlocked[i]) {
                 timeBetweenNextPiece[i] = GameConstants.CYCLE_START;
                 cycleTimer[i] = 0f;
             }
-            if (!blocked && wasBlocked[i]) {
+            if (!blockedNow && wasBlocked[i]) {
                 cycleTimer[i] = 0f;
             }
-            wasBlocked[i] = blocked;
+            wasBlocked[i] = blockedNow;
 
-            if (!blocked) continue;
+            if (!blockedNow) continue;
 
             cycleTimer[i] += dtSec;
             float interval = effectiveInterval(i);
@@ -92,8 +93,8 @@ class BlockedSpawnController {
             }
         }
 
-        boolean allBlocked = players > 0;
-        for (int i = 0; i < players; i++) {
+        boolean allBlocked = seats > 0;
+        for (int i = 0; i < seats; i++) {
             if (i >= board.getActivePieces().size()) { allBlocked = false; break; }
             Piece p = board.getActivePieces().get(i);
             if (!p.isBlockedFromSpawning) {
@@ -106,7 +107,7 @@ class BlockedSpawnController {
             if (explodeCountdown < 0f) explodeCountdown = 0f;
             explodeCountdown += dtSec;
             if (explodeCountdown >= GameConstants.EXPLODE_DURATION) {
-                onGameEnd.run();
+                onBoardLost.run();
             }
         } else if (explodeCountdown >= 0f) {
             explodeCountdown = -1f;
@@ -118,66 +119,66 @@ class BlockedSpawnController {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns true when player {@code i}'s blocked piece may be held
-     * (cycling has reached minimum interval and explode is not active).
+     * Returns true when seat {@code seat}'s blocked piece may be held
+     * (cycling has reached minimum interval and this board's explode is not active).
      */
-    boolean canHoldWhileBlocked(int i) {
-        if (timeBetweenNextPiece == null || i < 0 || i >= timeBetweenNextPiece.length) return false;
-        return timeBetweenNextPiece[i] <= GameConstants.CYCLE_MIN && explodeCountdown < 0f;
+    boolean canHoldWhileBlocked(int seat) {
+        if (timeBetweenNextPiece == null || seat < 0 || seat >= timeBetweenNextPiece.length) return false;
+        return timeBetweenNextPiece[seat] <= GameConstants.CYCLE_MIN && explodeCountdown < 0f;
     }
 
     /**
-     * Returns true if player {@code playerId}'s piece is blocked and may be held right now.
+     * Returns true if seat {@code seat}'s piece is blocked and may be held right now.
      */
-    boolean computeHoldAvailable(int playerId, Board board) {
-        if (board.getActivePieces().size() > playerId
-                && board.getActivePieces().get(playerId).isBlockedFromSpawning) {
+    boolean computeHoldAvailable(int seat, Board board) {
+        if (board.getActivePieces().size() > seat
+                && board.getActivePieces().get(seat).isBlockedFromSpawning) {
             if (explodeCountdown >= 0f) return false;
-            return canHoldWhileBlocked(playerId);
+            return canHoldWhileBlocked(seat);
         }
         long now = System.currentTimeMillis();
-        boolean globalLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < GameConstants.HOLD_GLOBAL_LOCK_MS;
-        return !board.isPlayerHoldUsed(playerId) && !globalLock;
+        boolean boardLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < GameConstants.HOLD_GLOBAL_LOCK_MS;
+        return !board.isPlayerHoldUsed(seat) && !boardLock;
     }
 
     /**
-     * Returns true when the controlling player's piece is blocked and can be held (triggers
+     * Returns true when the controlling seat's piece is blocked and can be held (triggers
      * the hold-glow indicator on the client).
      */
-    boolean computeOwnPieceHoldGlow(int playerId, Board board) {
-        if (board.getActivePieces().size() <= playerId) return false;
-        Piece p = board.getActivePieces().get(playerId);
-        return p.isBlockedFromSpawning && canHoldWhileBlocked(playerId);
+    boolean computeOwnPieceHoldGlow(int seat, Board board) {
+        if (board.getActivePieces().size() <= seat) return false;
+        Piece p = board.getActivePieces().get(seat);
+        return p.isBlockedFromSpawning && canHoldWhileBlocked(seat);
     }
 
     /**
-     * Applies a hold action for a blocked player, with coyote-time support. Queues the hold
-     * sound via {@code effects}.
+     * Applies a hold action for a blocked seat, with coyote-time support. Queues the hold
+     * sound (addressed to {@code globalPlayerId}, for network identification) via {@code effects}.
      */
-    void applyBlockedHold(int playerId, Board board, PlacementEffects effects) {
-        if (!canHoldWhileBlocked(playerId)) return;
-        if (board.getActivePieces().size() <= playerId) return;
+    void applyBlockedHold(int seat, int globalPlayerId, Board board, PlacementEffects effects) {
+        if (!canHoldWhileBlocked(seat)) return;
+        if (board.getActivePieces().size() <= seat) return;
 
         long now = System.currentTimeMillis();
-        byte currentType = board.getActivePieces().get(playerId).type;
-        byte effectiveType = (lastCycleSwitchMs[playerId] > 0
-                && (now - lastCycleSwitchMs[playerId]) <= GameConstants.COYOTE_MS)
-                ? previousCyclePieceId[playerId]
+        byte currentType = board.getActivePieces().get(seat).type;
+        byte effectiveType = (lastCycleSwitchMs[seat] > 0
+                && (now - lastCycleSwitchMs[seat]) <= GameConstants.COYOTE_MS)
+                ? previousCyclePieceId[seat]
                 : currentType;
 
         byte oldHeld = board.getHeldPieceType();
         board.setHeldPieceType(effectiveType);
 
         if (oldHeld == 0) {
-            board.spawnNextPiece(playerId);
+            board.spawnNextPiece(seat);
         } else {
-            board.spawnHeldPiece(playerId, oldHeld);
+            board.spawnHeldPiece(seat, oldHeld);
         }
 
-        timeBetweenNextPiece[playerId] = GameConstants.CYCLE_START;
-        cycleTimer[playerId] = 0f;
+        timeBetweenNextPiece[seat] = GameConstants.CYCLE_START;
+        cycleTimer[seat] = 0f;
         lastHoldUsedMs = System.currentTimeMillis();
-        effects.addHoldSound((byte) playerId, true);
+        effects.addHoldSound((byte) globalPlayerId, true);
     }
 
     void setLastHoldUsedMs(long ms) { lastHoldUsedMs = ms; }

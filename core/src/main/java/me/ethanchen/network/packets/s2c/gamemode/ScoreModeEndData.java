@@ -1,7 +1,10 @@
 package me.ethanchen.network.packets.s2c.gamemode;
 
 public class ScoreModeEndData {
+    /** Session-wide aggregate score across every board. */
     public long finalScore;
+    /** Each player's own board's score, indexed by global slot (the personal result for XP/display). */
+    public long[] boardScore;
     public long timeSurvivedMs;
     /** Per-player count of mutual lateral bumps against another player's piece, indexed by player slot. */
     public int[] bumpCounts;

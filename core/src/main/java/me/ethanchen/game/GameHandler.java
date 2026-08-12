@@ -13,28 +13,27 @@ public class GameHandler {
     private GameMode mode;
     private final int numPlayers;
     private ArrayList<Board> boards;
+    /**
+     * Maps each global session slot to the index of the board it is seated on. Currently every
+     * slot maps to board 0 (the only board created); this exists so board-specific logic can be
+     * written correctly ahead of true multi-board support.
+     */
+    private int[] slotBoard;
+    /** Maps each global session slot to its board-local seat index (see {@link Board#globalSlotForSeat}). */
+    private int[] slotSeat;
     /** Per-player gravity accumulators (ms). */
     private int[] gravityTickCounters;
-    /** Match gravity interval in ms per row at full fall speed (ramped by scoring). */
-    private int gravity;
     /**
      * Per-player fall-speed multipliers (1 = normal). The Noob's passive uses 0.5 so that
      * player's piece falls half as fast.
      */
     private float[] playerGravitySpeedMult;
-    /**
-     * Global fall-speed factor from abilities such as The Noob's disable/ramp
-     * ({@code 0} = frozen, {@code 1} = full speed).
-     */
-    private float globalGravitySpeedFactor = 1f;
     private long startDelay;
     private boolean started;
     private ArrayList<LineClearResult> pendingLockResults = new ArrayList<>();
 
-    // Global counters shared across all game modes
-    private int b2b = 0;
-    private int combo = 0;
-    private int previousComboPlayerId = -1;
+    /** Per-board combo/b2b/gravity/gravity-speed state, indexed the same as {@link #boards}. */
+    private ArrayList<BoardState> boardStates = new ArrayList<>();
 
     public GameHandler(int numPlayers) {
         this.numPlayers = numPlayers;
@@ -50,13 +49,55 @@ public class GameHandler {
         startDelay = startGameTimer;
         if (mode == GameMode.NONE) return;
         GameModeRules rules = mode.rules();
-        gravity = rules.initialGravityMs();
         Arrays.fill(gravityTickCounters, 0);
         Arrays.fill(playerGravitySpeedMult, 1f);
-        globalGravitySpeedFactor = 1f;
         Board board = new Board(rules.boardPreset(numPlayers));
         rules.prepareBoard(board);
         boards.add(board);
+        BoardState state = new BoardState();
+        state.reset(rules.initialGravityMs());
+        boardStates.add(state);
+
+        // Every seated slot is currently placed on the single board created above, in seat order.
+        slotBoard = new int[numPlayers];
+        slotSeat = new int[numPlayers];
+        for (int i = 0; i < numPlayers; i++) {
+            slotBoard[i] = 0;
+            slotSeat[i] = i;
+        }
+        board.setBoardIndex(0);
+        board.setSeatSlots(slotSeat.clone());
+    }
+
+    /** Resolves the board that global slot {@code playerId} is seated on, or {@code null} if unseated. */
+    public Board boardFor(int playerId) {
+        int bi = boardIndexOf(playerId);
+        return (bi >= 0 && bi < boards.size()) ? boards.get(bi) : null;
+    }
+
+    /** Index of the board that global slot {@code playerId} is seated on, or {@code -1} if unseated. */
+    public int boardIndexOf(int playerId) {
+        if (slotBoard == null || playerId < 0 || playerId >= slotBoard.length) return -1;
+        return slotBoard[playerId];
+    }
+
+    /** Board-local seat index for global slot {@code playerId} (defaults to identity if unmapped). */
+    public int seatOf(int playerId) {
+        if (slotSeat == null || playerId < 0 || playerId >= slotSeat.length) return playerId;
+        return slotSeat[playerId];
+    }
+
+    /** Every global slot currently seated on board {@code boardIndex}, in seat order. */
+    public int[] slotsOnBoard(int boardIndex) {
+        if (slotBoard == null) return new int[0];
+        int count = 0;
+        for (int b : slotBoard) if (b == boardIndex) count++;
+        int[] result = new int[count];
+        int w = 0;
+        for (int i = 0; i < slotBoard.length; i++) {
+            if (slotBoard[i] == boardIndex) result[w++] = i;
+        }
+        return result;
     }
 
     public void startGame() {
@@ -95,7 +136,8 @@ public class GameHandler {
                 // Frozen: do not accumulate so thawing does not dump buffered ticks.
                 continue;
             }
-            int interval = Math.max(1, Math.round(gravity / speed));
+            int boardGravity = boardStateOrDefault(boardIndexOf(playerId)).getGravity();
+            int interval = Math.max(1, Math.round(boardGravity / speed));
             gravityTickCounters[playerId] += deltaTime;
             while (gravityTickCounters[playerId] >= interval) {
                 doGravityTick(playerId);
@@ -107,7 +149,14 @@ public class GameHandler {
     private float fallSpeedFor(int playerId) {
         float personal = (playerId >= 0 && playerId < playerGravitySpeedMult.length)
                 ? playerGravitySpeedMult[playerId] : 1f;
-        return personal * globalGravitySpeedFactor;
+        float boardFactor = boardStateOrDefault(boardIndexOf(playerId)).getGravitySpeedFactor();
+        return personal * boardFactor;
+    }
+
+    /** Resolves the {@link BoardState} for {@code boardIndex}, or a fresh default instance if out of range. */
+    private BoardState boardStateOrDefault(int boardIndex) {
+        if (boardIndex >= 0 && boardIndex < boardStates.size()) return boardStates.get(boardIndex);
+        return new BoardState();
     }
 
     public void doGravityTick() {
@@ -117,9 +166,8 @@ public class GameHandler {
     }
 
     public void doGravityTick(int playerId) {
-        for (Board b : boards) {
-            b.doGravityTick(playerId);
-        }
+        Board b = boardFor(playerId);
+        if (b != null) b.doGravityTick(seatOf(playerId));
     }
 
     private void doLockTimers(int deltaTime) {
@@ -162,9 +210,9 @@ public class GameHandler {
     }
 
     /**
-     * Updates the global b2b, combo and previousComboPlayerId counters based on the
-     * result of a hard drop or falling-column landing.  Must be called AFTER scoring so
-     * that pre-clear values can be read during score calculation.
+     * Updates the combo, b2b and previousComboPlayerId counters of the board the result occurred
+     * on (never a different board) based on the result of a hard drop or falling-column landing.
+     * Must be called AFTER scoring so that pre-clear values can be read during score calculation.
      * <p>
      * Rules:
      * <ul>
@@ -174,18 +222,7 @@ public class GameHandler {
      * </ul>
      */
     public void applyClearToCounters(LineClearResult r) {
-        if (!r.placed) return;
-        if (r.numClearedRows() == 0) {
-            combo = 0;
-        } else {
-            combo++;
-            previousComboPlayerId = r.playerId;
-            if (isB2BEligible(r)) {
-                b2b++;
-            } else {
-                b2b = 0;
-            }
-        }
+        boardStateOrDefault(r.boardIndex).applyClearToCounters(r);
     }
 
     // Getters/Setters
@@ -206,24 +243,37 @@ public class GameHandler {
         return started;
     }
 
-    /** Base gravity interval (ms/row) before per-player / ability speed modifiers. */
+    /** Base gravity interval (ms/row) before per-player / ability speed modifiers, for board 0. */
     public int getGravity() {
-        return gravity;
+        return getGravity(0);
+    }
+
+    /** Base gravity interval (ms/row) for {@code boardIndex} before per-player / ability speed modifiers. */
+    public int getGravity(int boardIndex) {
+        return boardStateOrDefault(boardIndex).getGravity();
     }
 
     /**
-     * Effective gravity interval for {@code playerId} after personal and global speed factors.
+     * Effective gravity interval for {@code playerId} after personal and board speed factors.
      * Returns a very large interval when fall speed is zero (gravity disabled).
      */
     public int getEffectiveGravityMs(int playerId) {
         float speed = fallSpeedFor(playerId);
         if (speed <= 0f) return Integer.MAX_VALUE / 4;
-        return Math.max(1, Math.round(gravity / speed));
+        int boardGravity = boardStateOrDefault(boardIndexOf(playerId)).getGravity();
+        return Math.max(1, Math.round(boardGravity / speed));
     }
 
-    public int getB2b() { return b2b; }
-    public int getCombo() { return combo; }
-    public int getPreviousComboPlayerId() { return previousComboPlayerId; }
+    /** Board 0's combo counter. Prefer {@link #getB2b(int)} once multiple boards exist. */
+    public int getB2b() { return getB2b(0); }
+    /** Board 0's combo counter. Prefer {@link #getCombo(int)} once multiple boards exist. */
+    public int getCombo() { return getCombo(0); }
+    /** Board 0's previous-combo player. Prefer {@link #getPreviousComboPlayerId(int)}. */
+    public int getPreviousComboPlayerId() { return getPreviousComboPlayerId(0); }
+
+    public int getB2b(int boardIndex) { return boardStateOrDefault(boardIndex).getB2b(); }
+    public int getCombo(int boardIndex) { return boardStateOrDefault(boardIndex).getCombo(); }
+    public int getPreviousComboPlayerId(int boardIndex) { return boardStateOrDefault(boardIndex).getPreviousComboPlayerId(); }
 
     /** Resets every player's gravity accumulator. */
     public void resetGravityTimer() {
@@ -236,8 +286,13 @@ public class GameHandler {
         gravityTickCounters[playerId] = 0;
     }
 
+    /** Sets board 0's gravity. Prefer {@link #setGravity(int, int)} once multiple boards exist. */
     public void setGravity(int g) {
-        gravity = g;
+        setGravity(0, g);
+    }
+
+    public void setGravity(int boardIndex, int g) {
+        if (boardIndex >= 0 && boardIndex < boardStates.size()) boardStates.get(boardIndex).setGravity(g);
     }
 
     /** Returns player 0's accumulator; prefer {@link #getGravityTickCounter(int)}. */
@@ -274,12 +329,42 @@ public class GameHandler {
         return playerGravitySpeedMult[playerId];
     }
 
+    /** Sets board 0's ability-driven gravity speed factor. Prefer {@link #setGravitySpeedFactor(int, float)}. */
     public void setGlobalGravitySpeedFactor(float factor) {
-        if (factor < 0f) factor = 0f;
-        globalGravitySpeedFactor = factor;
+        setGravitySpeedFactor(0, factor);
     }
 
+    /** Board 0's ability-driven gravity speed factor. Prefer {@link #getGravitySpeedFactor(int)}. */
     public float getGlobalGravitySpeedFactor() {
-        return globalGravitySpeedFactor;
+        return getGravitySpeedFactor(0);
+    }
+
+    /** Sets {@code boardIndex}'s ability-driven fall-speed factor (e.g. The Noob's disable/ramp). */
+    public void setGravitySpeedFactor(int boardIndex, float factor) {
+        if (boardIndex >= 0 && boardIndex < boardStates.size()) boardStates.get(boardIndex).setGravitySpeedFactor(factor);
+    }
+
+    public float getGravitySpeedFactor(int boardIndex) {
+        return boardStateOrDefault(boardIndex).getGravitySpeedFactor();
+    }
+
+    // -------------------------------------------------------------------------
+    // Test-only seams
+    // -------------------------------------------------------------------------
+    // GameHandler.init() always creates exactly one real Board (see class javadoc on the
+    // board-scoped refactor); these let tests exercise multi-board combo/gravity isolation
+    // without standing up a second real Board.
+
+    /** Test-only: appends an additional {@link BoardState} (no backing {@link Board}) so tests can verify per-board isolation. */
+    public void addBoardStateForTesting(int initialGravityMs) {
+        BoardState state = new BoardState();
+        state.reset(initialGravityMs);
+        boardStates.add(state);
+    }
+
+    /** Test-only: overrides the slot-to-board/seat mapping to simulate multiple boards without creating them. */
+    public void setSlotBoardMappingForTesting(int[] slotBoard, int[] slotSeat) {
+        this.slotBoard = slotBoard;
+        this.slotSeat = slotSeat;
     }
 }

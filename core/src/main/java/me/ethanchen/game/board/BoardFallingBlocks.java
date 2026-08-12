@@ -330,6 +330,7 @@ final class BoardFallingBlocks {
         result.placed = true;
         result.fallingClear = true;
         result.playerId = playerId;
+        result.boardIndex = b.getBoardIndex();
         result.pieceType = col.types.length > 0 ? col.types[0] : Tile.EMPTY;
         result.restingX = col.x;
         result.restingY = bottom;

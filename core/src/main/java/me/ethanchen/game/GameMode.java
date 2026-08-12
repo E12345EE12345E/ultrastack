@@ -38,7 +38,7 @@ public enum GameMode {
         @Override public Board.Presets boardPreset(int n) { return Board.Presets.STANDARD_SINGLE; }
         @Override public int initialGravityMs() { return GameConstants.INITIAL_GRAVITY_MS; }
         @Override public void prepareBoard(Board b) {}
-        @Override public boolean isWinConditionMet(GameHandler game, long gameEndTargetMs) { return false; }
+        @Override public boolean isWinConditionMet(GameHandler game, int boardIndex, long gameEndTargetMs) { return false; }
     };
 
     private static final GameModeRules SCORE_RULES = new GameModeRules() {
@@ -50,7 +50,8 @@ public enum GameMode {
         }
         @Override public int initialGravityMs() { return GameConstants.INITIAL_GRAVITY_MS; }
         @Override public void prepareBoard(Board b) {}
-        @Override public boolean isWinConditionMet(GameHandler game, long gameEndTargetMs) {
+        @Override public boolean isWinConditionMet(GameHandler game, int boardIndex, long gameEndTargetMs) {
+            // Shared session-wide clock: every board resolves identically once the timer expires.
             return System.currentTimeMillis() >= gameEndTargetMs;
         }
     };
@@ -64,8 +65,11 @@ public enum GameMode {
         }
         @Override public int initialGravityMs() { return GameConstants.INITIAL_GRAVITY_PUZZLE_MS; }
         @Override public void prepareBoard(Board b) { b.spawnGarbageLines(GameConstants.PUZZLE_GARBAGE_LINES); }
-        @Override public boolean isWinConditionMet(GameHandler game, long gameEndTargetMs) {
-            return !game.getBoards().isEmpty() && !game.getBoards().get(0).hasGarbage();
+        @Override public boolean isWinConditionMet(GameHandler game, int boardIndex, long gameEndTargetMs) {
+            // Per-board objective: this board wins as soon as its own garbage is cleared,
+            // independent of any other board.
+            if (boardIndex < 0 || boardIndex >= game.getBoards().size()) return false;
+            return !game.getBoards().get(boardIndex).hasGarbage();
         }
     };
 }

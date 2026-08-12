@@ -29,10 +29,14 @@ public interface GameModeRules {
     void prepareBoard(Board board);
 
     /**
-     * Returns true when the win condition for this mode has been satisfied.
+     * Returns true when the win condition for {@code boardIndex} has been satisfied. Modes with
+     * a shared session-wide clock (e.g. score mode's timer) ignore {@code boardIndex} and resolve
+     * every board identically; modes with a per-board objective (e.g. puzzle's garbage-clear)
+     * evaluate only that board.
      *
      * @param game           live game state
+     * @param boardIndex     the board being checked
      * @param gameEndTargetMs wall-clock ms at which MULTIPLAYER_SCORE ends (ignored for other modes)
      */
-    boolean isWinConditionMet(GameHandler game, long gameEndTargetMs);
+    boolean isWinConditionMet(GameHandler game, int boardIndex, long gameEndTargetMs);
 }

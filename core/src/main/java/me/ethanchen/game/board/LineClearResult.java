@@ -10,8 +10,11 @@ public class LineClearResult {
     /** True when the piece was actually locked into the board (had solid support). */
     public boolean placed;
 
-    /** Player index whose piece was hard-dropped. */
+    /** Player index (global session slot, not board-local seat) whose piece was hard-dropped. */
     public int playerId;
+
+    /** Index of the board this result occurred on. */
+    public int boardIndex;
 
     /** Piece type byte of the dropped piece. */
     public byte pieceType;
@@ -78,7 +81,7 @@ public class LineClearResult {
     public boolean manual = true;
 
     /**
-     * When {@code placed == false} after a hard drop, the id of the other player whose
+     * When {@code placed == false} after a hard drop, the global slot of the other player whose
      * active piece is supporting this piece (preventing it from locking).  -1 otherwise.
      */
     public int blockedByPlayerId = -1;

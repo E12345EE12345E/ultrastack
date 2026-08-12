@@ -79,6 +79,15 @@ public class GameScreen extends MenuScreen {
     private long startTimeMS;
     private String[] playerNames;
 
+    /**
+     * Slot -> board/seat tables from {@link StartGameBroadcast}, so board-scoped lookups resolve
+     * correctly once more than one board exists. Today every entry is {@code 0} / identity since
+     * only one board is ever created, so behaviour is unchanged; the client still only ever
+     * renders one board ({@link GameDrawMode#SINGLE_BOARD}), chosen via {@link #primaryBoard()}.
+     */
+    private byte[] slotBoardIndex;
+    private byte[] slotSeatIndex;
+
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = buildDispatcher();
 
     private PacketDispatcher<ClientPacketWrapper> buildDispatcher() {
@@ -100,6 +109,8 @@ public class GameScreen extends MenuScreen {
         long startGameTimer = b.msUntilStart;
         startTimeMS = lastUpdateMs + startGameTimer;
         playerNames = b.playerNames;
+        slotBoardIndex = b.slotBoardIndex != null ? b.slotBoardIndex : new byte[0];
+        slotSeatIndex = b.slotSeatIndex != null ? b.slotSeatIndex : new byte[0];
         game = new GameHandler(b.totalPlayers);
         game.init(b.mode, startGameTimer);
         gameEndTargetMs = startTimeMS + GameConstants.SCORE_MODE_DURATION_MS;
@@ -126,8 +137,9 @@ public class GameScreen extends MenuScreen {
             if (slot >= 0 && slot < isLocalSlot.length) isLocalSlot[slot] = true;
         }
 
-        if (!game.getBoards().isEmpty()) {
-            ripples = new PlayerRipples(game.getBoards().get(0), isLocalSlot);
+        Board primaryBoardAtInit = primaryBoard();
+        if (primaryBoardAtInit != null) {
+            ripples = new PlayerRipples(primaryBoardAtInit, isLocalSlot);
         }
 
         Controllers.addListener(controllerAdapter);
@@ -136,6 +148,36 @@ public class GameScreen extends MenuScreen {
 
     private boolean isLocalSlot(int slot) {
         return slot >= 0 && slot < isLocalSlot.length && isLocalSlot[slot];
+    }
+
+    /** Resolves the board that global slot {@code slot} is seated on, or {@code null} if none exist. */
+    private Board boardFor(int slot) {
+        List<Board> boards = game.getBoards();
+        if (boards.isEmpty()) return null;
+        int bi = (slotBoardIndex != null && slot >= 0 && slot < slotBoardIndex.length) ? (slotBoardIndex[slot] & 0xFF) : 0;
+        if (bi < 0 || bi >= boards.size()) bi = 0;
+        return boards.get(bi);
+    }
+
+    /** Resolves global slot {@code slot}'s board-local seat index. */
+    private int seatFor(int slot) {
+        if (slotSeatIndex != null && slot >= 0 && slot < slotSeatIndex.length) return slotSeatIndex[slot] & 0xFF;
+        return slot;
+    }
+
+    /** The slot this client renders as "the" board: its first local player, or slot 0 when spectating. */
+    private int primarySlot() {
+        return localPlayers.isEmpty() ? 0 : localPlayers.get(0).slot;
+    }
+
+    /** The single board currently rendered/controlled by this screen (see {@link GameDrawMode#SINGLE_BOARD}). */
+    private Board primaryBoard() {
+        return boardFor(primarySlot());
+    }
+
+    private int primaryBoardIndex() {
+        int slot = primarySlot();
+        return (slotBoardIndex != null && slot >= 0 && slot < slotBoardIndex.length) ? (slotBoardIndex[slot] & 0xFF) : 0;
     }
 
     private LocalPlayer keyboardPlayer() {
@@ -167,14 +209,13 @@ public class GameScreen extends MenuScreen {
         game.update(deltaTime);
         lastUpdateMs = System.currentTimeMillis();
 
-        Board board = game.getBoards().isEmpty() ? null : game.getBoards().get(0);
-        if (board != null) {
-            for (LocalPlayer lp : localPlayers) {
-                lp.input.tick(deltaTime, board, lp.holdAvailable);
-            }
-            if (ripples != null) {
-                ripples.update(board, deltaTime / 1000f, game.isStarted());
-            }
+        for (LocalPlayer lp : localPlayers) {
+            Board lpBoard = boardFor(lp.slot);
+            if (lpBoard != null) lp.input.tick(deltaTime, lpBoard, lp.holdAvailable);
+        }
+        Board rippleBoard = primaryBoard();
+        if (ripples != null && rippleBoard != null) {
+            ripples.update(rippleBoard, deltaTime / 1000f, game.isStarted());
         }
 
         Iterator<Particle> pit = particles.iterator();
@@ -232,7 +273,7 @@ public class GameScreen extends MenuScreen {
     }
 
     private void renderSingleBoard() {
-        Board board = game.getBoards().get(0);
+        Board board = primaryBoard();
         float tileSize = BoardRenderer.computeTileSize(board, 0.85f);
         float originX  = BoardRenderer.centeredOriginX(board, tileSize);
         float originY  = BoardRenderer.centeredOriginY(board, tileSize);
@@ -443,7 +484,8 @@ public class GameScreen extends MenuScreen {
         if (game.getBoards().isEmpty()) return super.keyDown(keycode);
         LocalPlayer kb = keyboardPlayer();
         if (kb == null) return super.keyDown(keycode);
-        Board board = game.getBoards().get(0);
+        Board board = boardFor(kb.slot);
+        if (board == null) return super.keyDown(keycode);
         boolean handled = kb.input.keyDown(keycode, board, kb.holdAvailable);
         return handled ? true : super.keyDown(keycode);
     }
@@ -463,7 +505,9 @@ public class GameScreen extends MenuScreen {
             int slot = app.getControllerRoster().slotOf(controller);
             LocalPlayer lp = playerForControllerSlot(slot);
             if (lp == null) return false;
-            return lp.input.controllerButtonDown(buttonIndex, game.getBoards().get(0), lp.holdAvailable);
+            Board board = boardFor(lp.slot);
+            if (board == null) return false;
+            return lp.input.controllerButtonDown(buttonIndex, board, lp.holdAvailable);
         }
         @Override
         public boolean buttonUp(Controller controller, int buttonIndex) {
@@ -486,11 +530,11 @@ public class GameScreen extends MenuScreen {
                 game.getBoards().get(i).updateFromNetBoardLight(p.boards[i]);
             }
         }
-        Board board = game.getBoards().isEmpty() ? null : game.getBoards().get(0);
         for (int i = 0; i < localPlayers.size(); i++) {
             LocalPlayer lp = localPlayers.get(i);
-            if (p.ackMoveIds != null && i < p.ackMoveIds.length && board != null) {
-                lp.predictor.ackMovesUpTo(p.ackMoveIds[i], board);
+            Board lpBoard = boardFor(lp.slot);
+            if (p.ackMoveIds != null && i < p.ackMoveIds.length && lpBoard != null) {
+                lp.predictor.ackMovesUpTo(p.ackMoveIds[i], lpBoard);
             }
             if (p.holdAvailable != null && i < p.holdAvailable.length) {
                 lp.holdAvailable = p.holdAvailable[i];
@@ -554,8 +598,9 @@ public class GameScreen extends MenuScreen {
         endGamePacket = egp;
         exploded      = true;
         fadeTimerMs   = 0;
-        if (!game.getBoards().isEmpty()) {
-            Board board = game.getBoards().get(0);
+        Board explodeBoard = primaryBoard();
+        if (explodeBoard != null) {
+            Board board = explodeBoard;
             for (me.ethanchen.game.board.Piece piece : board.getActivePieces()) {
                 if (piece.tiles == null || piece.location == null) continue;
                 for (com.badlogic.gdx.math.Vector2 offset : piece.tiles) {
@@ -581,13 +626,16 @@ public class GameScreen extends MenuScreen {
     }
 
     private void handleParticleBroadcast(ParticleBroadcast p) {
+        int primaryBoardIndex = primaryBoardIndex();
         if (p.spawners != null) {
             for (ParticleSpawner ps : p.spawners) {
+                if ((ps.boardIndex & 0xFF) != primaryBoardIndex) continue;
                 ParticleFactory.expandSpawner(ps, particles, particleRng);
             }
         }
         if (p.particles != null) {
             for (NetParticle np : p.particles) {
+                if ((np.boardIndex & 0xFF) != primaryBoardIndex) continue;
                 ParticleFactory.expandNetParticle(np, particles, particleRng);
             }
         }
@@ -595,7 +643,16 @@ public class GameScreen extends MenuScreen {
 
     private void handleHardDropEffects(HardDropEffectsBroadcast p) {
         if (p.effects == null) return;
+        int primaryBoardIndex = primaryBoardIndex();
         for (HardDropEffect e : p.effects) {
+            if ((e.boardIndex & 0xFF) != primaryBoardIndex) continue;
+            if (e.fallingClear) {
+                if (e.combo >= 0) {
+                    AudioManager.getInstance().playClearSound(e.combo);
+                    if (e.allClear) AudioManager.getInstance().playAllClearSound();
+                }
+                continue;
+            }
             AudioManager.getInstance().playPlaceSound(isLocalSlot(e.playerId));
             if (e.combo >= 0) {
                 AudioManager.getInstance().playClearSound(e.combo);
@@ -607,14 +664,15 @@ public class GameScreen extends MenuScreen {
                 if (e.allClear) AudioManager.getInstance().playAllClearSound();
             }
             ParticleFactory.expandHardDropFlash(e.pieceType, e.doubledX, e.doubledY, e.pieceRotation,
-                    particles, particleRng);
+                    e.boardIndex, particles, particleRng);
             if (ripples != null) ripples.poof(e.playerId);
         }
     }
 
     private void handlePieceSwap(PieceSwapBroadcast p) {
-        if (game.getBoards().isEmpty()) return;
-        game.getBoards().get(0).swapActivePiece(p.playerId, p.pieceType);
+        Board board = boardFor(p.playerId);
+        if (board == null) return;
+        board.swapActivePiece(seatFor(p.playerId), p.pieceType);
         if (ripples != null) ripples.poof(p.playerId);
     }
 

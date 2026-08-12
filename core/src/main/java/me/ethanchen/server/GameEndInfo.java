@@ -18,8 +18,14 @@ public class GameEndInfo {
     public ScoreModeEndData scoreModeEnd;
     /** Puzzle-mode end data; null when mode is not MULTIPLAYER_PUZZLE. */
     public PuzzleModeEndData puzzleModeEnd;
-    /** Hidden sortable score for this game, regardless of gamemode. */
+    /** Hidden sortable score for this game, regardless of gamemode: the session-wide aggregate across all boards. */
     public long score;
+    /**
+     * Each player's own personal result: their own board's score, indexed by global slot.
+     * Null for modes without a score concept. Used for per-player XP so a player's reward
+     * reflects their own board, not other boards' contributions to {@link #score}.
+     */
+    public long[] scorePerPlayer;
     /** Display-facing score string for this game, regardless of gamemode. */
     public String displayScore;
     /** Optional gamemode-specific extra data, serialized as a JSON string. May be null. */

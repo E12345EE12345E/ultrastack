@@ -6,4 +6,6 @@ import me.ethanchen.network.packets.NetworkPacket;
 public class AbilityActivateBroadcast extends NetworkPacket {
     /** Player index who activated their ability. */
     public byte playerId;
+    /** Index of the board this ability affected. */
+    public byte boardIndex;
 }

@@ -11,6 +11,17 @@ public class StartGameBroadcast extends NetworkPacket {
     /** Board slots this connection controls, in local-player order. Empty = spectating. */
     public byte[] localPlayerIds = new byte[0];
     /**
+     * Maps each global session slot (0..totalPlayers-1) to the index of the board it is seated
+     * on, so clients can resolve which of {@link #boards} a given slot belongs to. Currently
+     * every entry is {@code 0} (the single board created today).
+     */
+    public byte[] slotBoardIndex = new byte[0];
+    /**
+     * Maps each global session slot to its board-local seat index (into that board's own
+     * piece/spawn arrays), paired with {@link #slotBoardIndex}.
+     */
+    public byte[] slotSeatIndex = new byte[0];
+    /**
      * Milliseconds from the moment this packet was sent until the match starts, so clients can
      * rebase onto their own clock. Negative for a late (spectator) join into a running match.
      * Must not be an absolute timestamp: client and server clocks are not synchronised.
