@@ -199,6 +199,13 @@ public class ClientApp extends ApplicationAdapter {
                 if (p.gamemode != null) {
                     lobbySettings.gamemode = p.gamemode;
                 }
+                lobbySettings.pveLevelId = p.pveLevelId;
+                lobbySettings.pveDifficulty = p.pveDifficulty;
+                // PvE rejects multi-local-player counts server-side; force the client roster to 1.
+                if (p.gamemode == me.ethanchen.game.GameMode.PVE && getLocalPlayerCount() > 1) {
+                    setLocalPlayerMode(me.ethanchen.lwjgl3.input.LocalPlayerMode.KEYBOARD_OR_CONTROLLER);
+                    sendLocalPlayerCount();
+                }
             }
 
             if (wrapper.packet instanceof ProfileSyncBroadcast) {

@@ -25,6 +25,11 @@ public class PlayerProfile {
      * profile that has not received the tokens field yet (see {@link #ensureTokensFromXp(long)}).
      */
     public Long tokens;
+    /**
+     * Number of PvE levels unlocked chronologically (1 = only level 0). Victory on the highest
+     * unlocked level increments this by 1; skipping ahead never unlocks intermediate levels.
+     */
+    public int pveUnlockedLevels = 1;
 
     /** No-arg constructor required for libGDX Json and Kryo deserialization. */
     public PlayerProfile() {

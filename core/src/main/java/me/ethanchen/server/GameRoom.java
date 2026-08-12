@@ -7,6 +7,8 @@ import me.ethanchen.game.progression.ArtifactAcquisition;
 import me.ethanchen.game.progression.CharacterDef;
 import me.ethanchen.game.progression.CharacterRegistry;
 import me.ethanchen.game.progression.PlayerProfile;
+import me.ethanchen.game.pve.PveLevelRegistry;
+import me.ethanchen.game.pve.PveSessionState;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.ServerPacketWrapper;
 import me.ethanchen.network.dto.HardDropEffect;
@@ -114,6 +116,8 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     /** Pending lobby gamemode chosen by the host; applied at {@link #startGame}. */
     private GameMode pendingGamemode = GameMode.MULTIPLAYER_SCORE;
+    private int pendingPveLevelId;
+    private int pendingPveDifficulty;
 
     private volatile ServerGame serverGame;
     private volatile boolean running;
@@ -197,6 +201,8 @@ public class GameRoom implements Runnable, GameRoomContext {
         if (serverGame != null && serverGame.isInProgress()) return; // frozen during game
         RoomMember m = connToMember.get(connId);
         if (m == null) return;
+        // PvE forces a single local player per client (extras become spectators).
+        if (pendingGamemode == GameMode.PVE && count > 1) return;
         m.rebuildSeats(count);
         reseat();
     }
@@ -404,19 +410,62 @@ public class GameRoom implements Runnable, GameRoomContext {
         if (w.connectionID != hostConnId) return; // only host can change lobby settings
         LobbySettingsRequest req = (LobbySettingsRequest) w.packet;
         if (req.gamemode == null || req.gamemode == GameMode.NONE) return;
+
+        int levelId = req.pveLevelId;
+        int difficulty = req.pveDifficulty;
+        if (req.gamemode == GameMode.PVE) {
+            PveLevelRegistry.Entry entry = PveLevelRegistry.byId(levelId);
+            if (entry == null) return;
+            if (difficulty < 0 || difficulty >= entry.difficultyCount()) difficulty = 0;
+            if (!hostHasPveLevelUnlocked(levelId)) return;
+        } else {
+            levelId = 0;
+            difficulty = 0;
+        }
+
         pendingGamemode = req.gamemode;
+        pendingPveLevelId = levelId;
+        pendingPveDifficulty = difficulty;
+        if (pendingGamemode == GameMode.PVE) {
+            enforceSingleLocalPlayerPerMember();
+        }
         broadcastLobbySettings();
+    }
+
+    /** True when the host's profile has unlocked {@code levelId} (or no profile store / blank uuid). */
+    private boolean hostHasPveLevelUnlocked(int levelId) {
+        RoomMember host = connToMember.get(hostConnId);
+        if (host == null) return false;
+        if (profileStore == null || host.accountUuid == null || host.accountUuid.isEmpty()) {
+            // LAN / no-profile rooms: allow any registered level.
+            return true;
+        }
+        PlayerProfile profile = profileStore.loadProfile(host.accountUuid);
+        return profile != null && profile.pveUnlockedLevels > levelId;
+    }
+
+    /** Drops every member to a single seat so extras become spectators after {@link #reseat()}. */
+    private void enforceSingleLocalPlayerPerMember() {
+        if (serverGame != null && serverGame.isInProgress()) return;
+        for (RoomMember m : members) {
+            if (m.seats.size() > 1) m.rebuildSeats(1);
+        }
+        reseat();
     }
 
     private void broadcastLobbySettings() {
         LobbySettingsBroadcast b = new LobbySettingsBroadcast();
         b.gamemode = pendingGamemode;
+        b.pveLevelId = pendingPveLevelId;
+        b.pveDifficulty = pendingPveDifficulty;
         broadcastMembersTCP(b);
     }
 
     private void sendLobbySettings(int connId) {
         LobbySettingsBroadcast b = new LobbySettingsBroadcast();
         b.gamemode = pendingGamemode;
+        b.pveLevelId = pendingPveLevelId;
+        b.pveDifficulty = pendingPveDifficulty;
         sender.sendTCP(connId, b);
     }
 
@@ -464,7 +513,16 @@ public class GameRoom implements Runnable, GameRoomContext {
 
         serverGame = new ServerGame(this);
         ActiveLoadout[] loadouts = buildLoadouts(playerCount, gameMode.supportsCharacters());
-        serverGame.startGame(gameMode, playerCount, GameConstants.GAME_START_DELAY_MS, loadouts);
+        PveSessionState pveSession = null;
+        if (gameMode == GameMode.PVE) {
+            pveSession = PveSessionState.fromRegistry(pendingPveLevelId, pendingPveDifficulty);
+            if (pveSession == null) {
+                System.out.println("[GameRoom " + roomId + "] PvE start aborted: level "
+                        + pendingPveLevelId + " difficulty " + pendingPveDifficulty + " not found");
+                return;
+            }
+        }
+        serverGame.startGame(gameMode, playerCount, GameConstants.GAME_START_DELAY_MS, loadouts, pveSession);
 
         long startTimeMs = System.currentTimeMillis() + GameConstants.GAME_START_DELAY_MS;
         String[] playerNames = buildActivePlayerNames();
@@ -687,6 +745,7 @@ public class GameRoom implements Runnable, GameRoomContext {
         b.disconnected = info.disconnected;
         b.scoreModeEnd = info.scoreModeEnd;
         b.puzzleModeEnd = info.puzzleModeEnd;
+        b.pveModeEnd = info.pveModeEnd;
         b.mode = info.mode != null ? info.mode : GameMode.NONE;
         b.playerNames = buildActivePlayerNames();
         broadcastMembersTCP(b);
@@ -729,7 +788,23 @@ public class GameRoom implements Runnable, GameRoomContext {
             // (non-LAN) accounts -- LAN never persists xp (xpAwarder == null there) and must not
             // grant artifacts either (implementation.md, Part 5).
             if (info.win && maxXp > 0 && profileStore != null && xpAwarder != null) {
-                grantVictoryArtifacts(maxXp);
+                if (info.mode == GameMode.PVE) {
+                    PveSessionState session = serverGame != null ? serverGame.getPveSession() : null;
+                    if (session != null) {
+                        grantPveVictoryArtifacts(session, maxXp);
+                    }
+                } else {
+                    grantVictoryArtifacts(maxXp);
+                }
+            }
+
+            // PvE unlock progression: increment only when the cleared level was already the
+            // player's highest unlocked (prevents skipping by playing a higher level as guest).
+            if (info.win && info.mode == GameMode.PVE && profileStore != null) {
+                PveSessionState session = serverGame != null ? serverGame.getPveSession() : null;
+                if (session != null) {
+                    unlockPveLevelOnVictory(session.levelId);
+                }
             }
         }
 
@@ -756,6 +831,47 @@ public class GameRoom implements Runnable, GameRoomContext {
                 ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
                 grant.artifact = artifact;
                 sender.sendTCP(m.connId, grant);
+            }
+        }
+    }
+
+    /** Grants one artifact from the level's {@link me.ethanchen.game.pve.PveLootTable} per seated account. */
+    private void grantPveVictoryArtifacts(PveSessionState session, long xp) {
+        if (session.loot == null) return;
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
+                PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
+                Artifact artifact = session.loot.roll(artifactRng, xp);
+                if (artifact == null) continue;
+                profile.inventory.add(artifact);
+                profile.sortInventory();
+                profileStore.saveProfile(s.accountUuid, profile);
+
+                ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
+                grant.artifact = artifact;
+                sender.sendTCP(m.connId, grant);
+            }
+        }
+    }
+
+    /**
+     * For each seated account, if {@code pveUnlockedLevels == levelId + 1} (they already had this
+     * level unlocked as their highest), increment and sync the profile.
+     */
+    private void unlockPveLevelOnVictory(int levelId) {
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
+                PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
+                if (profile == null) continue;
+                if (profile.pveUnlockedLevels != levelId + 1) continue;
+                profile.pveUnlockedLevels++;
+                profileStore.saveProfile(s.accountUuid, profile);
+                ProfileSyncBroadcast sync = new ProfileSyncBroadcast();
+                sync.profile = profile;
+                sync.readOnly = false;
+                sender.sendTCP(m.connId, sync);
             }
         }
     }

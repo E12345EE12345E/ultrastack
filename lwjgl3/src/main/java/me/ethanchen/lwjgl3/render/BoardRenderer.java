@@ -87,21 +87,57 @@ public class BoardRenderer {
     // Layout helpers
     // -------------------------------------------------------------------------
 
-    /** Largest tile size that fits the board within {@code maxFraction} of the screen. */
+    /** Largest tile size that fits the board within {@code maxFraction} of the full window. */
     public static float computeTileSize(Board board, float maxFraction) {
-        float maxW = Gdx.graphics.getWidth()  * maxFraction / board.bw();
-        float maxH = Gdx.graphics.getHeight() * maxFraction / board.bh();
+        return computeTileSize(board, maxFraction, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+    }
+
+    /** Largest tile size that fits the board within {@code maxFraction} of a view rect. */
+    public static float computeTileSize(Board board, float maxFraction, float viewW, float viewH) {
+        float maxW = viewW * maxFraction / board.bw();
+        float maxH = viewH * maxFraction / board.bh();
         return Math.min(maxW, maxH);
     }
 
-    /** X coordinate that centers the board horizontally on screen. */
+    /** X coordinate that centers the board horizontally in the full window. */
     public static float centeredOriginX(Board board, float tileSize) {
-        return (Gdx.graphics.getWidth() - board.bw() * tileSize) / 2f;
+        return centeredOriginX(board, tileSize, 0f, Gdx.graphics.getWidth());
     }
 
-    /** Y coordinate that centers the board vertically on screen. */
+    /** X coordinate that centers the board horizontally in a view rect. */
+    public static float centeredOriginX(Board board, float tileSize, float viewOriginX, float viewW) {
+        return viewOriginX + (viewW - board.bw() * tileSize) / 2f;
+    }
+
+    /** Y coordinate that centers the board vertically in the full window. */
     public static float centeredOriginY(Board board, float tileSize) {
-        return (Gdx.graphics.getHeight() - board.bh() * tileSize) / 2f;
+        return centeredOriginY(board, tileSize, 0f, Gdx.graphics.getHeight());
+    }
+
+    /** Y coordinate that centers the board vertically in a view rect. */
+    public static float centeredOriginY(Board board, float tileSize, float viewOriginY, float viewH) {
+        return viewOriginY + (viewH - board.bh() * tileSize) / 2f;
+    }
+
+    /**
+     * X coordinate for {@code board} when it is one of {@code totalColumns} boards laid out
+     * side-by-side across the full window.
+     */
+    public static float originXForColumn(Board board, float tileSize, int column, int totalColumns) {
+        return originXForColumn(board, tileSize, column, totalColumns, 0f, Gdx.graphics.getWidth());
+    }
+
+    /**
+     * X coordinate for {@code board} when it is one of {@code totalColumns} boards laid out
+     * side-by-side across a view rect, with {@code column} (0-based, left to right) selecting
+     * this board's slot. Each board is centered within its own column.
+     */
+    public static float originXForColumn(Board board, float tileSize, int column, int totalColumns,
+                                         float viewOriginX, float viewW) {
+        if (totalColumns <= 1) return centeredOriginX(board, tileSize, viewOriginX, viewW);
+        float columnWidth = viewW / (float) totalColumns;
+        float columnLeft = viewOriginX + columnWidth * column;
+        return columnLeft + (columnWidth - board.bw() * tileSize) / 2f;
     }
 
     // -------------------------------------------------------------------------
@@ -198,6 +234,17 @@ public class BoardRenderer {
      */
     public void drawParticles(List<Particle> particles, float originX, float originY,
                               float tileSize, ShapeRenderer shapes) {
+        drawParticles(particles, originX, originY, tileSize, shapes, -1);
+    }
+
+    /**
+     * Like {@link #drawParticles(List, float, float, float, ShapeRenderer)}, but when
+     * {@code boardIndexFilter >= 0} only particles whose {@link Particle#boardIndex} matches are
+     * drawn. Used when multiple boards are rendered side-by-side so each board's particles are
+     * drawn relative to that board's own origin.
+     */
+    public void drawParticles(List<Particle> particles, float originX, float originY,
+                              float tileSize, ShapeRenderer shapes, int boardIndexFilter) {
         if (particles == null || particles.isEmpty()) return;
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
@@ -206,6 +253,7 @@ public class BoardRenderer {
         shapes.begin(ShapeRenderer.ShapeType.Filled);
         for (Particle p : particles) {
             if (p.isDead()) continue;
+            if (boardIndexFilter >= 0 && p.boardIndex != boardIndexFilter) continue;
             if (p.kind == Particle.Kind.POPUP_SCORE || p.kind == Particle.Kind.POPUP_SCORE_MULTIPLIER) continue;
             float alpha = p.alpha();
             shapes.setColor(p.r, p.g, p.b, alpha);
@@ -252,6 +300,17 @@ public class BoardRenderer {
      */
     public void drawTextParticles(List<Particle> particles, float originX, float originY,
                                   float tileSize, SpriteBatch sprites, BitmapFont font) {
+        drawTextParticles(particles, originX, originY, tileSize, sprites, font, -1);
+    }
+
+    /**
+     * Like {@link #drawTextParticles(List, float, float, float, SpriteBatch, BitmapFont)}, but
+     * when {@code boardIndexFilter >= 0} only particles whose {@link Particle#boardIndex} matches
+     * are drawn. See {@link #drawParticles(List, float, float, float, ShapeRenderer, int)}.
+     */
+    public void drawTextParticles(List<Particle> particles, float originX, float originY,
+                                  float tileSize, SpriteBatch sprites, BitmapFont font,
+                                  int boardIndexFilter) {
         if (particles == null || particles.isEmpty()) return;
 
         GlyphLayout layout = new GlyphLayout();
@@ -266,6 +325,7 @@ public class BoardRenderer {
         sprites.begin();
         for (Particle p : particles) {
             if (p.isDead()) continue;
+            if (boardIndexFilter >= 0 && p.boardIndex != boardIndexFilter) continue;
             float alpha = p.alpha();
             float px = originX + p.x * tileSize;
             float py = originY + p.y * tileSize;
@@ -343,6 +403,18 @@ public class BoardRenderer {
                                     ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
         BoardHudRenderer.drawCountUpTimerBox(elapsedMs, x, y, boxSize, tileSize,
                 shapes, sprites, font);
+    }
+
+    /**
+     * Draws the PvE section HUD (time, score, criteria). See
+     * {@link BoardHudRenderer#drawPveSectionBox}.
+     */
+    public void drawPveSectionBox(int sectionIndex, long elapsedMs, long timeoutMs, long totalScore,
+                                  String[] objectiveLines,
+                                  float x, float y, float boxWidth, float boxHeight, float tileSize,
+                                  ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
+        BoardHudRenderer.drawPveSectionBox(sectionIndex, elapsedMs, timeoutMs, totalScore,
+                objectiveLines, x, y, boxWidth, boxHeight, tileSize, shapes, sprites, font);
     }
 
     public void dispose() {

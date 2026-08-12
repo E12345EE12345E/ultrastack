@@ -45,28 +45,56 @@ public class GameHandler {
     }
 
     public void init(GameMode m, long startGameTimer) {
+        init(m, m == GameMode.NONE ? null : m.rules(), startGameTimer);
+    }
+
+    /**
+     * Like {@link #init(GameMode, long)}, but uses an explicitly-supplied {@code rules} instance
+     * instead of {@code m.rules()}. Needed for modes whose rules carry session-specific state
+     * that can't live on {@link GameMode}'s singleton (e.g. PvE's selected level/difficulty —
+     * see {@code PveRules}), so the caller builds a fresh rules instance per session.
+     */
+    public void init(GameMode m, GameModeRules rules, long startGameTimer) {
         mode = m;
         startDelay = startGameTimer;
-        if (mode == GameMode.NONE) return;
-        GameModeRules rules = mode.rules();
+        if (mode == GameMode.NONE || rules == null) return;
         Arrays.fill(gravityTickCounters, 0);
         Arrays.fill(playerGravitySpeedMult, 1f);
-        Board board = new Board(rules.boardPreset(numPlayers));
-        rules.prepareBoard(board);
-        boards.add(board);
-        BoardState state = new BoardState();
-        state.reset(rules.initialGravityMs());
-        boardStates.add(state);
 
-        // Every seated slot is currently placed on the single board created above, in seat order.
+        me.ethanchen.game.board.BoardPreset[] layout = rules.boardLayout(numPlayers);
+        for (me.ethanchen.game.board.BoardPreset preset : layout) {
+            Board board = new Board(preset);
+            rules.prepareBoard(board);
+            boards.add(board);
+            BoardState state = new BoardState();
+            state.reset(rules.initialGravityMs());
+            boardStates.add(state);
+        }
+
+        // Resolve each global slot to a board (per the mode's rules) and a board-local seat
+        // index (the running count of slots already assigned to that board, in slot order).
+        int[] requestedSlotBoard = rules.slotToBoard(numPlayers);
         slotBoard = new int[numPlayers];
         slotSeat = new int[numPlayers];
+        int[] seatCounters = new int[boards.size()];
         for (int i = 0; i < numPlayers; i++) {
-            slotBoard[i] = 0;
-            slotSeat[i] = i;
+            int b = (requestedSlotBoard != null && i < requestedSlotBoard.length) ? requestedSlotBoard[i] : 0;
+            if (b < 0 || b >= boards.size()) b = 0;
+            slotBoard[i] = b;
+            slotSeat[i] = seatCounters[b]++;
         }
-        board.setBoardIndex(0);
-        board.setSeatSlots(slotSeat.clone());
+
+        int[][] seatSlotsPerBoard = new int[boards.size()][];
+        for (int b = 0; b < boards.size(); b++) {
+            seatSlotsPerBoard[b] = new int[seatCounters[b]];
+        }
+        for (int i = 0; i < numPlayers; i++) {
+            seatSlotsPerBoard[slotBoard[i]][slotSeat[i]] = i;
+        }
+        for (int b = 0; b < boards.size(); b++) {
+            boards.get(b).setBoardIndex(b);
+            boards.get(b).setSeatSlots(seatSlotsPerBoard[b]);
+        }
     }
 
     /** Resolves the board that global slot {@code playerId} is seated on, or {@code null} if unseated. */

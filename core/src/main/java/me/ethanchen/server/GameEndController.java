@@ -8,6 +8,7 @@ import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.GameModeRules;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 /**
@@ -36,6 +37,9 @@ class GameEndController {
     private ScoreModeEndData frozenScoreEnd;
     private PuzzleModeEndData frozenPuzzleEnd;
     private long frozenPuzzleElapsedMs;
+    private PveModeEndData frozenPveEnd;
+    /** Sections cleared, staged by {@link #beginPveSessionEnd} for {@link #finalizeSession} to consume. */
+    private int pvePendingSectionsCleared;
 
     private long gameStartMs;
     private long gameEndTargetMs;
@@ -57,6 +61,8 @@ class GameEndController {
         frozenScoreEnd = null;
         frozenPuzzleEnd = null;
         frozenPuzzleElapsedMs = 0;
+        frozenPveEnd = null;
+        pvePendingSectionsCleared = 0;
     }
 
     boolean isGameEnded() { return sessionEnded; }
@@ -96,6 +102,22 @@ class GameEndController {
                          int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
         resolveBoard(boardIndex, false, mode, globalScore, boardScorePerPlayer,
                 bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+    }
+
+    /**
+     * Called by {@code PveSectionController} when the whole PvE session ends: a section timed out
+     * without meeting its criteria (loss), or the level's last section was cleared (win). Resolves
+     * every still-running board with {@code win} and finalizes the session immediately, the same
+     * way a session-wide win condition does for the other modes.
+     */
+    void beginPveSessionEnd(boolean win, int sectionsCleared, GameMode mode, long globalScore, long[] boardScorePerPlayer,
+                             int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+        if (sessionEnded) return;
+        pvePendingSectionsCleared = sectionsCleared;
+        for (int b = 0; b < numBoards; b++) {
+            if (!boardResolved[b]) markResolved(b, win);
+        }
+        finalizeSession(mode, globalScore, boardScorePerPlayer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
     }
 
     /** Called when a player disconnects mid-game: ends the whole session immediately (no board keeps running). */
@@ -139,6 +161,7 @@ class GameEndController {
 
         frozenScoreEnd  = null;
         frozenPuzzleEnd = null;
+        frozenPveEnd    = null;
         ClearSpinStats frozenClears = clearSpinStats != null ? clearSpinStats.copy() : null;
         if (mode == GameMode.MULTIPLAYER_SCORE || mode == GameMode.CHARACTER_SCORE) {
             frozenScoreEnd = new ScoreModeEndData();
@@ -161,6 +184,15 @@ class GameEndController {
             frozenPuzzleEnd.blockedCounts = copyOf(blockedCounts);
             frozenPuzzleEnd.piecesPlaced = copyOf(piecesPlaced);
             applyClearSpinStats(frozenPuzzleEnd, frozenClears);
+        } else if (mode == GameMode.PVE) {
+            frozenPveEnd = new PveModeEndData();
+            frozenPveEnd.sectionsCleared = pvePendingSectionsCleared;
+            frozenPveEnd.timeMs = System.currentTimeMillis() - gameStartMs;
+            frozenPveEnd.finalScore = globalScore;
+            frozenPveEnd.bumpCounts = copyOf(bumpCounts);
+            frozenPveEnd.blockedCounts = copyOf(blockedCounts);
+            frozenPveEnd.piecesPlaced = copyOf(piecesPlaced);
+            applyClearSpinStats(frozenPveEnd, frozenClears);
         }
     }
 
@@ -174,6 +206,15 @@ class GameEndController {
     }
 
     private static void applyClearSpinStats(PuzzleModeEndData end, ClearSpinStats stats) {
+        if (stats == null) return;
+        end.fourLineClears = stats.fourLineClears;
+        end.tSpinSingles = stats.tSpinSingles;
+        end.tSpinDoubles = stats.tSpinDoubles;
+        end.tSpinTriples = stats.tSpinTriples;
+        end.allSpinClears = stats.allSpinClears;
+    }
+
+    private static void applyClearSpinStats(PveModeEndData end, ClearSpinStats stats) {
         if (stats == null) return;
         end.fourLineClears = stats.fourLineClears;
         end.tSpinSingles = stats.tSpinSingles;
@@ -209,15 +250,18 @@ class GameEndController {
         info.disconnected = pendingDisconnected;
         info.scoreModeEnd = frozenScoreEnd;
         info.puzzleModeEnd = frozenPuzzleEnd;
+        info.pveModeEnd = frozenPveEnd;
         info.score = score;
         info.scorePerPlayer = frozenScoreEnd != null ? frozenScoreEnd.boardScore : null;
         info.displayScore = computeFinalDisplayScore(mode, score);
-        if (frozenScoreEnd != null || frozenPuzzleEnd != null) {
+        if (frozenScoreEnd != null || frozenPuzzleEnd != null || frozenPveEnd != null) {
             // Must use OutputType.json — default (minimal) is not valid JSON and breaks
             // SQLite/web consumers that parse extra_json with JSON.parse.
             Json json = new Json();
             json.setOutputType(JsonWriter.OutputType.json);
-            info.extraJson = json.toJson(frozenScoreEnd != null ? frozenScoreEnd : frozenPuzzleEnd);
+            Object payload = frozenScoreEnd != null ? frozenScoreEnd
+                    : (frozenPuzzleEnd != null ? frozenPuzzleEnd : frozenPveEnd);
+            info.extraJson = json.toJson(payload);
         }
 
         room.sendEndGame(info);
@@ -245,6 +289,7 @@ class GameEndController {
             case MULTIPLAYER_SCORE:
             case CHARACTER_SCORE:    return frozenScoreEnd != null ? frozenScoreEnd.finalScore : 0L;
             case MULTIPLAYER_PUZZLE: return frozenPuzzleEnd != null ? frozenPuzzleEnd.score : 0L;
+            case PVE:                return frozenPveEnd != null ? frozenPveEnd.finalScore : 0L;
             default:                 return 0L;
         }
     }

@@ -5,25 +5,32 @@ import java.util.ArrayList;
 import com.badlogic.gdx.math.Vector2;
 
 /**
- * Pushes active pieces and falling columns down when a descending overhang (locked tiles
- * compacting downward during a line clear) would otherwise intersect or phase through them.
+ * Pushes active pieces and falling columns out of the way of solid tiles that move vertically
+ * underneath them: down when a descending overhang (locked tiles compacting downward during a
+ * line clear) would otherwise intersect or phase through them, and up when inserted garbage
+ * rows raise the whole stack into them.
  *
- * <p>Relies on an invariant of {@link BoardLineClear}: a row can only be cleared when every
- * allowed cell in it holds a locked tile, so no active piece can ever have a mino inside a
- * cleared row. Since a piece's minos are vertically contiguous, every piece therefore lies
- * entirely above or entirely below each cleared row. Collapsing a single row shifts solid
- * content down by exactly one cell, so a piece that did not overlap solid tiles before that
- * single-row collapse can always be resolved by moving down by exactly one cell — the "crushed
- * between the overhang and the stack" case is unreachable. This is why the fix replays the
- * clear one row at a time (via a boolean occupancy snapshot) rather than resolving the net
- * shift in one shot: a thin overhang must "catch" a piece on each individual row it passes
- * through, not just on the total displacement.
+ * <p>Both cases are resolved one row at a time against a boolean occupancy snapshot rather
+ * than by resolving the net shift in one shot, because a single row step moves solid content
+ * by exactly one cell: a piece that did not overlap solid tiles before the step can always be
+ * resolved by moving one cell, so the "crushed between the moving tiles and the stack" case is
+ * unreachable. A thin overhang must "catch" a piece on each individual row it passes through,
+ * not just on the total displacement, and a piece the garbage never touches must not move at
+ * all even when several rows are inserted at once.
+ *
+ * <p>The line-clear direction additionally relies on an invariant of {@link BoardLineClear}:
+ * a row can only be cleared when every allowed cell in it holds a locked tile, so no active
+ * piece can ever have a mino inside a cleared row.
  *
  * <p>Falling columns are treated analogously: their footprint (integer rows from
- * {@link FallingColumn#bottomRow()} through {@code bottomRow + height - 1}) is pushed down
- * under the same per-row collapse loop.
+ * {@link FallingColumn#bottomRow()} through {@code bottomRow + height - 1}) is pushed under
+ * the same per-row loop.
  */
 final class BoardPiecePush {
+
+    /** Sign of a push, in the "shift down by N" convention used by the overlap helpers. */
+    private static final int DOWN = 1;
+    private static final int UP = -1;
 
     private BoardPiecePush() {}
 
@@ -39,57 +46,112 @@ final class BoardPiecePush {
      * push would otherwise make them overlap.
      */
     static void pushPiecesUnderOverhangs(Board b, ArrayList<Integer> fullRows) {
-        int n = b.activePieces.size();
-        int fc = b.fallingColumns.size();
-        if ((n == 0 && fc == 0) || fullRows.isEmpty()) return;
-
-        boolean[][] solid = snapshotSolid(b);
-
-        boolean[] eligible = new boolean[n];
-        for (int i = 0; i < n; i++) {
-            Piece p = b.activePieces.get(i);
-            eligible[i] = !p.isBlockedFromSpawning && !overlapsSolid(b, p, 0, solid);
-        }
-
-        boolean[] fallEligible = new boolean[fc];
-        for (int i = 0; i < fc; i++) {
-            FallingColumn col = b.fallingColumns.get(i);
-            fallEligible[i] = !fallingOverlapsSolid(col, 0, solid, b);
-        }
-
-        int[] push = new int[n];
-        int[] fallPush = new int[fc];
+        if (fullRows.isEmpty()) return;
+        PushState state = PushState.begin(b);
+        if (state == null) return;
 
         for (int k = 0; k < fullRows.size(); k++) {
             // fullRows is ascending; k rows below this one have already been removed from
             // the snapshot, so this row's index in the partially-collapsed snapshot is offset.
-            int row = fullRows.get(k) - k;
-            collapseRow(b, solid, row);
+            collapseRow(b, state.solid, fullRows.get(k) - k);
+            state.resolveStep(b, DOWN);
+        }
+        state.apply(b, DOWN);
+    }
 
+    /**
+     * Pushes every eligible active piece and falling column up by however much is needed to
+     * stay clear of the rising stack as {@code insertedRows} are inserted at the bottom of the
+     * board, one row per element in insertion order. Each element holds the tile types of one
+     * new bottom row ({@link Tile#EMPTY} for its gap columns), so a piece sitting over a gap is
+     * only pushed once the garbage actually reaches it. Mutates
+     * {@code b.activePieces[*].location} and {@code b.fallingColumns[*].bottomY} in place.
+     *
+     * <p>Must be called before the board grid itself is shifted, since it snapshots the
+     * pre-insertion occupancy. Pieces above a pushed piece are chain-pushed if the push would
+     * otherwise make them overlap.
+     */
+    static void pushPiecesAboveGarbage(Board b, byte[][] insertedRows) {
+        if (insertedRows == null || insertedRows.length == 0) return;
+        PushState state = PushState.begin(b);
+        if (state == null) return;
+
+        for (byte[] row : insertedRows) {
+            raiseRow(b, state.solid, row);
+            state.resolveStep(b, UP);
+        }
+        state.apply(b, UP);
+    }
+
+    /**
+     * Per-row push accumulator: the evolving occupancy snapshot, which pieces and falling
+     * columns may be moved at all, and how far each has been pushed so far.
+     */
+    private static final class PushState {
+        final boolean[][] solid;
+        final boolean[] eligible;
+        final boolean[] fallEligible;
+        final int[] push;
+        final int[] fallPush;
+
+        private PushState(boolean[][] solid, boolean[] eligible, boolean[] fallEligible) {
+            this.solid = solid;
+            this.eligible = eligible;
+            this.fallEligible = fallEligible;
+            this.push = new int[eligible.length];
+            this.fallPush = new int[fallEligible.length];
+        }
+
+        /**
+         * Snapshots {@code b} and marks what may move. Pieces that are spawn-blocked or that
+         * already overlap a solid tile are ineligible. Returns null when there is nothing to
+         * push.
+         */
+        static PushState begin(Board b) {
+            int n = b.activePieces.size();
+            int fc = b.fallingColumns.size();
+            if (n == 0 && fc == 0) return null;
+
+            boolean[][] solid = snapshotSolid(b);
+
+            boolean[] eligible = new boolean[n];
+            for (int i = 0; i < n; i++) {
+                Piece p = b.activePieces.get(i);
+                eligible[i] = !p.isBlockedFromSpawning && !overlapsSolid(b, p, 0, solid);
+            }
+            boolean[] fallEligible = new boolean[fc];
+            for (int i = 0; i < fc; i++) {
+                fallEligible[i] = !fallingOverlapsSolid(b.fallingColumns.get(i), 0, solid, b);
+            }
+            return new PushState(solid, eligible, fallEligible);
+        }
+
+        /**
+         * Runs the chain-push fixed point for a single row step in direction {@code dir}
+         * ({@link #DOWN} or {@link #UP}) against the already-updated snapshot, then commits one
+         * cell of movement to everything that has to move.
+         */
+        void resolveStep(Board b, int dir) {
+            int n = eligible.length;
+            int fc = fallEligible.length;
             boolean[] moving = new boolean[n];
             boolean[] fallMoving = new boolean[fc];
+
             boolean changed = true;
             while (changed) {
                 changed = false;
                 for (int i = 0; i < n; i++) {
                     if (!eligible[i] || moving[i]) continue;
                     Piece p = b.activePieces.get(i);
-                    boolean mustMove = overlapsSolid(b, p, push[i], solid);
-                    if (!mustMove) {
-                        for (int j = 0; j < n && !mustMove; j++) {
-                            if (j == i || !eligible[j] || !moving[j]) continue;
-                            if (piecesOverlapAtOffsets(b, i, push[i], j, push[j] + 1)) {
-                                mustMove = true;
-                            }
-                        }
+                    boolean mustMove = overlapsSolid(b, p, dir * push[i], solid);
+                    for (int j = 0; j < n && !mustMove; j++) {
+                        if (j == i || !eligible[j] || !moving[j]) continue;
+                        mustMove = piecesOverlapAtOffsets(b, i, dir * push[i], j, dir * (push[j] + 1));
                     }
-                    if (!mustMove) {
-                        for (int j = 0; j < fc && !mustMove; j++) {
-                            if (!fallEligible[j] || !fallMoving[j]) continue;
-                            if (pieceOverlapsFalling(b, i, push[i], b.fallingColumns.get(j), fallPush[j] + 1)) {
-                                mustMove = true;
-                            }
-                        }
+                    for (int j = 0; j < fc && !mustMove; j++) {
+                        if (!fallEligible[j] || !fallMoving[j]) continue;
+                        mustMove = pieceOverlapsFalling(b, i, dir * push[i],
+                                b.fallingColumns.get(j), dir * (fallPush[j] + 1));
                     }
                     if (mustMove) {
                         moving[i] = true;
@@ -99,22 +161,15 @@ final class BoardPiecePush {
                 for (int i = 0; i < fc; i++) {
                     if (!fallEligible[i] || fallMoving[i]) continue;
                     FallingColumn col = b.fallingColumns.get(i);
-                    boolean mustMove = fallingOverlapsSolid(col, fallPush[i], solid, b);
-                    if (!mustMove) {
-                        for (int j = 0; j < n && !mustMove; j++) {
-                            if (!eligible[j] || !moving[j]) continue;
-                            if (pieceOverlapsFalling(b, j, push[j] + 1, col, fallPush[i])) {
-                                mustMove = true;
-                            }
-                        }
+                    boolean mustMove = fallingOverlapsSolid(col, dir * fallPush[i], solid, b);
+                    for (int j = 0; j < n && !mustMove; j++) {
+                        if (!eligible[j] || !moving[j]) continue;
+                        mustMove = pieceOverlapsFalling(b, j, dir * (push[j] + 1), col, dir * fallPush[i]);
                     }
-                    if (!mustMove) {
-                        for (int j = 0; j < fc && !mustMove; j++) {
-                            if (j == i || !fallEligible[j] || !fallMoving[j]) continue;
-                            if (fallingOverlap(col, fallPush[i], b.fallingColumns.get(j), fallPush[j] + 1)) {
-                                mustMove = true;
-                            }
-                        }
+                    for (int j = 0; j < fc && !mustMove; j++) {
+                        if (j == i || !fallEligible[j] || !fallMoving[j]) continue;
+                        mustMove = fallingOverlap(col, dir * fallPush[i],
+                                b.fallingColumns.get(j), dir * (fallPush[j] + 1));
                     }
                     if (mustMove) {
                         fallMoving[i] = true;
@@ -131,19 +186,22 @@ final class BoardPiecePush {
             }
         }
 
-        for (int i = 0; i < n; i++) {
-            if (push[i] > 0) {
-                b.activePieces.get(i).location.add(0, -push[i]);
+        /** Moves everything that accumulated a push by its total, in direction {@code dir}. */
+        void apply(Board b, int dir) {
+            for (int i = 0; i < push.length; i++) {
+                if (push[i] > 0) {
+                    b.activePieces.get(i).location.add(0, -dir * push[i]);
+                }
             }
-        }
-        for (int i = 0; i < fc; i++) {
-            if (fallPush[i] > 0) {
-                FallingColumn col = b.fallingColumns.get(i);
-                col.bottomY -= fallPush[i];
-                // Keep resting at an integer-ish position after a discrete push
-                if (col.isAtIntegerRow() || !col.moving) {
-                    col.bottomY = (float) Math.floor(col.bottomY);
-                    col.moving = false;
+            for (int i = 0; i < fallPush.length; i++) {
+                if (fallPush[i] > 0) {
+                    FallingColumn col = b.fallingColumns.get(i);
+                    col.bottomY -= dir * fallPush[i];
+                    // Keep resting at an integer-ish position after a discrete push
+                    if (col.isAtIntegerRow() || !col.moving) {
+                        col.bottomY = (float) Math.floor(col.bottomY);
+                        col.moving = false;
+                    }
                 }
             }
         }
@@ -176,6 +234,25 @@ final class BoardPiecePush {
             if (b.allowedTiles[b.height - 1][x]) {
                 solid[b.height - 1][x] = false;
             }
+        }
+    }
+
+    /**
+     * Shifts the snapshot up by one row and writes {@code rowTypes} into the vacated bottom
+     * row, mirroring how {@link Board#spawnGarbageRows} inserts a garbage row: permanent
+     * ({@code allowedTiles=false}) cells are never overwritten, a disallowed source cell reads
+     * as empty, and content shifted past the top of the board is discarded.
+     */
+    private static void raiseRow(Board b, boolean[][] solid, byte[] rowTypes) {
+        for (int y = b.height - 1; y >= 1; y--) {
+            for (int x = 0; x < b.width; x++) {
+                if (!b.allowedTiles[y][x]) continue;
+                solid[y][x] = b.allowedTiles[y - 1][x] && solid[y - 1][x];
+            }
+        }
+        for (int x = 0; x < b.width; x++) {
+            if (!b.allowedTiles[0][x]) continue;
+            solid[0][x] = rowTypes != null && x < rowTypes.length && rowTypes[x] != Tile.EMPTY;
         }
     }
 

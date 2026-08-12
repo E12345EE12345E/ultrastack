@@ -23,6 +23,9 @@ import me.ethanchen.network.packets.s2c.*;
 import me.ethanchen.network.packets.s2c.gamemode.CharacterModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
+import me.ethanchen.game.pve.PveBoardDisplay;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeData;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
@@ -30,7 +33,7 @@ import java.util.ArrayList;
 
 public class NetworkRegister {
     // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
-    public static final byte PROTOCOL_VERSION = 22;
+    public static final byte PROTOCOL_VERSION = 26;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -76,6 +79,9 @@ public class NetworkRegister {
         kryo.register(ScoreModeEndData.class);
         kryo.register(PuzzleModeData.class);
         kryo.register(PuzzleModeEndData.class);
+        kryo.register(PveModeData.class);
+        kryo.register(PveModeEndData.class);
+        kryo.register(PveBoardDisplay.class);
         // End game
         kryo.register(EndGameBroadcast.class);
         // Other Objects

@@ -16,15 +16,28 @@ public enum GameMode {
     /** Same mechanics as {@link #MULTIPLAYER_SCORE}, but characters and artifacts are active (implementation.md, Part 5). */
     CHARACTER_SCORE {
         @Override public GameModeRules rules() { return SCORE_RULES; }
+    },
+    /**
+     * PvE co-op mode driven by a selected level's JSON section data. Characters and artifacts
+     * are active (same as {@link #CHARACTER_SCORE}). Unlike the other modes, {@link #rules()}
+     * here is only a safe single-board fallback: the real rules for an in-progress session
+     * (built from the selected level, which varies per session) are a fresh
+     * {@code me.ethanchen.game.pve.PveRules} instance passed directly to
+     * {@link GameHandler#init(GameMode, GameModeRules, long)} by {@code ServerGame.startGame}.
+     */
+    PVE {
+        @Override public GameModeRules rules() { return SCORE_RULES; }
+        @Override public boolean supportsCharacters() { return true; }
     };
 
     /** Returns the rules strategy for this game mode. */
     public abstract GameModeRules rules();
 
     /**
-     * True for gamemodes prefixed {@code CHARACTER_}, meaning characters and artifacts affect
-     * scoring; {@code MULTIPLAYER_} modes never do, even though artifacts can still be earned
-     * from them (implementation.md, Part 5).
+     * True when characters and artifacts affect scoring and abilities are available.
+     * Default: gamemodes prefixed {@code CHARACTER_}. {@link #PVE} overrides this to
+     * {@code true}. {@code MULTIPLAYER_} modes never support characters, even though
+     * artifacts can still be earned from them (implementation.md, Part 5).
      */
     public boolean supportsCharacters() {
         return name().startsWith("CHARACTER_");

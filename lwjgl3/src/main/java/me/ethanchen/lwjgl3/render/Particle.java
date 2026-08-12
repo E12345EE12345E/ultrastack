@@ -33,6 +33,9 @@ public class Particle {
 
     public Kind kind;
 
+    /** Index of the board this particle belongs to (matches {@code GameHandler.getBoards()}). */
+    public int boardIndex;
+
     /** Board-tile coordinates of the particle center. */
     public float x;
     public float y;

@@ -2,6 +2,7 @@ package me.ethanchen.lwjgl3.menuscreens;
 
 import java.util.ArrayDeque;
 
+import me.ethanchen.game.GameMode;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.network.ClientPacketWrapper;
@@ -66,12 +67,11 @@ public class MultiplayerLobby extends MenuScreen {
         if (isHost) {
             addHostButtons();
             // Sync host's local pending settings into the room so peers (and late joiners) match.
-            LobbySettingsRequest req = new LobbySettingsRequest();
-            req.gamemode = app.getLobbySettings().gamemode;
-            app.sendTCP(req);
+            sendPendingLobbySettings();
         }
 
         sidebar = new LocalPlayerSidebar(app, elements, app::sendLocalPlayerCount);
+        sidebar.setEnabled(app.getLobbySettings().gamemode != GameMode.PVE);
         app.sendLocalPlayerCount();
 
         characterSidebar = new CharacterSidebar(app, elements, this,
@@ -96,10 +96,16 @@ public class MultiplayerLobby extends MenuScreen {
         app.setRoomHost(p.youAreHost);
         if (p.youAreHost) {
             addHostButtons();
-            LobbySettingsRequest req = new LobbySettingsRequest();
-            req.gamemode = app.getLobbySettings().gamemode;
-            app.sendTCP(req);
+            sendPendingLobbySettings();
         }
+    }
+
+    private void sendPendingLobbySettings() {
+        LobbySettingsRequest req = new LobbySettingsRequest();
+        req.gamemode = app.getLobbySettings().gamemode;
+        req.pveLevelId = app.getLobbySettings().pveLevelId;
+        req.pveDifficulty = app.getLobbySettings().pveDifficulty;
+        app.sendTCP(req);
     }
 
     private void leaveRoom() {
@@ -121,6 +127,7 @@ public class MultiplayerLobby extends MenuScreen {
 
     @Override
     public void update() {
+        sidebar.setEnabled(app.getLobbySettings().gamemode != GameMode.PVE);
         sidebar.tick();
         characterSidebar.tick();
     }

@@ -13,6 +13,8 @@ import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.PieceQueue;
 import me.ethanchen.game.board.SpinType;
 import me.ethanchen.game.progression.CharacterDef;
+import me.ethanchen.game.pve.PveRules;
+import me.ethanchen.game.pve.PveSessionState;
 import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.packets.s2c.AbilityActivateBroadcast;
 import me.ethanchen.network.packets.s2c.BumpSoundBroadcast;
@@ -29,7 +31,8 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
  *
  * <ul>
  *   <li>{@link PlacementEffects}       — particle/sound queuing
- *   <li>{@link ScoreModeScorer}        — one instance per board, MULTIPLAYER_SCORE state and scoring
+ *   <li>{@link ScoreModeScorer}        — one instance per board for score modes
+ *   <li>{@link PveScorer}              — one instance per board for PvE (shares formulas, not ScoreModeData)
  *   <li>{@link BlockedSpawnController} — one instance per board, blocked-piece cycling and hold-while-blocked
  *   <li>{@link GameEndController}      — per-board win/elimination tracking, grace period, and end-game broadcast
  * </ul>
@@ -59,8 +62,10 @@ public class ServerGame {
     private long globalScore;
 
     private final PlacementEffects effects = new PlacementEffects();
-    /** One scorer per board; see {@link ScoreModeScorer}. */
+    /** One scorer per board for MULTIPLAYER_SCORE / CHARACTER_SCORE; null in PvE. */
     private ScoreModeScorer[] scorers;
+    /** One scorer per board for PvE; null outside PvE. */
+    private PveScorer[] pveScorers;
     /** One blocked/explode controller per board; see {@link BlockedSpawnController}. */
     private BlockedSpawnController[] blocked;
     /** One Noob-ability gravity controller per board; see {@link NoobGravityController}. */
@@ -68,6 +73,10 @@ public class ServerGame {
     private final GameEndController endCtrl = new GameEndController();
     private final MeterController meterController = new MeterController();
     private ActiveLoadout[] loadouts;
+    /** Selected level/difficulty snapshot for the current PvE session; null for every other mode. */
+    private PveSessionState pveSession;
+    /** Drives PvE section progression; null unless {@link #gameMode} is {@code PVE}. */
+    private PveSectionController pveSectionController;
 
     public ServerGame(GameRoomContext room) {
         inProgress = false;
@@ -91,17 +100,35 @@ public class ServerGame {
      * null or contain null entries for modes/slots without an active character.
      */
     public synchronized boolean startGame(GameMode gameMode, int players, int msToStart, ActiveLoadout[] loadouts) {
+        return startGame(gameMode, players, msToStart, loadouts, null);
+    }
+
+    /**
+     * As {@link #startGame(GameMode, int, int, ActiveLoadout[])}, but additionally captures the
+     * selected level/difficulty for a PvE session (implementation.md, Part 6). {@code pveSession}
+     * is ignored for every mode other than {@link GameMode#PVE}.
+     */
+    public synchronized boolean startGame(GameMode gameMode, int players, int msToStart,
+                                           ActiveLoadout[] loadouts, PveSessionState pveSession) {
         if (inProgress) return false;
         inProgress = true;
         lastUpdateMs = System.currentTimeMillis();
         this.gameMode = gameMode;
         this.players = players;
         this.loadouts = gameMode.supportsCharacters() ? loadouts : null;
+        this.pveSession = (gameMode == GameMode.PVE) ? pveSession : null;
         this.game = new GameHandler(players);
-        this.game.init(gameMode, msToStart);
+        if (this.pveSession != null) {
+            this.game.init(gameMode, new PveRules(this.pveSession.levelData), msToStart);
+        } else {
+            this.game.init(gameMode, msToStart);
+        }
 
-        long gameStartMs    = System.currentTimeMillis() + msToStart;
-        long gameEndTargetMs = gameStartMs + GameConstants.SCORE_MODE_DURATION_MS;
+        long gameStartMs = System.currentTimeMillis() + msToStart;
+        // Score modes use the four-minute timer; PvE / puzzle ignore gameEndTargetMs.
+        long gameEndTargetMs = (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE)
+                ? gameStartMs + GameConstants.SCORE_MODE_DURATION_MS
+                : Long.MAX_VALUE;
 
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
@@ -113,14 +140,23 @@ public class ServerGame {
         globalScore = 0;
 
         int numBoards = game.getBoards().size();
-        scorers = new ScoreModeScorer[numBoards];
+        boolean useScoreModeScorers = gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE;
+        boolean usePveScorers = gameMode == GameMode.PVE;
+        scorers = useScoreModeScorers ? new ScoreModeScorer[numBoards] : null;
+        pveScorers = usePveScorers ? new PveScorer[numBoards] : null;
         blocked = new BlockedSpawnController[numBoards];
         noobGravity = new NoobGravityController[numBoards];
         for (int b = 0; b < numBoards; b++) {
             int[] boardSlots = game.slotsOnBoard(b);
-            ScoreModeScorer scorer = new ScoreModeScorer();
-            scorer.reset(b, boardSlots, game);
-            scorers[b] = scorer;
+            if (useScoreModeScorers) {
+                ScoreModeScorer scorer = new ScoreModeScorer();
+                scorer.reset(b, boardSlots, game);
+                scorers[b] = scorer;
+            } else if (usePveScorers) {
+                PveScorer scorer = new PveScorer();
+                scorer.reset(b, boardSlots, game);
+                pveScorers[b] = scorer;
+            }
             BlockedSpawnController bsc = new BlockedSpawnController();
             bsc.reset(boardSlots.length);
             blocked[b] = bsc;
@@ -129,13 +165,31 @@ public class ServerGame {
         endCtrl.reset(gameStartMs, gameEndTargetMs, numBoards);
         t = 0;
 
+        if (this.pveSession != null) {
+            pveSectionController = new PveSectionController(this.pveSession.levelData, game, numBoards,
+                    (win, sectionsCleared) -> endCtrl.beginPveSessionEnd(win, sectionsCleared, this.gameMode,
+                            globalScore, computeBoardScorePerPlayer(), bumpCounts, blockedCounts, piecesPlaced, clearSpinStats));
+        } else {
+            pveSectionController = null;
+        }
+
         if (this.loadouts != null) {
-            for (ScoreModeScorer scorer : scorers) scorer.setBonusProvider(this::characterScoreBonusPercent);
+            if (scorers != null) {
+                for (ScoreModeScorer scorer : scorers) scorer.setBonusProvider(this::characterScoreBonusPercent);
+            }
+            if (pveScorers != null) {
+                for (PveScorer scorer : pveScorers) scorer.setBonusProvider(this::characterScoreBonusPercent);
+            }
             meterController.reset(players, this.loadouts, game, numBoards);
             applyBagOverrides();
             applyGravityPassives();
         } else {
-            for (ScoreModeScorer scorer : scorers) scorer.setBonusProvider(null);
+            if (scorers != null) {
+                for (ScoreModeScorer scorer : scorers) scorer.setBonusProvider(null);
+            }
+            if (pveScorers != null) {
+                for (PveScorer scorer : pveScorers) scorer.setBonusProvider(null);
+            }
         }
         return true;
     }
@@ -185,9 +239,12 @@ public class ServerGame {
         this.highestMoveId = null;
         this.loadouts = null;
         this.scorers = null;
+        this.pveScorers = null;
         this.blocked = null;
         this.noobGravity = null;
         this.globalScore = 0;
+        this.pveSession = null;
+        this.pveSectionController = null;
         meterController.clear();
         inProgress = false;
         room.onGameStopped();
@@ -304,15 +361,11 @@ public class ServerGame {
         piecesPlaced[result.playerId]++;
         clearSpinStats.record(result);
         int priorCombo = game.getCombo(result.boardIndex);
-        if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
-            long points = scorerFor(result.boardIndex).scoreHardDrop(result, effects);
-            if (points > 0) globalScore += points;
-            if (loadouts != null && points > 0) {
-                meterController.onScoreEvent(result.playerId, points, result.pieceType,
-                        result.numClearedRows() > 0, result.spinType != SpinType.NONE);
-            }
-        } else {
-            game.applyClearToCounters(result);
+        long points = scoreHardDropForMode(result);
+        if (points > 0) globalScore += points;
+        if (loadouts != null && points > 0) {
+            meterController.onScoreEvent(result.playerId, points, result.pieceType,
+                    result.numClearedRows() > 0, result.spinType != SpinType.NONE);
         }
         effects.queueHardDropEffect(result, priorCombo);
         effects.queueResultParticles(result, game.getBoards().get(result.boardIndex).bw());
@@ -331,19 +384,17 @@ public class ServerGame {
             clearSpinStats.record(result);
         }
 
-        if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
-            long points = attributed ? scorerFor(result.boardIndex).scoreFallingClear(result, effects) : 0L;
-            if (!attributed) {
-                // Still update counters even when unattributed (score is zero).
-                game.applyClearToCounters(result);
-            }
-            if (points > 0) globalScore += points;
-            if (loadouts != null && attributed && points > 0) {
-                meterController.onScoreEvent(result.playerId, points, result.pieceType,
-                        result.numClearedRows() > 0, false);
-            }
+        long points = 0L;
+        if (attributed) {
+            points = scoreFallingClearForMode(result);
         } else {
+            // Unattributed falling clears still update combo/B2B counters; score stays zero.
             game.applyClearToCounters(result);
+        }
+        if (points > 0) globalScore += points;
+        if (loadouts != null && attributed && points > 0) {
+            meterController.onScoreEvent(result.playerId, points, result.pieceType,
+                    result.numClearedRows() > 0, false);
         }
 
         effects.queueFallingLandingFlash(result);
@@ -351,8 +402,40 @@ public class ServerGame {
         effects.queueFallingClearEffect(result, priorCombo);
     }
 
-    private ScoreModeScorer scorerFor(int boardIndex) {
+    /** Routes hard-drop scoring to the active mode's board scorer, or updates counters only. */
+    private long scoreHardDropForMode(LineClearResult result) {
+        if (gameMode == GameMode.PVE) {
+            PveScorer scorer = pveScorerFor(result.boardIndex);
+            return scorer != null ? scorer.scoreHardDrop(result, effects) : 0L;
+        }
+        if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
+            ScoreModeScorer scorer = scoreModeScorerFor(result.boardIndex);
+            return scorer != null ? scorer.scoreHardDrop(result, effects) : 0L;
+        }
+        game.applyClearToCounters(result);
+        return 0L;
+    }
+
+    private long scoreFallingClearForMode(LineClearResult result) {
+        if (gameMode == GameMode.PVE) {
+            PveScorer scorer = pveScorerFor(result.boardIndex);
+            return scorer != null ? scorer.scoreFallingClear(result, effects) : 0L;
+        }
+        if (gameMode == GameMode.MULTIPLAYER_SCORE || gameMode == GameMode.CHARACTER_SCORE) {
+            ScoreModeScorer scorer = scoreModeScorerFor(result.boardIndex);
+            return scorer != null ? scorer.scoreFallingClear(result, effects) : 0L;
+        }
+        game.applyClearToCounters(result);
+        return 0L;
+    }
+
+    private ScoreModeScorer scoreModeScorerFor(int boardIndex) {
         return (scorers != null && boardIndex >= 0 && boardIndex < scorers.length) ? scorers[boardIndex] : null;
+    }
+
+    private PveScorer pveScorerFor(int boardIndex) {
+        return (pveScorers != null && boardIndex >= 0 && boardIndex < pveScorers.length)
+                ? pveScorers[boardIndex] : null;
     }
 
     // -------------------------------------------------------------------------
@@ -404,6 +487,7 @@ public class ServerGame {
             case MULTIPLAYER_SCORE:
             case MULTIPLAYER_PUZZLE:
             case CHARACTER_SCORE:
+            case PVE:
                 if (loadouts != null && game != null) {
                     for (int b = 0; b < noobGravity.length; b++) {
                         if (!endCtrl.isBoardRunning(b)) continue;
@@ -436,6 +520,9 @@ public class ServerGame {
     private void updateGameTick() {
         if (endCtrl.isGameEnded()) return;
         game.update(deltaTime);
+        if (gameMode == GameMode.PVE && pveSectionController != null && game.isStarted() && !endCtrl.isGameEnded()) {
+            pveSectionController.tick(deltaTime, globalScore);
+        }
         for (LineClearResult r : game.getAndClearPendingLockResults()) {
             if (!endCtrl.isBoardRunning(r.boardIndex)) continue;
             if (r.fallingClear) {
@@ -467,10 +554,15 @@ public class ServerGame {
     /** Each player's own board's current score, indexed by global slot; used to freeze the personal result at game end. */
     private long[] computeBoardScorePerPlayer() {
         long[] out = new long[players];
-        if (scorers == null) return out;
         for (int slot = 0; slot < players; slot++) {
-            ScoreModeScorer scorer = scorerFor(game.boardIndexOf(slot));
-            out[slot] = scorer != null ? scorer.getTotalScore() : 0L;
+            int boardIndex = game.boardIndexOf(slot);
+            if (pveScorers != null) {
+                PveScorer scorer = pveScorerFor(boardIndex);
+                out[slot] = scorer != null ? scorer.getTotalScore() : 0L;
+            } else {
+                ScoreModeScorer scorer = scoreModeScorerFor(boardIndex);
+                out[slot] = scorer != null ? scorer.getTotalScore() : 0L;
+            }
         }
         return out;
     }
@@ -537,7 +629,7 @@ public class ServerGame {
     }
 
     public ScoreModeData getScoreModeData(int boardIndex) {
-        ScoreModeScorer scorer = scorerFor(boardIndex);
+        ScoreModeScorer scorer = scoreModeScorerFor(boardIndex);
         ScoreModeData d = scorer != null ? scorer.getScoreModeData() : new ScoreModeData();
         d.totalScore = globalScore;
         return d;
@@ -570,7 +662,25 @@ public class ServerGame {
                 b.characterMode = meterController.getCharacterModeData();
                 b.characterMode.globalGravitySpeedFactor = game.getGravitySpeedFactor(0);
             }
+        } else if (gameMode == me.ethanchen.game.GameMode.PVE) {
+            if (pveSectionController != null) {
+                me.ethanchen.network.packets.s2c.gamemode.PveModeData pve =
+                        new me.ethanchen.network.packets.s2c.gamemode.PveModeData();
+                pveSectionController.populateModeData(pve, globalScore);
+                PveScorer board0 = pveScorerFor(0);
+                if (board0 != null) board0.populateBoardVisuals(pve);
+                b.pveMode = pve;
+            }
+            if (loadouts != null) {
+                b.characterMode = meterController.getCharacterModeData();
+                b.characterMode.globalGravitySpeedFactor = game.getGravitySpeedFactor(0);
+            }
         }
+    }
+
+    /** Selected PvE level/difficulty for the current session, or {@code null} outside PvE. */
+    public PveSessionState getPveSession() {
+        return pveSession;
     }
 
     /**

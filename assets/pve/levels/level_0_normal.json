@@ -1,0 +1,68 @@
+{
+  "difficultyRank": 1,
+  "board1": {
+    "width": 10,
+    "height": 24,
+    "spawns": [[4, 20]],
+    "blockedTiles": [],
+    "initialTiles": []
+  },
+  "board2": {
+    "width": 10,
+    "height": 24,
+    "spawns": [[1, 20], [7, 20]],
+    "blockedTiles": [],
+    "initialTiles": []
+  },
+  "sections": [
+    {
+      "pass": [[{ "type": "TIME", "value": 10000 }]],
+      "timeoutMs": -1,
+      "display": "BOARD_DEFAULT",
+      "env": {
+        "bossId": -1,
+        "garbage": []
+      }
+    },
+    {
+      "pass": [
+        [{ "type": "SCORE", "value": 4000 }],
+        [
+          { "type": "SCORE", "value": 2500 },
+          { "type": "TIME", "value": 60000 }
+        ]
+      ],
+      "timeoutMs": 60000,
+      "display": "BOARD_DEFAULT",
+      "env": {
+        "bossId": -1,
+        "garbage": []
+      }
+    },
+    {
+      "pass": [[{ "type": "TIME", "value": 30000 }]],
+      "timeoutMs": -1,
+      "display": "BOARD_DEFAULT",
+      "env": {
+        "bossId": -1,
+        "garbage": [
+          {
+            "intervalMs": 4000,
+            "initialMs": 0,
+            "style": "DEFAULT",
+            "amount": 1
+          }
+        ]
+      }
+    },
+    {
+      "pass": [],
+      "timeoutMs": -1,
+      "display": "BOARD_BOSSFIGHT",
+      "env": {
+        "bossId": 0,
+        "garbage": []
+      }
+    }
+  ]
+}

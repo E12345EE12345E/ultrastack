@@ -2,6 +2,7 @@ package me.ethanchen.server;
 
 import me.ethanchen.game.GameMode;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 /**
@@ -18,6 +19,8 @@ public class GameEndInfo {
     public ScoreModeEndData scoreModeEnd;
     /** Puzzle-mode end data; null when mode is not MULTIPLAYER_PUZZLE. */
     public PuzzleModeEndData puzzleModeEnd;
+    /** PvE-mode end data; null when mode is not PVE. */
+    public PveModeEndData pveModeEnd;
     /** Hidden sortable score for this game, regardless of gamemode: the session-wide aggregate across all boards. */
     public long score;
     /**

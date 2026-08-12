@@ -5,6 +5,8 @@ import java.util.Random;
 
 import com.badlogic.gdx.math.Vector2;
 
+import me.ethanchen.game.pve.PveBoardSpec;
+
 /**
  * Factory that encodes the initial geometry of each {@link Board.Presets} variant.
  * Extracts the ~100-line switch block that previously lived inside {@link Board#Board(Board.Presets)},
@@ -52,6 +54,38 @@ public final class BoardPreset {
             case SHORT_4P:
                 return build(rng, (byte) 22, (byte) 16, spawns(new Vector2(1, 12), new Vector2(7, 12), new Vector2(13, 12), new Vector2(19, 12)));
         }
+    }
+
+    /**
+     * Builds a custom-geometry preset from PvE level data: playable area with cutouts
+     * ({@code blockedTiles}), one spawn (and fresh 7-bag queue) per seat, in seat order.
+     * {@code initialTiles} are applied separately by {@code Board#applyInitialTiles} once the
+     * board exists, since they mutate locked tiles rather than construction-time geometry.
+     */
+    public static BoardPreset fromPve(PveBoardSpec spec) {
+        Random rng = new Random();
+        byte w = (byte) spec.width;
+        byte h = (byte) spec.height;
+        boolean[][] allowed = new boolean[h][w];
+        for (boolean[] row : allowed) Arrays.fill(row, true);
+        if (spec.blockedTiles != null) {
+            for (int[] cell : spec.blockedTiles) {
+                if (cell == null || cell.length < 2) continue;
+                int x = cell[0], y = cell[1];
+                if (x >= 0 && x < w && y >= 0 && y < h) allowed[y][x] = false;
+            }
+        }
+        int seatCount = spec.spawns != null ? spec.spawns.length : 0;
+        Vector2[] spawnPositions = new Vector2[seatCount];
+        for (int i = 0; i < seatCount; i++) {
+            int[] s = spec.spawns[i];
+            spawnPositions[i] = new Vector2(s[0], s[1]);
+        }
+        PieceQueue[] queues = new PieceQueue[seatCount];
+        for (int i = 0; i < seatCount; i++) {
+            queues[i] = new PieceQueue(rng.nextInt(), PieceQueue.BagTypes.BAG_7);
+        }
+        return new BoardPreset(w, h, allowed, spawnPositions, queues);
     }
 
     // -------------------------------------------------------------------------

@@ -12,4 +12,8 @@ import me.ethanchen.game.GameMode;
  */
 public class LobbySettings {
     public GameMode gamemode = GameMode.MULTIPLAYER_SCORE;
+    /** Selected PvE level id when {@link #gamemode} is {@link GameMode#PVE}. */
+    public int pveLevelId;
+    /** Difficulty index into the selected level's JSON list (0 for the first/only difficulty). */
+    public int pveDifficulty;
 }

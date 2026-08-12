@@ -11,6 +11,12 @@ application.mainClass = "me.ethanchen.headless.HeadlessLauncher"
 application.applicationName = appName
 eclipse.project.name = appName + '-headless'
 
+sourceSets.main.resources.srcDirs += [ rootProject.file('assets').path ]
+
+run {
+  workingDir = rootProject.file('assets').path
+}
+
 dependencies {
   implementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
   implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"

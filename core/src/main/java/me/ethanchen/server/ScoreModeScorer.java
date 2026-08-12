@@ -1,308 +1,64 @@
 package me.ethanchen.server;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Random;
 
-import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.board.LineClearResult;
-import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
-import me.ethanchen.network.packets.s2c.NetParticle;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
+import me.ethanchen.server.ScoreFormulas.BoardScoreState;
 
 /**
- * Encapsulates one board's MULTIPLAYER_SCORE scoring state and logic extracted from
- * {@link ServerGame}: glow target, repeat columns, this board's own accumulated score, and the
- * per-placement scoring algorithm. One instance exists per board so glow/repeat-column/gravity
- * ramp never leak between boards; {@link ServerGame} separately tracks the session-wide
- * aggregate score across every board's scorer.
+ * One board's MULTIPLAYER_SCORE / CHARACTER_SCORE scoring state. Uses {@link ScoreFormulas}
+ * for the shared placement math; PvE has its own {@link PveScorer}.
  */
 class ScoreModeScorer {
 
-    private long totalScore;
-    /** Global slot of the currently glowing player on this board, or -1. */
-    private int glowPlayerId = -1;
-    private int repeatColumn;
-    private int repeatColumn2;
-    /** Indexed by position within {@link #boardSlots}, not by global slot. */
-    private float[] glowValues;
-    private final Random scoreRng = new Random();
+    private final BoardScoreState state = new BoardScoreState();
     private int boardIndex;
-    /** Global slots of every player seated on this board. */
-    private int[] boardSlots = new int[0];
     private GameHandler game;
-    /** Non-null only for CHARACTER_ modes: supplies the artifact/passive score bonus percent. */
+    /** Non-null only for CHARACTER_ modes. */
     private CharacterScoreBonusProvider bonusProvider;
 
     ScoreModeScorer() {}
 
-    /** Set by {@link ServerGame} for CHARACTER_ modes; cleared (null) for plain MULTIPLAYER_SCORE. */
     void setBonusProvider(CharacterScoreBonusProvider bonusProvider) {
         this.bonusProvider = bonusProvider;
     }
 
-    /** Re-initialises this board's scorer for a new game. */
     void reset(int boardIndex, int[] boardSlots, GameHandler game) {
         this.boardIndex = boardIndex;
-        this.boardSlots = boardSlots != null ? boardSlots : new int[0];
         this.game = game;
-        totalScore = 0;
-        glowPlayerId = -1;
-        repeatColumn = -1;
-        repeatColumn2 = -1;
-        glowValues = new float[this.boardSlots.length];
-        Arrays.fill(glowValues, 0.5f);
+        state.reset(boardSlots);
     }
 
-    /** This board's own accumulated score (not the session-wide aggregate). */
-    long getTotalScore() { return totalScore; }
+    long getTotalScore() { return state.totalScore; }
 
-    // -------------------------------------------------------------------------
-    // Per-placement scoring
-    // -------------------------------------------------------------------------
-
-    /**
-     * Scores the placement, updates glow/repeat-column state, queues score popup particles,
-     * updates this board's combo/B2B counters via {@code game}, and ramps this board's gravity.
-     * Called only in MULTIPLAYER_SCORE mode.
-     */
     long scoreHardDrop(LineClearResult result, PlacementEffects effects) {
-        int lines = result.numClearedRows();
-        if (lines == 0) {
-            game.applyClearToCounters(result);
-            return 0L;
-        }
-
-        int priorB2b = game.getB2b(boardIndex);
-        int priorCombo = game.getCombo(boardIndex);
-        int priorComboPlayer = game.getPreviousComboPlayerId(boardIndex);
-        boolean eligible = GameHandler.isB2BEligible(result);
-
-        boolean b2bBonus    = eligible && priorB2b >= 1;
-        boolean comboBonus  = priorCombo >= 1 && priorComboPlayer != result.playerId;
-        boolean glowBonus   = result.playerId == glowPlayerId;
-        boolean diffColBonus = !clearedTilesHitRepeatColumn(result);
-
-        long base = baseScore(result.spinType, lines, result.pieceType);
-
-        double multiplier = 1.0;
-        if (b2bBonus)    multiplier *= GameConstants.B2B_MULTIPLIER;
-        if (comboBonus)  multiplier *= GameConstants.COMBO_MULTIPLIER;
-        if (glowBonus)   multiplier *= GameConstants.GLOW_MULTIPLIER;
-        if (diffColBonus) multiplier *= GameConstants.DIFF_COLUMN_MULTIPLIER;
-        if (bonusProvider != null) {
-            float artifactBonusPercent = bonusProvider.scoreBonusPercent(
-                    result.playerId, result.pieceType, lines > 0, result.spinType != SpinType.NONE);
-            multiplier *= (1.0 + artifactBonusPercent / 100.0);
-        }
-        long points = Math.round(base * multiplier);
-        if (result.allClear) points += GameConstants.SCORE_ALL_CLEAR_BONUS;
-        totalScore += points;
-
-        float cx = result.restingCenterX;
-        float cy = result.restingCenterY;
-
-        NetParticle scoreParticle = new NetParticle();
-        scoreParticle.boardIndex = (byte) boardIndex;
-        scoreParticle.kind = NetParticle.KIND_POPUP_SCORE;
-        scoreParticle.tileType = result.pieceType;
-        scoreParticle.x = cx;
-        scoreParticle.y = cy;
-        scoreParticle.value = (int) Math.min(points, Integer.MAX_VALUE);
-        effects.pendingParticles.add(scoreParticle);
-
-        int bonusBits = (b2bBonus    ? 1 : 0)
-                      | (diffColBonus ? 2 : 0)
-                      | (comboBonus  ? 4 : 0)
-                      | (glowBonus   ? 8 : 0);
-        if (bonusBits != 0) {
-            NetParticle multParticle = new NetParticle();
-            multParticle.boardIndex = (byte) boardIndex;
-            multParticle.kind = NetParticle.KIND_POPUP_SCORE_MULTIPLIER;
-            multParticle.tileType = result.pieceType;
-            multParticle.x = cx;
-            multParticle.y = cy;
-            multParticle.value = bonusBits;
-            effects.pendingParticles.add(multParticle);
-        }
-
-        if (glowBonus) glowPlayerId = -1;
-        if (eligible && boardSlots.length > 1) {
-            glowPlayerId = randomOtherPlayer(result.playerId);
-        }
-        rebuildGlowValues();
-
-        updateRepeatColumns(result);
-
-        game.applyClearToCounters(result);
-
-        int newGravity = game.getGravity(boardIndex);
-        for (int i = 0; i < lines; i++) {
-            newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
-        }
-        game.setGravity(boardIndex, newGravity);
-
-        return points;
+        return ScoreFormulas.scoreHardDrop(state, game, boardIndex, result, effects, bonusProvider, true);
     }
 
-    /**
-     * Scores a falling-column landing: flat {@link GameConstants#SCORE_FALLING_PER_LINE} per
-     * cleared row, plus the all-clear bonus when applicable. No combo/B2B/glow/diff-column
-     * multipliers. Still updates this board's combo/B2B counters via {@code game.applyClearToCounters}.
-     */
     long scoreFallingClear(LineClearResult result, PlacementEffects effects) {
-        int lines = result.numClearedRows();
-        if (lines == 0) {
-            game.applyClearToCounters(result);
-            return 0L;
-        }
-
-        long points = GameConstants.SCORE_FALLING_PER_LINE * lines;
-        if (result.allClear) points += GameConstants.SCORE_ALL_CLEAR_BONUS;
-        totalScore += points;
-
-        float cx = result.restingCenterX;
-        float cy = result.restingCenterY;
-
-        NetParticle scoreParticle = new NetParticle();
-        scoreParticle.boardIndex = (byte) boardIndex;
-        scoreParticle.kind = NetParticle.KIND_POPUP_SCORE;
-        scoreParticle.tileType = result.pieceType;
-        scoreParticle.x = cx;
-        scoreParticle.y = cy;
-        scoreParticle.value = (int) Math.min(points, Integer.MAX_VALUE);
-        effects.pendingParticles.add(scoreParticle);
-
-        game.applyClearToCounters(result);
-
-        int newGravity = game.getGravity(boardIndex);
-        for (int i = 0; i < lines; i++) {
-            newGravity = (int) Math.max(GameConstants.GRAVITY_FLOOR_MS, newGravity * GameConstants.GRAVITY_RAMP);
-        }
-        game.setGravity(boardIndex, newGravity);
-
-        return points;
+        return ScoreFormulas.scoreFallingClear(state, game, boardIndex, result, effects, true);
     }
 
     /** Board-local data; {@code totalScore} is filled in by {@link ServerGame} with the session aggregate. */
     ScoreModeData getScoreModeData() {
         ScoreModeData d = new ScoreModeData();
-        d.glowingValues = (glowValues != null) ? Arrays.copyOf(glowValues, glowValues.length) : new float[0];
-        d.boardScore    = totalScore;
-        d.repeatColumn  = repeatColumn;
-        d.repeatColumn2 = repeatColumn2;
+        d.glowingValues = (state.glowValues != null)
+                ? Arrays.copyOf(state.glowValues, state.glowValues.length) : new float[0];
+        d.boardScore = state.totalScore;
+        d.repeatColumn = state.repeatColumn;
+        d.repeatColumn2 = state.repeatColumn2;
         return d;
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
+    /** Kept for callers/tests that historically called {@code ScoreModeScorer.baseScore}. */
     static long baseScore(SpinType spinType, int lines) {
-        return baseScore(spinType, lines, (byte) 0);
+        return ScoreFormulas.baseScore(spinType, lines);
     }
 
     static long baseScore(SpinType spinType, int lines, byte pieceType) {
-        switch (spinType) {
-            case T_SPIN:
-                switch (lines) {
-                    case 1: return GameConstants.SCORE_TSPIN_SINGLE;
-                    case 2: return GameConstants.SCORE_TSPIN_DOUBLE;
-                    case 3: return GameConstants.SCORE_TSPIN_TRIPLE;
-                }
-                break;
-            case T_SPIN_MINI:
-                switch (lines) {
-                    case 1: return GameConstants.SCORE_TSPIN_MINI_SINGLE;
-                    case 2: return GameConstants.SCORE_TSPIN_MINI_DOUBLE;
-                }
-                break;
-            case ALL_SPIN:
-                switch (lines) {
-                    case 1: return GameConstants.SCORE_ALL_SPIN_SINGLE;
-                    case 2: return GameConstants.SCORE_ALL_SPIN_DOUBLE;
-                    case 3: return GameConstants.SCORE_ALL_SPIN_TRIPLE;
-                    case 4: return GameConstants.SCORE_ALL_SPIN_TETRIS;
-                }
-                break;
-            case SMALL_SPIN:
-                switch (lines) {
-                    case 1: return GameConstants.SCORE_SMALL_SPIN_SINGLE;
-                    case 2: return GameConstants.SCORE_SMALL_SPIN_DOUBLE;
-                    case 3: return GameConstants.SCORE_SMALL_SPIN_TRIPLE;
-                }
-                break;
-            default:
-                break;
-        }
-        if (pieceType == Piece.I3 && lines == 3) return GameConstants.SCORE_I3_TRIPLE;
-        switch (lines) {
-            case 1: return GameConstants.SCORE_SINGLE;
-            case 2: return GameConstants.SCORE_DOUBLE;
-            case 3: return GameConstants.SCORE_TRIPLE;
-            case 4: return GameConstants.SCORE_TETRIS;
-        }
-        return 0;
-    }
-
-    private boolean clearedTilesHitRepeatColumn(LineClearResult result) {
-        if (repeatColumn == -1 && repeatColumn2 == -1) return false;
-        for (int[] cols : result.filledColumnsPerClearedRow) {
-            for (int col : cols) {
-                if (col == repeatColumn || col == repeatColumn2) return true;
-            }
-        }
-        return false;
-    }
-
-    private void updateRepeatColumns(LineClearResult result) {
-        float cx = result.restingCenterX;
-        byte type = result.pieceType;
-        byte rot  = result.pieceRotation;
-        if (type == Piece.I && (rot == 0 || rot == 2)) {
-            repeatColumn  = (int) Math.floor(cx - 0.5f);
-            repeatColumn2 = (int) Math.floor(cx + 0.5f);
-        } else if (type == Piece.O) {
-            repeatColumn  = (int) Math.floor(cx - 0.5f);
-            repeatColumn2 = (int) Math.floor(cx + 0.5f);
-        } else if (type == Piece.I && rot == 1) {
-            repeatColumn  = (int) Math.floor(cx + 0.5f);
-            repeatColumn2 = -1;
-        } else if (type == Piece.I && rot == 3) {
-            repeatColumn  = (int) Math.floor(cx - 0.5f);
-            repeatColumn2 = -1;
-        } else {
-            repeatColumn  = (int) Math.floor(cx);
-            repeatColumn2 = -1;
-        }
-    }
-
-    /** Picks a random global slot on this board other than {@code excludeId}, or -1 if none. */
-    private int randomOtherPlayer(int excludeId) {
-        if (boardSlots.length <= 1) return -1;
-        ArrayList<Integer> others = new ArrayList<>(boardSlots.length - 1);
-        for (int slot : boardSlots) {
-            if (slot != excludeId) others.add(slot);
-        }
-        if (others.isEmpty()) return -1;
-        return others.get(scoreRng.nextInt(others.size()));
-    }
-
-    private void rebuildGlowValues() {
-        if (glowValues == null || glowValues.length != boardSlots.length) {
-            glowValues = new float[boardSlots.length];
-        }
-        Arrays.fill(glowValues, 0.25f);
-        int localIndex = localIndexOf(glowPlayerId);
-        if (localIndex >= 0) glowValues[localIndex] = 2f;
-    }
-
-    private int localIndexOf(int globalSlot) {
-        for (int i = 0; i < boardSlots.length; i++) {
-            if (boardSlots[i] == globalSlot) return i;
-        }
-        return -1;
+        return ScoreFormulas.baseScore(spinType, lines, pieceType);
     }
 }

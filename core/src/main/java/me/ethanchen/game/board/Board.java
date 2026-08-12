@@ -99,7 +99,11 @@ public class Board {
     // Init
 
     public Board(Presets preset) {
-        BoardPreset p = BoardPreset.of(preset);
+        this(BoardPreset.of(preset));
+    }
+
+    /** Builds a board from an already-resolved {@link BoardPreset}, e.g. custom PvE geometry. */
+    public Board(BoardPreset p) {
         this.width = p.width;
         this.height = p.height;
         this.allowedTiles = p.allowedTiles;
@@ -177,6 +181,94 @@ public class Board {
         }
         // Push any falling columns that now intersect solid garbage up until clear.
         BoardFallingBlocks.resolveAfterGarbage(this);
+    }
+
+    /**
+     * Fills the given {@code [x, y]} cells with a single garbage tile each. Used once at board
+     * setup for PvE levels whose section-0 geometry specifies pre-placed tiles
+     * ({@code PveBoardSpec.initialTiles}); a no-op for any cell that's out of range or not part
+     * of the playable ({@code allowedTiles}) area.
+     */
+    public void applyInitialTiles(int[][] cells) {
+        if (cells == null) return;
+        for (int[] cell : cells) {
+            if (cell == null || cell.length < 2) continue;
+            int x = cell[0], y = cell[1];
+            if (x < 0 || x >= width || y < 0 || y >= height) continue;
+            if (!allowedTiles[y][x]) continue;
+            board[y][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+        }
+    }
+
+    /**
+     * Pushes the existing stack of locked tiles up by {@code amount} rows and fills the
+     * newly-opened bottom rows with garbage, per {@code style}. Generalizes
+     * {@link #spawnGarbageLines(int)} (which only fills empty bottom rows at setup time) for
+     * mid-game PvE garbage waves. Rows pushed above the top of the board are discarded.
+     *
+     * <p>Active pieces and falling columns are not shifted by the full {@code amount}: they are
+     * pushed up only as far as the rising tiles actually require, chain-pushing each other out
+     * of the way, the same way {@code BoardPiecePush} handles overhangs descending onto them
+     * during a line clear.
+     */
+    public void spawnGarbageRows(int amount, me.ethanchen.game.pve.GarbageStyle style, Random rng) {
+        if (amount <= 0) return;
+        amount = Math.min(amount, height);
+
+        // Insertion order: rows[0] goes in first and ends up highest, at row amount - 1.
+        byte[][] rows = new byte[amount][];
+        for (int i = 0; i < amount; i++) {
+            rows[i] = buildGarbageRow(style, rng);
+        }
+        BoardPiecePush.pushPiecesAboveGarbage(this, rows);
+
+        // Insert one row at a time so the grid ends up exactly where the push resolution,
+        // which replays the same per-row rise, expects it to be.
+        for (int i = 0; i < amount; i++) {
+            raiseLockedTilesOneRow();
+            writeGarbageRow(0, rows[i]);
+        }
+
+        BoardFallingBlocks.resolveAfterGarbage(this);
+    }
+
+    /**
+     * Builds one garbage row's tile types, leaving {@link Tile#EMPTY} in the gap column(s)
+     * chosen per {@code style}.
+     */
+    private byte[] buildGarbageRow(me.ethanchen.game.pve.GarbageStyle style, Random rng) {
+        int gapCol = rng.nextInt(width);
+        int gapCol2 = (style == me.ethanchen.game.pve.GarbageStyle.DOUBLE_HOLE) ? rng.nextInt(width) : -1;
+        byte[] types = new byte[width];
+        for (int x = 0; x < width; x++) {
+            types[x] = (x == gapCol || x == gapCol2) ? Tile.EMPTY : Tile.GARBAGE;
+        }
+        return types;
+    }
+
+    /**
+     * Shifts every locked tile up one row, discarding the top row. Permanent
+     * ({@code allowedTiles=false}) cells are never overwritten and read as empty, matching how
+     * {@link BoardLineClear} compacts downward.
+     */
+    private void raiseLockedTilesOneRow() {
+        for (int y = height - 1; y >= 1; y--) {
+            for (int x = 0; x < width; x++) {
+                if (!allowedTiles[y][x]) continue;
+                boolean fromAllowed = allowedTiles[y - 1][x];
+                board[y][x].set(fromAllowed ? board[y - 1][x].get() : Tile.EMPTY,
+                        fromAllowed ? board[y - 1][x].tex() : Tile.SINGLE_TILE);
+            }
+        }
+    }
+
+    /** Writes a row built by {@link #buildGarbageRow} into board row {@code y}. */
+    private void writeGarbageRow(int y, byte[] types) {
+        if (y < 0 || y >= height) return;
+        for (int x = 0; x < width; x++) {
+            if (!allowedTiles[y][x]) continue;
+            board[y][x].set(types[x], Tile.SINGLE_TILE);
+        }
     }
 
     /**

@@ -103,6 +103,7 @@ final class ParticleFactory {
         if (np.kind == NetParticle.KIND_FLASH) {
             Particle flash = new Particle();
             flash.kind = Particle.Kind.FLASH;
+            flash.boardIndex = np.boardIndex & 0xFF;
             flash.x = np.x + 0.5f;
             flash.y = np.y + 0.5f;
             flash.vx = 0;
@@ -119,6 +120,7 @@ final class ParticleFactory {
             for (int i = 0; i < count; i++) {
                 Particle shard = new Particle();
                 shard.kind = Particle.Kind.TILE_BREAK;
+                shard.boardIndex = np.boardIndex & 0xFF;
                 shard.x = np.x + rng.nextFloat();
                 shard.y = np.y + rng.nextFloat();
                 float angle = rng.nextFloat() * (float)(Math.PI * 2);
@@ -135,6 +137,7 @@ final class ParticleFactory {
         } else if (np.kind == NetParticle.KIND_POPUP_SCORE) {
             Particle pop = new Particle();
             pop.kind = Particle.Kind.POPUP_SCORE;
+            pop.boardIndex = np.boardIndex & 0xFF;
             pop.x = np.x;
             pop.y = np.y + 1f;
             pop.vx = 0f;
@@ -146,6 +149,7 @@ final class ParticleFactory {
         } else if (np.kind == NetParticle.KIND_POPUP_SCORE_MULTIPLIER) {
             Particle pop = new Particle();
             pop.kind = Particle.Kind.POPUP_SCORE_MULTIPLIER;
+            pop.boardIndex = np.boardIndex & 0xFF;
             pop.x = np.x;
             pop.y = np.y + 1.5f;
             pop.vx = 0f;

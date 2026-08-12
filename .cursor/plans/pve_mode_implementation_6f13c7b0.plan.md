@@ -4,25 +4,25 @@ overview: "Implement the full PvE gamemode from implementation.md in seven phase
 todos:
   - id: multiboard
     content: "Phase 1: true multi-board support in GameHandler/GameModeRules/StartGameBroadcast + side-by-side client rendering"
-    status: pending
+    status: completed
   - id: datamodel
     content: "Phase 2: PvE data model, JSON level format + loader, custom board geometry, PveLevelRegistry, PveLootTable"
-    status: pending
+    status: completed
   - id: engine
     content: "Phase 3: GameMode.PVE + PveRules + PveSectionController (criteria, timeouts, env overrides, garbage intervals) + PveModeEndData"
-    status: pending
+    status: completed
   - id: net-hud
     content: "Phase 4: PveModeData networking and in-game section HUD"
-    status: pending
+    status: completed
   - id: selection
     content: "Phase 5: level selection carousel, difficulty selector, pveUnlockedLevels persistence, single-local-player enforcement, PvE loot grant"
-    status: pending
+    status: completed
   - id: boss
     content: "Phase 6: BossDef/BossRegistry/BossController + bossfight layout with ripple and HP bar"
-    status: pending
+    status: completed
   - id: level0
     content: "Phase 7: author level 0 JSON, boss 0, T-piece loot table, register it"
-    status: pending
+    status: completed
 isProject: false
 ---
 

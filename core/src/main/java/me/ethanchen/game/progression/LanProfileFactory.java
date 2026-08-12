@@ -23,6 +23,8 @@ public final class LanProfileFactory {
         }
         profile.selectedCharacterId = CharacterDef.NOOB.id;
         profile.tokens = 0L;
+        // LAN hosts may select any registered PvE level; nothing persists past the session.
+        profile.pveUnlockedLevels = Integer.MAX_VALUE;
 
         Random rng = new Random();
         Artifact a = ArtifactRoller.roll(randomTetromino(rng), 3, 60f, rng);

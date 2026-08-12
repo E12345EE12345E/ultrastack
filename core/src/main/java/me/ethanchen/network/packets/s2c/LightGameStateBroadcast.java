@@ -4,6 +4,7 @@ import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.s2c.gamemode.CharacterModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 public class LightGameStateBroadcast extends NetworkPacket {
@@ -34,6 +35,8 @@ public class LightGameStateBroadcast extends NetworkPacket {
     public PuzzleModeData puzzleMode;
     /** Non-null only for CHARACTER_ modes: per-slot character meter state. */
     public CharacterModeData characterMode;
+    /** Non-null only for {@code GameMode.PVE}: live section / boss HUD state. */
+    public PveModeData pveMode;
 
     /** True once the server has detected win/loss; the rest of this packet's payload is frozen
      *  and may be re-sent unchanged until EndGameBroadcast follows (see

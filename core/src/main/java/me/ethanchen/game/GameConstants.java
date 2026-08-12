@@ -73,7 +73,7 @@ public final class GameConstants {
     public static final int NET_UPDATE_BROADCAST_INTERVAL_TICKS = 2;
 
     // Base score by lines cleared (index 1-3; index 4 only populated for standard/all-spin
-    // clears). MULTIPLAYER_SCORE mode; see ServerGame#baseScore.
+    // clears). Score modes / PvE; see ScoreFormulas#baseScore.
     public static final long SCORE_SINGLE = 100;
     public static final long SCORE_DOUBLE = 200;
     public static final long SCORE_TRIPLE = 300;
@@ -101,7 +101,7 @@ public final class GameConstants {
     /**
      * Flat bonus added to a placement's score when it results in an All Clear (Perfect Clear).
      * Applied post-multiplication, i.e. after all other bonuses have been applied to the
-     * base line-clear score. MULTIPLAYER_SCORE mode; see ScoreModeScorer#scoreHardDrop.
+     * base line-clear score. Score modes / PvE; see ScoreFormulas#scoreHardDrop.
      */
     public static final long SCORE_ALL_CLEAR_BONUS = 1000;
 

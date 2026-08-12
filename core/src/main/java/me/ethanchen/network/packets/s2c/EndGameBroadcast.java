@@ -3,6 +3,7 @@ package me.ethanchen.network.packets.s2c;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeEndData;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeEndData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeEndData;
 
 public class EndGameBroadcast extends NetworkPacket {
@@ -15,6 +16,8 @@ public class EndGameBroadcast extends NetworkPacket {
     public ScoreModeEndData scoreModeEnd;
     /** Puzzle-mode end data; null when mode is not MULTIPLAYER_PUZZLE. */
     public PuzzleModeEndData puzzleModeEnd;
+    /** PvE-mode end data; null when mode is not PVE. */
+    public PveModeEndData pveModeEnd;
     /** True if the game ended because a player disconnected rather than a natural conclusion. */
     public boolean disconnected;
 }

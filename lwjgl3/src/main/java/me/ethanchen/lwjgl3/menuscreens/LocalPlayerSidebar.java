@@ -20,6 +20,8 @@ public class LocalPlayerSidebar {
     private final UIToggleButton[] modeButtons = new UIToggleButton[3];
     private final TextInput controllerCountText;
     private int lastControllerCount = -1;
+    /** When false (PvE), mode toggles are inert so the client stays at one local player. */
+    private boolean enabled = true;
 
     private static final LocalPlayerMode[] MODES = {
             LocalPlayerMode.KEYBOARD_OR_CONTROLLER,
@@ -52,6 +54,7 @@ public class LocalPlayerSidebar {
     }
 
     private void selectMode(LocalPlayerMode mode) {
+        if (!enabled) return;
         app.setLocalPlayerMode(mode);
         for (int i = 0; i < MODES.length; i++) {
             modeButtons[i].selected = (MODES[i] == mode);
@@ -59,9 +62,18 @@ public class LocalPlayerSidebar {
         onChange.run();
     }
 
+    /**
+     * Enables or disables the local-player mode toggles. Disabled for PvE (single local player
+     * only); the buttons stay visible but {@link #selectMode} / {@link #tick()} no-op so the
+     * server roster is not bumped above 1.
+     */
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
     /** Refresh the controller digit; fires {@code onChange} when the count changes. */
     public void tick() {
-        refreshControllerCount(true);
+        refreshControllerCount(enabled);
     }
 
     private void refreshControllerCount(boolean fireOnChange) {

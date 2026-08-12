@@ -9,4 +9,6 @@ import me.ethanchen.network.packets.NetworkPacket;
  */
 public class LobbySettingsBroadcast extends NetworkPacket {
     public GameMode gamemode;
+    public int pveLevelId;
+    public int pveDifficulty;
 }

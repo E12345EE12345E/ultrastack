@@ -20,12 +20,17 @@ import me.ethanchen.game.progression.CharacterDef;
 import me.ethanchen.game.progression.CharacterRegistry;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.input.LocalPlayerRoster;
+import me.ethanchen.lwjgl3.menuscreens.ui.AspectLockedViewport;
+import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicTag;
+import me.ethanchen.game.pve.PveBoardDisplay;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
 import me.ethanchen.lwjgl3.render.CharacterMeterRenderer;
 import me.ethanchen.lwjgl3.render.Particle;
 import me.ethanchen.lwjgl3.render.shader.PlayerRipples;
+import me.ethanchen.lwjgl3.render.shader.RippleCircleRenderer;
+import me.ethanchen.lwjgl3.render.shader.RippleShaderColor;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.dto.HardDropEffect;
@@ -42,6 +47,7 @@ import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.network.packets.s2c.gamemode.CharacterModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
 
 /**
@@ -72,6 +78,16 @@ public class GameScreen extends MenuScreen {
     private ScoreModeData latestScoreMode;
     private PuzzleModeData latestPuzzleMode;
     private CharacterModeData latestCharacterMode;
+    private PveModeData latestPveMode;
+    private RippleCircleRenderer bossRipple;
+    private float bossRippleTime;
+    /** Locked 16:9 design rect for all in-game board/HUD placement. */
+    private final AspectLockedViewport gameViewport =
+            new AspectLockedViewport(DesignUi.DESIGN_W, DesignUi.DESIGN_H);
+    /** 0 = default dual/single layout, 1 = parted boards with boss in the middle. */
+    private float bossLayoutBlend;
+    private float bossLayoutTarget;
+    private static final float BOSS_LAYOUT_DURATION_MS = 900f;
     /** Per-slot previous "meter full / ability ready" state for rising-edge available SFX. */
     private boolean[] abilityWasReady;
 
@@ -121,7 +137,11 @@ public class GameScreen extends MenuScreen {
                 game.getBoards().set(i, board);
             }
         }
-        drawMode = (b.mode != GameMode.NONE) ? GameDrawMode.SINGLE_BOARD : GameDrawMode.NONE;
+        if (b.mode == GameMode.NONE) {
+            drawMode = GameDrawMode.NONE;
+        } else {
+            drawMode = game.getBoards().size() > 1 ? GameDrawMode.DUAL_BOARD : GameDrawMode.SINGLE_BOARD;
+        }
 
         isLocalSlot = new boolean[Math.max(1, b.totalPlayers & 0xFF)];
         abilityWasReady = new boolean[isLocalSlot.length];
@@ -218,6 +238,20 @@ public class GameScreen extends MenuScreen {
             ripples.update(rippleBoard, deltaTime / 1000f, game.isStarted());
         }
 
+        // Ease boards apart / together when entering or leaving a bossfight section.
+        if (bossLayoutBlend < bossLayoutTarget) {
+            bossLayoutBlend = Math.min(bossLayoutTarget,
+                    bossLayoutBlend + deltaTime / BOSS_LAYOUT_DURATION_MS);
+        } else if (bossLayoutBlend > bossLayoutTarget) {
+            bossLayoutBlend = Math.max(bossLayoutTarget,
+                    bossLayoutBlend - deltaTime / BOSS_LAYOUT_DURATION_MS);
+        }
+        if (bossLayoutTarget <= 0f && bossLayoutBlend <= 0.001f
+                && drawMode == GameDrawMode.BOSSFIGHT && game != null) {
+            drawMode = game.getBoards().size() > 1 ? GameDrawMode.DUAL_BOARD : GameDrawMode.SINGLE_BOARD;
+            bossLayoutBlend = 0f;
+        }
+
         Iterator<Particle> pit = particles.iterator();
         while (pit.hasNext()) {
             Particle p = pit.next();
@@ -249,9 +283,23 @@ public class GameScreen extends MenuScreen {
 
     @Override
     public void render() {
+        gameViewport.update();
+        float bossT = smoothstep(bossLayoutBlend);
+        boolean bossLayoutActive = bossT > 0.001f || bossLayoutTarget > 0f;
+        List<Board> boards = game.getBoards();
         switch (drawMode) {
             case SINGLE_BOARD:
-                renderSingleBoard();
+                if (bossLayoutActive) renderSingleBossLayout(bossT);
+                else renderSingleBoard();
+                break;
+            case DUAL_BOARD:
+                if (bossLayoutActive && boards.size() > 1) renderDualBossLayout(bossT);
+                else if (bossLayoutActive) renderSingleBossLayout(bossT);
+                else renderMultiBoard();
+                break;
+            case BOSSFIGHT:
+                if (boards.size() > 1) renderDualBossLayout(bossT);
+                else renderSingleBossLayout(bossT);
                 break;
             default:
                 break;
@@ -274,14 +322,61 @@ public class GameScreen extends MenuScreen {
 
     private void renderSingleBoard() {
         Board board = primaryBoard();
-        float tileSize = BoardRenderer.computeTileSize(board, 0.85f);
-        float originX  = BoardRenderer.centeredOriginX(board, tileSize);
-        float originY  = BoardRenderer.centeredOriginY(board, tileSize);
+        float tileSize = BoardRenderer.computeTileSize(board, 0.85f, gameViewport.viewW, gameViewport.viewH);
+        float originX = BoardRenderer.centeredOriginX(board, tileSize, gameViewport.originX, gameViewport.viewW);
+        float originY = BoardRenderer.centeredOriginY(board, tileSize, gameViewport.originY, gameViewport.viewH);
 
+        renderBoardContents(board, primaryBoardIndex(), originX, originY, tileSize);
+        renderBoardHud(board, originX, originY, tileSize);
+    }
+
+    /**
+     * Renders every board in {@code game.getBoards()} side-by-side, each fit into its own
+     * column of the locked 16:9 design rect via {@link BoardRenderer#originXForColumn}. The
+     * primary board (the local player's own board, or board 0 for spectators) additionally
+     * gets the HUD elements (hold box, timer, names, meters) that a single shared HUD makes
+     * sense for.
+     */
+    private void renderMultiBoard() {
+        List<Board> boards = game.getBoards();
+        int totalColumns = boards.size();
+        int primaryIndex = primaryBoardIndex();
+
+        // Fit tile size against the narrowest column and shortest board height so every board
+        // renders at the same scale within the 16:9 design rect.
+        float tileSize = Float.MAX_VALUE;
+        for (Board b : boards) {
+            float maxW = gameViewport.viewW / (float) totalColumns * 0.85f / b.bw();
+            float maxH = gameViewport.viewH * 0.85f / b.bh();
+            tileSize = Math.min(tileSize, Math.min(maxW, maxH));
+        }
+
+        for (int i = 0; i < boards.size(); i++) {
+            Board board = boards.get(i);
+            float originX = BoardRenderer.originXForColumn(
+                    board, tileSize, i, totalColumns, gameViewport.originX, gameViewport.viewW);
+            float originY = BoardRenderer.centeredOriginY(
+                    board, tileSize, gameViewport.originY, gameViewport.viewH);
+            renderBoardContents(board, i, originX, originY, tileSize);
+            if (i == primaryIndex) {
+                renderBoardHud(board, originX, originY, tileSize);
+            }
+        }
+    }
+
+    /** Draws the grid, pieces, shadows and particles for one board (shared by single/dual layouts). */
+    private void renderBoardContents(Board board, int boardIndex, float originX, float originY, float tileSize) {
         float[] glowValues = new float[board.getActivePieces().size()];
-        if (latestScoreMode != null && latestScoreMode.glowingValues != null
-                && latestScoreMode.glowingValues.length == glowValues.length) {
-            System.arraycopy(latestScoreMode.glowingValues, 0, glowValues, 0, glowValues.length);
+        float[] srcGlow = null;
+        if (boardIndex == primaryBoardIndex()) {
+            if (game.getMode() == GameMode.PVE && latestPveMode != null) {
+                srcGlow = latestPveMode.glowingValues;
+            } else if (latestScoreMode != null) {
+                srcGlow = latestScoreMode.glowingValues;
+            }
+        }
+        if (srcGlow != null && srcGlow.length == glowValues.length) {
+            System.arraycopy(srcGlow, 0, glowValues, 0, glowValues.length);
         } else {
             Arrays.fill(glowValues, 0.5f);
         }
@@ -290,10 +385,13 @@ public class GameScreen extends MenuScreen {
             if (board.getActivePieces().get(i).isBlockedFromSpawning) glowValues[i] = 0f;
         }
         for (LocalPlayer lp : localPlayers) {
-            if (lp.ownPieceHoldGlow && lp.slot >= 0 && lp.slot < glowValues.length
-                    && board.getActivePieces().size() > lp.slot
-                    && board.getActivePieces().get(lp.slot).isBlockedFromSpawning) {
-                glowValues[lp.slot] = 2f;
+            if (lp.ownPieceHoldGlow && boardFor(lp.slot) == board) {
+                int seat = seatFor(lp.slot);
+                if (seat >= 0 && seat < glowValues.length
+                        && board.getActivePieces().size() > seat
+                        && board.getActivePieces().get(seat).isBlockedFromSpawning) {
+                    glowValues[seat] = 2f;
+                }
             }
         }
 
@@ -313,32 +411,44 @@ public class GameScreen extends MenuScreen {
         }
 
         boolean[] localFlags = new boolean[board.getActivePieces().size()];
-        for (int i = 0; i < localFlags.length; i++) {
-            localFlags[i] = isLocalSlot(i);
+        for (int seat = 0; seat < localFlags.length; seat++) {
+            localFlags[seat] = isLocalSlot(board.globalSlotForSeat(seat));
         }
 
         BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
-        if (ripples != null && !exploded) {
+        if (ripples != null && !exploded && boardIndex == primaryBoardIndex()) {
             ripples.draw(originX, originY, tileSize);
         }
         BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
                 glowValues, shadows, blockedWhiteAmt, !exploded,
                 localPlayers.isEmpty() ? null : localFlags, otherPlayerGrayscaleAmt);
 
-        if (latestScoreMode != null) {
-            if (latestScoreMode.repeatColumn != -1) {
-                BoardRenderer.getInstance().drawColumnHighlight(board, originX, originY, tileSize,
-                        shapes, latestScoreMode.repeatColumn, 1f, 0f, 0f, 0.15f);
+        if (boardIndex == primaryBoardIndex()) {
+            int repeatCol = -1;
+            int repeatCol2 = -1;
+            if (game.getMode() == GameMode.PVE && latestPveMode != null) {
+                repeatCol = latestPveMode.repeatColumn;
+                repeatCol2 = latestPveMode.repeatColumn2;
+            } else if (latestScoreMode != null) {
+                repeatCol = latestScoreMode.repeatColumn;
+                repeatCol2 = latestScoreMode.repeatColumn2;
             }
-            if (latestScoreMode.repeatColumn2 != -1) {
+            if (repeatCol != -1) {
                 BoardRenderer.getInstance().drawColumnHighlight(board, originX, originY, tileSize,
-                        shapes, latestScoreMode.repeatColumn2, 1f, 0f, 0f, 0.15f);
+                        shapes, repeatCol, 1f, 0f, 0f, 0.15f);
+            }
+            if (repeatCol2 != -1) {
+                BoardRenderer.getInstance().drawColumnHighlight(board, originX, originY, tileSize,
+                        shapes, repeatCol2, 1f, 0f, 0f, 0.15f);
             }
         }
 
-        BoardRenderer.getInstance().drawParticles(particles, originX, originY, tileSize, shapes);
-        BoardRenderer.getInstance().drawTextParticles(particles, originX, originY, tileSize, sprites, font);
+        BoardRenderer.getInstance().drawParticles(particles, originX, originY, tileSize, shapes, boardIndex);
+        BoardRenderer.getInstance().drawTextParticles(particles, originX, originY, tileSize, sprites, font, boardIndex);
+    }
 
+    /** Draws the shared HUD (hold box, timer, countdown, names, meters) attached to one board. */
+    private void renderBoardHud(Board board, float originX, float originY, float tileSize) {
         float holdBoxSize = tileSize * 4f;
         float holdBoxX = originX - holdBoxSize - tileSize * 0.5f;
         float holdBoxY = originY + (board.bh() - 4) * tileSize;
@@ -353,6 +463,20 @@ public class GameScreen extends MenuScreen {
             long elapsedMs = latestPuzzleMode != null ? latestPuzzleMode.elapsedMs : 0;
             BoardRenderer.getInstance().drawCountUpTimerBox(
                     elapsedMs, timerBoxX, timerBoxY, timerBoxSize, tileSize, shapes, sprites, font);
+        } else if (game.getMode() == GameMode.PVE) {
+            if (latestPveMode != null) {
+                int objCount = latestPveMode.objectiveLines != null
+                        ? latestPveMode.objectiveLines.length : 0;
+                float sectionBoxH = timerBoxSize + tileSize * Math.max(0, objCount - 1) * 0.55f;
+                BoardRenderer.getInstance().drawPveSectionBox(
+                        latestPveMode.sectionIndex,
+                        latestPveMode.sectionElapsedMs,
+                        latestPveMode.sectionTimeoutMs,
+                        latestPveMode.totalScore,
+                        latestPveMode.objectiveLines,
+                        timerBoxX, timerBoxY, timerBoxSize, sectionBoxH, tileSize,
+                        shapes, sprites, font);
+            }
         } else {
             long currentScore = latestScoreMode != null ? latestScoreMode.totalScore : 0;
             BoardRenderer.getInstance().drawTimerBox(
@@ -363,6 +487,181 @@ public class GameScreen extends MenuScreen {
         renderCountdown(board, originX, originY, tileSize);
         renderPlayerNames(board, originX, originY, tileSize);
         renderCharacterMeters(board, originX, originY, tileSize);
+    }
+
+    /**
+     * Dual-board bossfight: both boards stay visible and float outward while the boss eases into
+     * the center gap. {@code t} is an eased blend in [0, 1] (0 = default side-by-side, 1 = parted).
+     */
+    private void renderDualBossLayout(float t) {
+        List<Board> boards = game.getBoards();
+        if (boards.size() < 2) {
+            renderSingleBossLayout(t);
+            return;
+        }
+        int primaryIndex = primaryBoardIndex();
+
+        float tileSize = Float.MAX_VALUE;
+        for (Board b : boards) {
+            float maxW = gameViewport.viewW / 2f * 0.85f / b.bw();
+            float maxH = gameViewport.viewH * 0.85f / b.bh();
+            tileSize = Math.min(tileSize, Math.min(maxW, maxH));
+        }
+
+        Board left = boards.get(0);
+        Board right = boards.get(1);
+        float leftW = left.bw() * tileSize;
+        float rightW = right.bw() * tileSize;
+        float originY = BoardRenderer.centeredOriginY(left, tileSize, gameViewport.originY, gameViewport.viewH);
+
+        float defLeftX = BoardRenderer.originXForColumn(
+                left, tileSize, 0, 2, gameViewport.originX, gameViewport.viewW);
+        float defRightX = BoardRenderer.originXForColumn(
+                right, tileSize, 1, 2, gameViewport.originX, gameViewport.viewW);
+
+        // Part toward the edges of the 16:9 rect, leaving a center lane for the boss.
+        float hudGutter = tileSize * 5.5f;
+        float bossLeftX = gameViewport.toScreenX(0.02f) + hudGutter;
+        float bossRightX = gameViewport.toScreenX(0.98f) - rightW;
+        float leftX = defLeftX + (bossLeftX - defLeftX) * t;
+        float rightX = defRightX + (bossRightX - defRightX) * t;
+
+        renderBoardContents(left, 0, leftX, originY, tileSize);
+        renderBoardContents(right, 1, rightX, originY, tileSize);
+        if (primaryIndex == 0) {
+            renderBoardHud(left, leftX, originY, tileSize);
+        } else if (primaryIndex == 1) {
+            renderBoardHud(right, rightX, originY, tileSize);
+        } else {
+            renderBoardHud(left, leftX, originY, tileSize);
+        }
+
+        if (t <= 0.001f) return;
+
+        float innerLeft = leftX + leftW;
+        float innerRight = rightX;
+        float laneWidth = Math.max(0f, innerRight - innerLeft);
+        float boxSize = Math.min(gameViewport.toScreenH(0.42f), laneWidth * 0.92f)
+                * (0.35f + 0.65f * t) * 0.65f;
+        float panelX = innerLeft + (laneWidth - boxSize) * 0.5f;
+        // Drop in from slightly above as the boards part.
+        float centerY = gameViewport.toScreenY(0.5f) + (1f - t) * gameViewport.viewH * 0.12f;
+        renderBossPanel(panelX, centerY, boxSize);
+    }
+
+    /**
+     * Single-board bossfight: board and boss form one centered group. At {@code t=0} the board
+     * is screen-centered; as {@code t} rises the pair settles so the action reads in the middle
+     * of the 16:9 design rect (board left of boss, not pinned to the left edge).
+     */
+    private void renderSingleBossLayout(float t) {
+        Board board = primaryBoard();
+        if (board == null) return;
+
+        float tileSize = BoardRenderer.computeTileSize(board, 0.85f, gameViewport.viewW, gameViewport.viewH);
+        // Keep room for the boss lane once parted; width guard only bites for wide boards.
+        float partedTile = Math.min(tileSize, gameViewport.viewW * 0.42f / board.bw());
+        tileSize = tileSize + (partedTile - tileSize) * t;
+
+        float boardW = board.bw() * tileSize;
+        float hudGutter = tileSize * 5.5f;
+        float meterColumnW = hasSeatedCharacters() ? tileSize * 5.5f : 0f;
+        float gap = tileSize * 1.5f;
+        float boxSize = gameViewport.toScreenH(0.42f) * 0.65f * (0.35f + 0.65f * t);
+
+        // Default: board alone, centered.
+        float defX = BoardRenderer.centeredOriginX(board, tileSize, gameViewport.originX, gameViewport.viewW);
+        // Parted: center the full [HUD][board][meters][gap][boss] group in the design rect.
+        float groupW = hudGutter + boardW + meterColumnW + gap + boxSize;
+        float groupLeft = gameViewport.toScreenX(0.5f) - groupW * 0.5f;
+        float partedX = groupLeft + hudGutter;
+
+        float originX = defX + (partedX - defX) * t;
+        float originY = BoardRenderer.centeredOriginY(board, tileSize, gameViewport.originY, gameViewport.viewH);
+
+        renderBoardContents(board, primaryBoardIndex(), originX, originY, tileSize);
+        renderBoardHud(board, originX, originY, tileSize);
+
+        if (t <= 0.001f) return;
+
+        float panelX = originX + boardW + meterColumnW + gap;
+        float centerY = gameViewport.toScreenY(0.5f) + (1f - t) * gameViewport.viewH * 0.12f;
+        renderBossPanel(panelX, centerY, boxSize);
+    }
+
+    private static float smoothstep(float x) {
+        x = Math.max(0f, Math.min(1f, x));
+        return x * x * (3f - 2f * x);
+    }
+
+    /** True when the live character payload has at least one seated character id. */
+    private boolean hasSeatedCharacters() {
+        if (latestCharacterMode == null || latestCharacterMode.characterIds == null) return false;
+        for (int id : latestCharacterMode.characterIds) {
+            if (id >= 0) return true;
+        }
+        return false;
+    }
+
+    private void renderBossPanel(float panelX, float centerY, float boxSize) {
+        if (latestPveMode == null || latestPveMode.bossId < 0 || boxSize <= 0f) return;
+        float panelUnit = boxSize / 6f;
+        float panelY = centerY - boxSize * 0.5f;
+        float cx = panelX + boxSize * 0.5f;
+        float cy = panelY + boxSize * 0.55f;
+
+        // Boss ripple driven by phase / phase progress.
+        if (bossRipple == null) bossRipple = new RippleCircleRenderer();
+        bossRippleTime += deltaTime / 1000f;
+        float progress = latestPveMode.bossPhaseDurationMs > 0
+                ? Math.min(1f, latestPveMode.bossPhaseElapsedMs / (float) latestPveMode.bossPhaseDurationMs)
+                : 0f;
+        float radius;
+        RippleShaderColor color;
+        switch (latestPveMode.bossPhase) {
+            case 1: // WINDUP — grow + shift toward red
+                radius = 3.5f + 2.5f * progress;
+                color = new RippleShaderColor(
+                        new com.badlogic.gdx.graphics.Color(1f, 0.85f - 0.55f * progress, 0.2f, 1f));
+                break;
+            case 2: // ATTACK — fast shrink + snap to hot color
+                radius = 6f * (1f - progress) + 1.5f;
+                color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(1f, 0.15f, 0.1f, 1f));
+                break;
+            case 3: // STUNNED — dim steady
+                radius = 3f;
+                color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(0.5f, 0.7f, 1f, 1f));
+                break;
+            default: // IDLE
+                radius = 3.5f;
+                color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(0.9f, 0.9f, 1f, 1f));
+                break;
+        }
+        // RippleCircleRenderer expects board-space coords relative to an origin/tileSize; feed a
+        // synthetic board origin so the circle sits on the portrait center in screen space.
+        float synthOriginX = cx - 0.5f * panelUnit;
+        float synthOriginY = cy - 0.5f * panelUnit;
+        bossRipple.draw(synthOriginX, synthOriginY, panelUnit, 0f, 0f, radius,
+                1f, 1f, 0.35f, 0.55f, color, bossRippleTime, 1f);
+
+        CharacterMeterRenderer.draw(shapes, sprites, font,
+                0, "BOSS", latestPveMode.bossHp, Math.max(1, latestPveMode.bossMaxHp),
+                new com.badlogic.gdx.graphics.Color(1f, 0.35f, 0.25f, 1f),
+                panelX, panelY, boxSize);
+
+        // Explicit HP numerals under the ring.
+        String hpText = latestPveMode.bossHp + " / " + latestPveMode.bossMaxHp;
+        com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout();
+        float savedX = font.getScaleX(), savedY = font.getScaleY();
+        font.getData().setScale(1f);
+        float fs = 0.45f * (boxSize / font.getData().lineHeight);
+        font.getData().setScale(fs);
+        layout.setText(font, hpText);
+        sprites.begin();
+        font.setColor(com.badlogic.gdx.graphics.Color.WHITE);
+        font.draw(sprites, hpText, panelX + (boxSize - layout.width) * 0.5f, panelY - panelUnit * 0.1f);
+        sprites.end();
+        font.getData().setScale(savedX, savedY);
     }
 
     /** Draws every seated player's character portrait + meter donut to the right of the board. */
@@ -555,6 +854,10 @@ public class GameScreen extends MenuScreen {
             latestCharacterMode = p.characterMode;
             updateAbilityAvailableSounds(p.characterMode);
         }
+        if (p.pveMode != null) {
+            latestPveMode = p.pveMode;
+            updateDrawModeFromPve(p.pveMode);
+        }
 
         game.setGravity(p.gravity);
         applyCharacterGravityPrediction(p);
@@ -626,16 +929,16 @@ public class GameScreen extends MenuScreen {
     }
 
     private void handleParticleBroadcast(ParticleBroadcast p) {
-        int primaryBoardIndex = primaryBoardIndex();
+        // Every board's particles are kept (tagged with their own boardIndex) and filtered only
+        // at render time, so a client drawing more than one board (GameDrawMode.DUAL_BOARD) sees
+        // particles on every board, not just its primary one.
         if (p.spawners != null) {
             for (ParticleSpawner ps : p.spawners) {
-                if ((ps.boardIndex & 0xFF) != primaryBoardIndex) continue;
                 ParticleFactory.expandSpawner(ps, particles, particleRng);
             }
         }
         if (p.particles != null) {
             for (NetParticle np : p.particles) {
-                if ((np.boardIndex & 0xFF) != primaryBoardIndex) continue;
                 ParticleFactory.expandNetParticle(np, particles, particleRng);
             }
         }
@@ -645,27 +948,34 @@ public class GameScreen extends MenuScreen {
         if (p.effects == null) return;
         int primaryBoardIndex = primaryBoardIndex();
         for (HardDropEffect e : p.effects) {
-            if ((e.boardIndex & 0xFF) != primaryBoardIndex) continue;
-            if (e.fallingClear) {
-                if (e.combo >= 0) {
-                    AudioManager.getInstance().playClearSound(e.combo);
-                    if (e.allClear) AudioManager.getInstance().playAllClearSound();
+            boolean onPrimaryBoard = (e.boardIndex & 0xFF) == primaryBoardIndex;
+            // Sounds and the primary board's ripple shader stay scoped to the client's own board
+            // so a client rendering multiple boards (DUAL_BOARD) doesn't hear every other board's
+            // events; the hard-drop flash itself is still expanded for every board so it's
+            // visible wherever it happened.
+            if (onPrimaryBoard) {
+                if (e.fallingClear) {
+                    if (e.combo >= 0) {
+                        AudioManager.getInstance().playClearSound(e.combo);
+                        if (e.allClear) AudioManager.getInstance().playAllClearSound();
+                    }
+                } else {
+                    AudioManager.getInstance().playPlaceSound(isLocalSlot(e.playerId));
+                    if (e.combo >= 0) {
+                        AudioManager.getInstance().playClearSound(e.combo);
+                        if (e.lines == 4) AudioManager.getInstance().playClearTetrisSound();
+                        if (e.spinType == HardDropEffect.SPIN_TSPIN
+                                || e.spinType == HardDropEffect.SPIN_ALL_SPIN) {
+                            AudioManager.getInstance().playSpinClearSound();
+                        }
+                        if (e.allClear) AudioManager.getInstance().playAllClearSound();
+                    }
+                    if (ripples != null) ripples.poof(e.playerId);
                 }
-                continue;
             }
-            AudioManager.getInstance().playPlaceSound(isLocalSlot(e.playerId));
-            if (e.combo >= 0) {
-                AudioManager.getInstance().playClearSound(e.combo);
-                if (e.lines == 4) AudioManager.getInstance().playClearTetrisSound();
-                if (e.spinType == HardDropEffect.SPIN_TSPIN
-                        || e.spinType == HardDropEffect.SPIN_ALL_SPIN) {
-                    AudioManager.getInstance().playSpinClearSound();
-                }
-                if (e.allClear) AudioManager.getInstance().playAllClearSound();
-            }
+            if (e.fallingClear) continue;
             ParticleFactory.expandHardDropFlash(e.pieceType, e.doubledX, e.doubledY, e.pieceRotation,
                     e.boardIndex, particles, particleRng);
-            if (ripples != null) ripples.poof(e.playerId);
         }
     }
 
@@ -715,12 +1025,26 @@ public class GameScreen extends MenuScreen {
         AudioManager.getInstance().playBumpSound(self);
     }
 
+    /** Switches between the default single/dual layout and the bossfight layout from live PvE data. */
+    private void updateDrawModeFromPve(PveModeData mode) {
+        if (game.getMode() != GameMode.PVE || mode == null) return;
+        boolean boss = mode.displayMode == PveBoardDisplay.BOARD_BOSSFIGHT;
+        bossLayoutTarget = boss ? 1f : 0f;
+        if (boss || bossLayoutBlend > 0.001f) {
+            // Stay on BOSSFIGHT while the parting animation is active so both boards keep rendering.
+            drawMode = GameDrawMode.BOSSFIGHT;
+        } else {
+            drawMode = game.getBoards().size() > 1 ? GameDrawMode.DUAL_BOARD : GameDrawMode.SINGLE_BOARD;
+        }
+    }
+
     @Override
     public void dispose() {
         Controllers.removeListener(controllerAdapter);
         AudioManager.getInstance().stopMusic();
         if (ripples != null) ripples.dispose();
+        if (bossRipple != null) bossRipple.dispose();
     }
 
-    private enum GameDrawMode { NONE, SINGLE_BOARD }
+    private enum GameDrawMode { NONE, SINGLE_BOARD, DUAL_BOARD, BOSSFIGHT }
 }

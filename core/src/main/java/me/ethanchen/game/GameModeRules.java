@@ -1,6 +1,7 @@
 package me.ethanchen.game;
 
 import me.ethanchen.game.board.Board;
+import me.ethanchen.game.board.BoardPreset;
 
 /**
  * Strategy interface that encodes all mode-specific behaviour that used to be scattered across
@@ -17,6 +18,25 @@ public interface GameModeRules {
      * {@link Board.Presets#STANDARD_SINGLE} as a safe fallback.
      */
     Board.Presets boardPreset(int numPlayers);
+
+    /**
+     * Returns the geometry for every board that should exist in the session, in board order.
+     * Modes with a single shared board (the default for every mode except PvE) just wrap
+     * {@link #boardPreset(int)}; PvE overrides this to build one or more custom-geometry boards
+     * (splitting players across boards) from its level data.
+     */
+    default BoardPreset[] boardLayout(int numPlayers) {
+        return new BoardPreset[]{ BoardPreset.of(boardPreset(numPlayers)) };
+    }
+
+    /**
+     * Maps each global session slot (0..numPlayers-1) to the index of the board it is seated on,
+     * into the array returned by {@link #boardLayout(int)}. Defaults to every slot on board 0,
+     * matching {@link #boardLayout(int)}'s single-board default.
+     */
+    default int[] slotToBoard(int numPlayers) {
+        return new int[numPlayers];
+    }
 
     /** Initial gravity interval in milliseconds. */
     int initialGravityMs();
