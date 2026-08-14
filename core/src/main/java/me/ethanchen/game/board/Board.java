@@ -215,10 +215,22 @@ public class Board {
         if (amount <= 0) return;
         amount = Math.min(amount, height);
 
+        boolean cheese = style == me.ethanchen.game.pve.GarbageStyle.CHEESE
+                || style == me.ethanchen.game.pve.GarbageStyle.CHEESE_DOUBLE;
+        boolean twoHoles = style == me.ethanchen.game.pve.GarbageStyle.DOUBLE_HOLE
+                || style == me.ethanchen.game.pve.GarbageStyle.CHEESE_DOUBLE;
+
+        // DEFAULT / DOUBLE_HOLE / CUSTOM pick gap columns once so every row in this attack
+        // shares them; CHEESE / CHEESE_DOUBLE re-roll per row.
+        int sharedGap = cheese ? -1 : rng.nextInt(width);
+        int sharedGap2 = cheese || !twoHoles ? -1 : rng.nextInt(width);
+
         // Insertion order: rows[0] goes in first and ends up highest, at row amount - 1.
         byte[][] rows = new byte[amount][];
         for (int i = 0; i < amount; i++) {
-            rows[i] = buildGarbageRow(style, rng);
+            int gapCol = cheese ? rng.nextInt(width) : sharedGap;
+            int gapCol2 = cheese && twoHoles ? rng.nextInt(width) : sharedGap2;
+            rows[i] = buildGarbageRow(gapCol, gapCol2);
         }
         BoardPiecePush.pushPiecesAboveGarbage(this, rows);
 
@@ -233,12 +245,10 @@ public class Board {
     }
 
     /**
-     * Builds one garbage row's tile types, leaving {@link Tile#EMPTY} in the gap column(s)
-     * chosen per {@code style}.
+     * Builds one garbage row's tile types, leaving {@link Tile#EMPTY} in {@code gapCol} and,
+     * when {@code gapCol2 >= 0}, a second gap column.
      */
-    private byte[] buildGarbageRow(me.ethanchen.game.pve.GarbageStyle style, Random rng) {
-        int gapCol = rng.nextInt(width);
-        int gapCol2 = (style == me.ethanchen.game.pve.GarbageStyle.DOUBLE_HOLE) ? rng.nextInt(width) : -1;
+    private byte[] buildGarbageRow(int gapCol, int gapCol2) {
         byte[] types = new byte[width];
         for (int x = 0; x < width; x++) {
             types[x] = (x == gapCol || x == gapCol2) ? Tile.EMPTY : Tile.GARBAGE;

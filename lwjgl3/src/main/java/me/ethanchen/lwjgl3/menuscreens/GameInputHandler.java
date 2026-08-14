@@ -152,7 +152,7 @@ class GameInputHandler {
         arrTimer  = 0;
         dasCharged = false;
         if (!game.isStarted()) return true;
-        if (board.getActivePieces().size() <= playerId) return true;
+        if (board.getActivePieces().size() <= seat()) return true;
         predictor.queueMove(isLeft ? MoveType.LEFT : MoveType.RIGHT, board, game, holdAvailable);
         return true;
     }
@@ -175,7 +175,7 @@ class GameInputHandler {
         softDropHeld  = true;
         softDropTimer = 0;
         if (game.isStarted() && isSoftDropFasterThanGravity()) {
-            if (board.getActivePieces().size() > playerId) {
+            if (board.getActivePieces().size() > seat()) {
                 predictor.queueMove(MoveType.SOFT_DROP, board, game, holdAvailable);
                 game.resetGravityTimer(playerId);
             }
@@ -189,7 +189,7 @@ class GameInputHandler {
 
     private void tickAutoShift(int deltaMs, Board board, boolean holdAvailable) {
         if (heldDirection == 0 || !game.isStarted()) return;
-        if (board.getActivePieces().size() <= playerId) return;
+        if (board.getActivePieces().size() <= seat()) return;
 
         GameSettings s = app.getSettings();
         if (!dasCharged) {
@@ -208,7 +208,7 @@ class GameInputHandler {
     private void tickSoftDrop(int deltaMs, Board board, boolean holdAvailable) {
         if (!softDropHeld || !game.isStarted()) return;
         if (!isSoftDropFasterThanGravity()) return;
-        if (board.getActivePieces().size() <= playerId) return;
+        if (board.getActivePieces().size() <= seat()) return;
 
         softDropTimer += deltaMs;
         while (softDropTimer >= SOFT_DROP_INTERVAL_MS) {
@@ -228,7 +228,11 @@ class GameInputHandler {
     }
 
     private boolean canAct(Board board) {
-        return game.isStarted() && board.getActivePieces().size() > playerId;
+        return game.isStarted() && board.getActivePieces().size() > seat();
+    }
+
+    private int seat() {
+        return game.seatOf(playerId);
     }
 
     private boolean isCtrlLeft(int b) {

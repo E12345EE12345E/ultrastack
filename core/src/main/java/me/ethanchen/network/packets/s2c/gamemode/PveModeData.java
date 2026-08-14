@@ -38,6 +38,10 @@ public class PveModeData {
     public int bossMaxHp;
     /** {@code BossController.Phase} ordinal, or {@code -1} when no boss is active. */
     public int bossPhase = -1;
+    /** Combat-stage index into {@code BossDef.phases}, or {@code -1} when no boss is active. */
+    public int bossPhaseIndex = -1;
     public long bossPhaseElapsedMs;
     public long bossPhaseDurationMs;
+    /** Current attack sends a client shockwave; false for smaller hits. */
+    public boolean bossAttackShockwave;
 }

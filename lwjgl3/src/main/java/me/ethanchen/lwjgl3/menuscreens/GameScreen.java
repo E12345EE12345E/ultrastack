@@ -28,8 +28,10 @@ import me.ethanchen.game.pve.PveBoardDisplay;
 import me.ethanchen.game.pve.boss.BossDefeatAnim;
 import me.ethanchen.game.pve.boss.BossDef;
 import me.ethanchen.game.pve.boss.BossIntroAnim;
+import me.ethanchen.game.pve.boss.BossPhaseDef;
 import me.ethanchen.game.pve.boss.BossRegistry;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
+import me.ethanchen.lwjgl3.render.BossParticle;
 import me.ethanchen.lwjgl3.render.BossTextureShard;
 import me.ethanchen.lwjgl3.render.CharacterAssets;
 import me.ethanchen.lwjgl3.render.CharacterMeterRenderer;
@@ -37,6 +39,7 @@ import me.ethanchen.lwjgl3.render.Particle;
 import me.ethanchen.lwjgl3.render.shader.PlayerRipples;
 import me.ethanchen.lwjgl3.render.shader.RippleCircleRenderer;
 import me.ethanchen.lwjgl3.render.shader.RippleShaderColor;
+import me.ethanchen.lwjgl3.render.shader.ShockwaveRenderer;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.dto.HardDropEffect;
@@ -94,6 +97,9 @@ public class GameScreen extends MenuScreen {
     private float bossRippleTargetRadius = 3.5f;
     private static final float BOSS_RIPPLE_STIFFNESS = 22f;
     private static final float BOSS_RIPPLE_DAMPING = 2f * (float) Math.sqrt(BOSS_RIPPLE_STIFFNESS);
+    /** Ring width in panel units; inner/outer radii are {@code radius ± thickness/2}. */
+    private static final float BOSS_RIPPLE_THICKNESS = 1.0f;
+    private static final float BOSS_RIPPLE_INTENSITY = 0.4f;
     /** Locked 16:9 design rect for all in-game board/HUD placement. */
     private final AspectLockedViewport gameViewport =
             new AspectLockedViewport(DesignUi.DESIGN_W, DesignUi.DESIGN_H);
@@ -109,21 +115,18 @@ public class GameScreen extends MenuScreen {
     /** Client-only shatter shards from the boss portrait (not networked). */
     private final ArrayList<BossTextureShard> bossShards = new ArrayList<>();
     private boolean bossShardsSpawned;
+    /** Client-only charge/explode orbs around the boss portrait (not networked). */
+    private final ArrayList<BossParticle> bossParticles = new ArrayList<>();
+    private float bossChargeSpawnAcc;
+    private boolean attackBurstSpawned;
+    private boolean flashInShockwaveSpawned;
+    private ShockwaveRenderer shockwave;
     /** Per-slot previous "meter full / ability ready" state for rising-edge available SFX. */
     private boolean[] abilityWasReady;
 
     private long gameEndTargetMs;
     private long startTimeMS;
     private String[] playerNames;
-
-    /**
-     * Slot -> board/seat tables from {@link StartGameBroadcast}, so board-scoped lookups resolve
-     * correctly once more than one board exists. Today every entry is {@code 0} / identity since
-     * only one board is ever created, so behaviour is unchanged; the client still only ever
-     * renders one board ({@link GameDrawMode#SINGLE_BOARD}), chosen via {@link #primaryBoard()}.
-     */
-    private byte[] slotBoardIndex;
-    private byte[] slotSeatIndex;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = buildDispatcher();
 
@@ -146,18 +149,12 @@ public class GameScreen extends MenuScreen {
         long startGameTimer = b.msUntilStart;
         startTimeMS = lastUpdateMs + startGameTimer;
         playerNames = b.playerNames;
-        slotBoardIndex = b.slotBoardIndex != null ? b.slotBoardIndex : new byte[0];
-        slotSeatIndex = b.slotSeatIndex != null ? b.slotSeatIndex : new byte[0];
-        game = new GameHandler(b.totalPlayers);
+        game = new GameHandler(b.totalPlayers & 0xFF);
         game.init(b.mode, startGameTimer);
         gameEndTargetMs = startTimeMS + GameConstants.SCORE_MODE_DURATION_MS;
-        if (b.boards != null) {
-            int count = Math.min(b.boards.length, game.getBoards().size());
-            for (int i = 0; i < count; i++) {
-                Board board = new Board(b.boards[i]);
-                game.getBoards().set(i, board);
-            }
-        }
+        // PvE's GameMode.rules() fallback is a single score-mode board; install the real
+        // server boards and slot mapping so 3–4 player splits have the right seat counts.
+        game.applyNetBoards(b.boards, b.slotBoardIndex, b.slotSeatIndex);
         if (b.mode == GameMode.NONE) {
             drawMode = GameDrawMode.NONE;
         } else {
@@ -172,7 +169,7 @@ public class GameScreen extends MenuScreen {
         for (int i = 0; i < n; i++) {
             int slot = ids[i] & 0xFF;
             LocalPlayerRoster.Entry entry = roster.getEntries().get(i);
-            ClientMovePredictor predictor = new ClientMovePredictor(app, slot, i);
+            ClientMovePredictor predictor = new ClientMovePredictor(app, seatFor(slot), i);
             GameInputHandler input = new GameInputHandler(app, slot, game, predictor);
             localPlayers.add(new LocalPlayer(slot, i, entry.source, entry.controllerSlot, input, predictor));
             if (slot >= 0 && slot < isLocalSlot.length) isLocalSlot[slot] = true;
@@ -180,7 +177,12 @@ public class GameScreen extends MenuScreen {
 
         Board primaryBoardAtInit = primaryBoard();
         if (primaryBoardAtInit != null) {
-            ripples = new PlayerRipples(primaryBoardAtInit, isLocalSlot);
+            int seats = primaryBoardAtInit.getSpawnPositions().length;
+            boolean[] localBySeat = new boolean[seats];
+            for (int seat = 0; seat < seats; seat++) {
+                localBySeat[seat] = isLocalSlot(primaryBoardAtInit.globalSlotForSeat(seat));
+            }
+            ripples = new PlayerRipples(primaryBoardAtInit, localBySeat);
         }
 
         Controllers.addListener(controllerAdapter);
@@ -193,17 +195,12 @@ public class GameScreen extends MenuScreen {
 
     /** Resolves the board that global slot {@code slot} is seated on, or {@code null} if none exist. */
     private Board boardFor(int slot) {
-        List<Board> boards = game.getBoards();
-        if (boards.isEmpty()) return null;
-        int bi = (slotBoardIndex != null && slot >= 0 && slot < slotBoardIndex.length) ? (slotBoardIndex[slot] & 0xFF) : 0;
-        if (bi < 0 || bi >= boards.size()) bi = 0;
-        return boards.get(bi);
+        return game.boardFor(slot);
     }
 
     /** Resolves global slot {@code slot}'s board-local seat index. */
     private int seatFor(int slot) {
-        if (slotSeatIndex != null && slot >= 0 && slot < slotSeatIndex.length) return slotSeatIndex[slot] & 0xFF;
-        return slot;
+        return game.seatOf(slot);
     }
 
     /** The slot this client renders as "the" board: its first local player, or slot 0 when spectating. */
@@ -217,8 +214,8 @@ public class GameScreen extends MenuScreen {
     }
 
     private int primaryBoardIndex() {
-        int slot = primarySlot();
-        return (slotBoardIndex != null && slot >= 0 && slot < slotBoardIndex.length) ? (slotBoardIndex[slot] & 0xFF) : 0;
+        int bi = game.boardIndexOf(primarySlot());
+        return bi >= 0 ? bi : 0;
     }
 
     private LocalPlayer keyboardPlayer() {
@@ -289,6 +286,13 @@ public class GameScreen extends MenuScreen {
             s.update(deltaTime);
             if (s.isDead()) sit.remove();
         }
+        Iterator<BossParticle> bpit = bossParticles.iterator();
+        while (bpit.hasNext()) {
+            BossParticle p = bpit.next();
+            p.update(deltaTime);
+            if (p.isDead()) bpit.remove();
+        }
+        if (shockwave != null) shockwave.update(deltaTime / 1000f);
 
         if (exploded) {
             fadeTimerMs += deltaTime;
@@ -315,6 +319,11 @@ public class GameScreen extends MenuScreen {
     @Override
     public void render() {
         gameViewport.update();
+        boolean capturingShockwave = shouldCaptureShockwave();
+        if (capturingShockwave) {
+            if (shockwave == null) shockwave = new ShockwaveRenderer();
+            shockwave.begin();
+        }
         float bossT = smoothstep(bossLayoutBlend);
         boolean bossLayoutActive = bossT > 0.001f || bossLayoutTarget > 0f;
         List<Board> boards = game.getBoards();
@@ -351,6 +360,7 @@ public class GameScreen extends MenuScreen {
         }
 
         elements.forEach(element -> element.render(shapes, sprites, font));
+        if (capturingShockwave) shockwave.end();
     }
 
     private void renderSingleBoard() {
@@ -360,6 +370,7 @@ public class GameScreen extends MenuScreen {
         float originY = BoardRenderer.centeredOriginY(board, tileSize, gameViewport.originY, gameViewport.viewH);
 
         renderBoardContents(board, primaryBoardIndex(), originX, originY, tileSize);
+        renderPlayerNames(board, originX, originY, tileSize);
         renderBoardHud(board, originX, originY, tileSize);
     }
 
@@ -391,6 +402,7 @@ public class GameScreen extends MenuScreen {
             float originY = BoardRenderer.centeredOriginY(
                     board, tileSize, gameViewport.originY, gameViewport.viewH);
             renderBoardContents(board, i, originX, originY, tileSize);
+            renderPlayerNames(board, originX, originY, tileSize);
             if (i == primaryIndex) {
                 renderBoardHud(board, originX, originY, tileSize);
             }
@@ -518,7 +530,6 @@ public class GameScreen extends MenuScreen {
         }
 
         renderCountdown(board, originX, originY, tileSize);
-        renderPlayerNames(board, originX, originY, tileSize);
         renderCharacterMeters(board, originX, originY, tileSize);
     }
 
@@ -561,6 +572,8 @@ public class GameScreen extends MenuScreen {
 
         renderBoardContents(left, 0, leftX, originY, tileSize);
         renderBoardContents(right, 1, rightX, originY, tileSize);
+        renderPlayerNames(left, leftX, originY, tileSize);
+        renderPlayerNames(right, rightX, originY, tileSize);
         if (primaryIndex == 0) {
             renderBoardHud(left, leftX, originY, tileSize);
         } else if (primaryIndex == 1) {
@@ -611,6 +624,7 @@ public class GameScreen extends MenuScreen {
         float originY = BoardRenderer.centeredOriginY(board, tileSize, gameViewport.originY, gameViewport.viewH);
 
         renderBoardContents(board, primaryBoardIndex(), originX, originY, tileSize);
+        renderPlayerNames(board, originX, originY, tileSize);
         renderBoardHud(board, originX, originY, tileSize);
 
         if (t < 1f) return;
@@ -685,6 +699,12 @@ public class GameScreen extends MenuScreen {
         float cy = panelY + boxSize * 0.55f;
         float panelUnit = boxSize / 6f;
 
+        if (entering && intro == BossIntroAnim.FLASH_IN && !flashInShockwaveSpawned) {
+            flashInShockwaveSpawned = true;
+            spawnBossShockwave(cx, cy,
+                    ShockwaveRenderer.AMPLITUDE_NORMAL, ShockwaveRenderer.SPEED_FAST);
+        }
+
         if (!entering && !defeated) {
             if (bossRipple == null) bossRipple = new RippleCircleRenderer();
             bossRippleTime += deltaTime / 1000f;
@@ -722,7 +742,7 @@ public class GameScreen extends MenuScreen {
             float synthOriginX = cx - 0.5f * panelUnit;
             float synthOriginY = cy - 0.5f * panelUnit;
             bossRipple.draw(synthOriginX, synthOriginY, panelUnit, 0f, 0f, bossRippleRadius,
-                    1f, 1f, 0.35f, 0.55f, color, bossRippleTime, 1f);
+                    1f, 1f, BOSS_RIPPLE_THICKNESS, BOSS_RIPPLE_INTENSITY, color, bossRippleTime, 1f);
         }
 
         com.badlogic.gdx.graphics.Texture portrait = CharacterAssets.portraitFor(0);
@@ -741,6 +761,8 @@ public class GameScreen extends MenuScreen {
                 if (!bossShardsSpawned) {
                     spawnBossTextureShards(portrait, destX, destY, portraitSize, portraitSize);
                     bossShardsSpawned = true;
+                    spawnBossShockwave(cx, cy,
+                            ShockwaveRenderer.AMPLITUDE_VERY_LOW, ShockwaveRenderer.SPEED_LOW);
                 }
             }
         }
@@ -763,6 +785,9 @@ public class GameScreen extends MenuScreen {
             sprites.setColor(com.badlogic.gdx.graphics.Color.WHITE);
             sprites.end();
         }
+
+        spawnBossCombatParticles(cx, cy, portraitSize, def);
+        drawBossParticles();
 
         boolean showBar;
         float barAlpha;
@@ -856,7 +881,7 @@ public class GameScreen extends MenuScreen {
                 s.vx = (float) Math.cos(angle) * speed;
                 s.vy = (float) Math.sin(angle) * speed;
                 s.gravity = gravity;
-                s.lifetime = 0.35f + particleRng.nextFloat() * 0.25f;
+                s.lifetime = 0.70f + particleRng.nextFloat() * 0.50f;
                 bossShards.add(s);
             }
         }
@@ -895,6 +920,102 @@ public class GameScreen extends MenuScreen {
         return true;
     }
 
+    private void spawnBossCombatParticles(float cx, float cy, float portraitSize, BossDef def) {
+        if (latestPveMode == null) return;
+        int phase = latestPveMode.bossPhase;
+        int attack = BossController.Phase.ATTACK.ordinal();
+        int windup = BossController.Phase.WINDUP.ordinal();
+        if (phase != attack) attackBurstSpawned = false;
+        if (phase == BossController.Phase.ENTERING.ordinal()
+                || phase == BossController.Phase.DEFEATED.ordinal()) {
+            bossChargeSpawnAcc = 0f;
+            return;
+        }
+
+        float hueMin = 0f;
+        float hueMax = 360f;
+        if (def != null && def.phases.length > 0) {
+            int idx = latestPveMode.bossPhaseIndex;
+            if (idx < 0) idx = 0;
+            if (idx >= def.phases.length) idx = def.phases.length - 1;
+            BossPhaseDef combat = def.phases[idx];
+            hueMin = combat.particleHueMin;
+            hueMax = combat.particleHueMax;
+        }
+
+        if (phase == windup) {
+            long remaining = latestPveMode.bossPhaseDurationMs - latestPveMode.bossPhaseElapsedMs;
+            if (remaining > BossParticle.CHARGE_SPAWN_CUTOFF_MS) {
+                bossChargeSpawnAcc += deltaTime / 1000f * BossParticle.CHARGE_SPAWN_PER_SEC;
+                while (bossChargeSpawnAcc >= 1f) {
+                    bossChargeSpawnAcc -= 1f;
+                    bossParticles.add(BossParticle.charge(particleRng, cx, cy, portraitSize, hueMin, hueMax));
+                }
+            }
+        } else {
+            bossChargeSpawnAcc = 0f;
+        }
+
+        if (phase == attack && !attackBurstSpawned) {
+            attackBurstSpawned = true;
+            for (int i = 0; i < BossParticle.EXPLODE_COUNT; i++) {
+                bossParticles.add(BossParticle.explode(particleRng, cx, cy, portraitSize, hueMin, hueMax));
+            }
+            if (latestPveMode.bossAttackShockwave) {
+                spawnBossShockwave(cx, cy,
+                        ShockwaveRenderer.AMPLITUDE_LOW, ShockwaveRenderer.SPEED_NORMAL);
+            }
+        }
+    }
+
+    private void spawnBossShockwave(float cx, float cy, float amplitude, float speed) {
+        if (shockwave == null) shockwave = new ShockwaveRenderer();
+        shockwave.spawn(cx, cy, amplitude, speed);
+    }
+
+    /** Capture the scene when a wave is live, or this frame will spawn one. */
+    private boolean shouldCaptureShockwave() {
+        if (shockwave != null && shockwave.hasActive()) return true;
+        if (latestPveMode == null) return false;
+        int phase = latestPveMode.bossPhase;
+        long elapsed = latestPveMode.bossPhaseElapsedMs;
+        if (phase == BossController.Phase.ATTACK.ordinal()
+                && !attackBurstSpawned
+                && latestPveMode.bossAttackShockwave) {
+            return true;
+        }
+        if (phase == BossController.Phase.DEFEATED.ordinal()
+                && !bossShardsSpawned
+                && elapsed >= BossDefeatAnim.SHAKE_MS) {
+            return true;
+        }
+        if (phase == BossController.Phase.ENTERING.ordinal()
+                && !flashInShockwaveSpawned
+                && elapsed >= BossIntroAnim.LANE_EXPAND_MS) {
+            BossDef def = BossRegistry.byId(latestPveMode.bossId);
+            BossIntroAnim intro = def != null && def.intro != null ? def.intro : BossIntroAnim.FLASH_IN;
+            return intro == BossIntroAnim.FLASH_IN;
+        }
+        return false;
+    }
+
+    private void drawBossParticles() {
+        if (bossParticles.isEmpty()) return;
+        com.badlogic.gdx.Gdx.gl.glEnable(com.badlogic.gdx.graphics.GL20.GL_BLEND);
+        com.badlogic.gdx.Gdx.gl.glBlendFunc(
+                com.badlogic.gdx.graphics.GL20.GL_SRC_ALPHA,
+                com.badlogic.gdx.graphics.GL20.GL_ONE_MINUS_SRC_ALPHA);
+        shapes.begin(com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType.Filled);
+        for (BossParticle p : bossParticles) {
+            if (p.isDead()) continue;
+            float rad = p.radius();
+            if (rad <= 0.5f) continue;
+            shapes.setColor(p.r, p.g, p.b, p.alpha());
+            shapes.circle(p.x, p.y, rad, BossParticle.CIRCLE_SEGMENTS);
+        }
+        shapes.end();
+    }
+
     private void drawBossTextureShards() {
         if (bossShards.isEmpty()) return;
         sprites.begin();
@@ -922,6 +1043,7 @@ public class GameScreen extends MenuScreen {
         int n = Math.min(ids.length, Math.min(fill.length, max.length));
         for (int slot = 0; slot < n; slot++) {
             if (ids[slot] < 0) continue;
+            if (boardFor(slot) != board) continue;
             String name = (playerNames != null && slot < playerNames.length) ? playerNames[slot] : null;
             float widgetY = boxY - drawn * (boxSize + tileSize * 0.3f);
             CharacterMeterRenderer.draw(shapes, sprites, font,
@@ -992,29 +1114,33 @@ public class GameScreen extends MenuScreen {
         font.getData().setScale(nmFs);
         sprites.begin();
 
-        for (int i = 0; i < playerNames.length; i++) {
-            if (playerNames[i] == null || playerNames[i].isEmpty()) continue;
-            boolean local = isLocalSlot(i);
+        for (int slot = 0; slot < playerNames.length; slot++) {
+            if (playerNames[slot] == null || playerNames[slot].isEmpty()) continue;
+            if (boardFor(slot) != board) continue;
+            boolean local = isLocalSlot(slot);
             // After start: only keep labels for local players (piece identity).
             if (game.isStarted() && !local) continue;
 
             float alpha = game.isStarted() ? 0.55f : preStartAlpha;
             font.setColor(1f, 1f, 1f, alpha);
 
+            int seat = seatFor(slot);
             float nameScreenX;
             float nameScreenY;
-            if (game.isStarted() && board.getActivePieces().size() > i) {
-                Piece piece = board.getActivePieces().get(i);
+            if (game.isStarted() && board.getActivePieces().size() > seat && seat >= 0) {
+                Piece piece = board.getActivePieces().get(seat);
                 if (piece == null || piece.location == null) continue;
                 nameScreenX = originX + (piece.location.x + 1.5f) * tileSize;
                 nameScreenY = originY + (piece.location.y + 4f) * tileSize;
             } else {
-                Vector2 spawn = board.getSpawnPos(i);
+                Vector2[] spawns = board.getSpawnPositions();
+                if (seat < 0 || spawns == null || seat >= spawns.length) continue;
+                Vector2 spawn = spawns[seat];
                 nameScreenX = originX + (spawn.x + 1.5f) * tileSize;
                 nameScreenY = originY + spawn.y * tileSize;
             }
-            nameLayout.setText(font, playerNames[i]);
-            font.draw(sprites, playerNames[i], nameScreenX - nameLayout.width * 0.5f, nameScreenY);
+            nameLayout.setText(font, playerNames[slot]);
+            font.draw(sprites, playerNames[slot], nameScreenX - nameLayout.width * 0.5f, nameScreenY);
         }
         sprites.end();
         font.setColor(com.badlogic.gdx.graphics.Color.WHITE);
@@ -1104,6 +1230,9 @@ public class GameScreen extends MenuScreen {
         }
 
         game.setGravity(p.gravity);
+        for (int b = 1; b < game.getBoards().size(); b++) {
+            game.setGravity(b, p.gravity);
+        }
         applyCharacterGravityPrediction(p);
         if (p.gravityTickCounters != null) {
             int n = Math.min(p.gravityTickCounters.length, game.getNumPlayers());
@@ -1214,7 +1343,7 @@ public class GameScreen extends MenuScreen {
                         }
                         if (e.allClear) AudioManager.getInstance().playAllClearSound();
                     }
-                    if (ripples != null) ripples.poof(e.playerId);
+                    if (ripples != null) ripples.poof(seatFor(e.playerId));
                 }
             }
             if (e.fallingClear) continue;
@@ -1227,7 +1356,7 @@ public class GameScreen extends MenuScreen {
         Board board = boardFor(p.playerId);
         if (board == null) return;
         board.swapActivePiece(seatFor(p.playerId), p.pieceType);
-        if (ripples != null) ripples.poof(p.playerId);
+        if (ripples != null && board == primaryBoard()) ripples.poof(seatFor(p.playerId));
     }
 
     private void handleHoldSound(HoldSoundBroadcast p) {
@@ -1276,6 +1405,10 @@ public class GameScreen extends MenuScreen {
         if (phase == entering) {
             bossShards.clear();
             bossShardsSpawned = false;
+            bossParticles.clear();
+            bossChargeSpawnAcc = 0f;
+            attackBurstSpawned = false;
+            flashInShockwaveSpawned = false;
         }
         if (prevBossPhase == entering && phase != entering && phase >= 0) {
             BossDef def = BossRegistry.byId(mode.bossId);
@@ -1310,6 +1443,7 @@ public class GameScreen extends MenuScreen {
         AudioManager.getInstance().stopMusic();
         if (ripples != null) ripples.dispose();
         if (bossRipple != null) bossRipple.dispose();
+        if (shockwave != null) shockwave.dispose();
     }
 
     private enum GameDrawMode { NONE, SINGLE_BOARD, DUAL_BOARD, BOSSFIGHT }

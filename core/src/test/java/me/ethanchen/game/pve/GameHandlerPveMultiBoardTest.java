@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import me.ethanchen.game.GameHandler;
 import me.ethanchen.game.GameMode;
+import me.ethanchen.network.dto.NetBoardFull;
 
 /**
  * Verifies the true multi-board support added for PvE (implementation.md, Part 6, Phase 1):
@@ -79,6 +80,39 @@ class GameHandlerPveMultiBoardTest {
         assertArrayEquals(new int[]{2, 3}, game.slotsOnBoard(1));
         assertEquals(0, game.seatOf(2));
         assertEquals(1, game.seatOf(3));
+    }
+
+    @Test
+    void clientFallbackInitThenApplyNetBoardsMatchesServerSplit() {
+        GameHandler server = init(3);
+        NetBoardFull[] nets = new NetBoardFull[server.getBoards().size()];
+        byte[] slotBoardIndex = new byte[3];
+        byte[] slotSeatIndex = new byte[3];
+        for (int i = 0; i < 3; i++) {
+            slotBoardIndex[i] = (byte) server.boardIndexOf(i);
+            slotSeatIndex[i] = (byte) server.seatOf(i);
+        }
+        for (int i = 0; i < nets.length; i++) {
+            nets[i] = server.getBoards().get(i).convertToNetBoardFull();
+        }
+
+        GameHandler client = new GameHandler(3);
+        client.init(GameMode.PVE, 0); // SCORE_RULES fallback: one trio board
+        assertEquals(1, client.getBoards().size());
+
+        client.applyNetBoards(nets, slotBoardIndex, slotSeatIndex);
+        assertEquals(2, client.getBoards().size());
+        assertEquals(1, client.getBoards().get(0).getSpawnPositions().length);
+        assertEquals(2, client.getBoards().get(1).getSpawnPositions().length);
+        assertEquals(0, client.boardIndexOf(0));
+        assertEquals(1, client.boardIndexOf(1));
+        assertEquals(1, client.boardIndexOf(2));
+        assertEquals(0, client.seatOf(0));
+        assertEquals(0, client.seatOf(1));
+        assertEquals(1, client.seatOf(2));
+        assertEquals(0, client.getBoards().get(0).globalSlotForSeat(0));
+        assertEquals(1, client.getBoards().get(1).globalSlotForSeat(0));
+        assertEquals(2, client.getBoards().get(1).globalSlotForSeat(1));
     }
 
     @Test

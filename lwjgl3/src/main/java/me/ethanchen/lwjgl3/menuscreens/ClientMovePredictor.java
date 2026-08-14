@@ -24,12 +24,12 @@ class ClientMovePredictor {
     private int nextMoveId = 0;
     private long lastMoveSendMs = 0;
     private final ClientApp app;
-    private final int playerId;
+    private final int seat;
     private final byte localIndex;
 
-    ClientMovePredictor(ClientApp app, int playerId, int localIndex) {
+    ClientMovePredictor(ClientApp app, int seat, int localIndex) {
         this.app = app;
-        this.playerId = playerId;
+        this.seat = seat;
         this.localIndex = (byte) localIndex;
     }
 
@@ -47,13 +47,13 @@ class ClientMovePredictor {
         // Hard drop and hold are server-authoritative; skip local application to avoid desyncing
         // the piece queue during prediction replay.
         if (type != MoveType.HARD_DROP && type != MoveType.HOLD) {
-            boolean moved = board.applyMove(playerId, type);
+            boolean moved = board.applyMove(seat, type);
             if (moved) {
                 if (type == MoveType.LEFT || type == MoveType.RIGHT || type == MoveType.SOFT_DROP) {
                     AudioManager.getInstance().playMoveSound();
                 } else if (type == MoveType.ROTATE_CW || type == MoveType.ROTATE_CCW
                         || type == MoveType.ROTATE_180) {
-                    if (board.detectSpinType(playerId) != SpinType.NONE) {
+                    if (board.detectSpinType(seat) != SpinType.NONE) {
                         AudioManager.getInstance().playSpinTurnSound();
                     } else {
                         AudioManager.getInstance().playRotateSound();
@@ -79,7 +79,7 @@ class ClientMovePredictor {
         }
         for (PendingMove pm : pendingMoves) {
             if (pm.type != MoveType.HARD_DROP && pm.type != MoveType.HOLD) {
-                board.applyMove(playerId, pm.type);
+                board.applyMove(seat, pm.type);
             }
         }
     }

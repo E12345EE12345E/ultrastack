@@ -7,6 +7,7 @@ import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.LineClearResult;
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.SpinType;
+import me.ethanchen.network.dto.NetBoardFull;
 
 
 public class GameHandler {
@@ -90,6 +91,64 @@ public class GameHandler {
         }
         for (int i = 0; i < numPlayers; i++) {
             seatSlotsPerBoard[slotBoard[i]][slotSeat[i]] = i;
+        }
+        for (int b = 0; b < boards.size(); b++) {
+            boards.get(b).setBoardIndex(b);
+            boards.get(b).setSeatSlots(seatSlotsPerBoard[b]);
+        }
+    }
+
+    /**
+     * Replaces locally-constructed boards with the authoritative network snapshot and applies
+     * the slot→board/seat mapping from {@code StartGameBroadcast}. The client cannot build
+     * session-specific {@code PveRules} (level geometry lives on the server), so {@link
+     * #init(GameMode, long)} uses {@link GameMode#rules()}'s single-board fallback; this method
+     * then installs the real boards the server sent.
+     */
+    public void applyNetBoards(NetBoardFull[] netBoards, byte[] slotBoardIndex, byte[] slotSeatIndex) {
+        if (netBoards == null || netBoards.length == 0) return;
+        int gravity = boardStates.isEmpty()
+                ? GameConstants.INITIAL_GRAVITY_MS
+                : boardStates.get(0).getGravity();
+        boards.clear();
+        boardStates.clear();
+        for (int i = 0; i < netBoards.length; i++) {
+            if (netBoards[i] == null) continue;
+            boards.add(new Board(netBoards[i]));
+            BoardState state = new BoardState();
+            state.reset(gravity);
+            boardStates.add(state);
+        }
+        if (boards.isEmpty()) return;
+
+        slotBoard = new int[numPlayers];
+        slotSeat = new int[numPlayers];
+        int[] derivedSeat = new int[boards.size()];
+        for (int i = 0; i < numPlayers; i++) {
+            int b = (slotBoardIndex != null && i < slotBoardIndex.length) ? (slotBoardIndex[i] & 0xFF) : 0;
+            if (b < 0 || b >= boards.size()) b = 0;
+            slotBoard[i] = b;
+            if (slotSeatIndex != null && i < slotSeatIndex.length) {
+                slotSeat[i] = slotSeatIndex[i] & 0xFF;
+            } else {
+                slotSeat[i] = derivedSeat[b]++;
+            }
+        }
+
+        int[][] seatSlotsPerBoard = new int[boards.size()][];
+        for (int b = 0; b < boards.size(); b++) {
+            int n = boards.get(b).getSpawnPositions() != null
+                    ? boards.get(b).getSpawnPositions().length : 0;
+            seatSlotsPerBoard[b] = new int[n];
+            for (int s = 0; s < n; s++) seatSlotsPerBoard[b][s] = s;
+        }
+        for (int i = 0; i < numPlayers; i++) {
+            int b = slotBoard[i];
+            int s = slotSeat[i];
+            if (b >= 0 && b < seatSlotsPerBoard.length
+                    && s >= 0 && s < seatSlotsPerBoard[b].length) {
+                seatSlotsPerBoard[b][s] = i;
+            }
         }
         for (int b = 0; b < boards.size(); b++) {
             boards.get(b).setBoardIndex(b);

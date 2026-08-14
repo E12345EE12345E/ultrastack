@@ -108,8 +108,10 @@ public class PveSectionController {
             out.bossHp = bossController.getHp();
             out.bossMaxHp = bossController.getMaxHp();
             out.bossPhase = bossController.getPhase().ordinal();
+            out.bossPhaseIndex = bossController.getPhaseIndex();
             out.bossPhaseElapsedMs = bossController.getPhaseElapsedMs();
             out.bossPhaseDurationMs = bossController.getPhaseDurationMs();
+            out.bossAttackShockwave = bossController.currentAttackSendsShockwave();
             out.objectiveLines = new String[]{
                     "DEFEAT BOSS",
                     bossController.getHp() + " / " + bossController.getMaxHp() + " HP"
@@ -119,8 +121,10 @@ public class PveSectionController {
             out.bossHp = 0;
             out.bossMaxHp = 0;
             out.bossPhase = -1;
+            out.bossPhaseIndex = -1;
             out.bossPhaseElapsedMs = 0;
             out.bossPhaseDurationMs = 0;
+            out.bossAttackShockwave = false;
             out.objectiveLines = formatObjectiveLines(section, out.sectionScore, sectionElapsedMs);
         }
     }

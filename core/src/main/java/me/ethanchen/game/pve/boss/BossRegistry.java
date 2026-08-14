@@ -10,10 +10,64 @@ public final class BossRegistry {
     private static final Map<Integer, BossDef> BY_ID = new HashMap<>();
 
     static {
-        // Boss 0: 10k HP; idle 5s, windup 2s / attack 1s adding 4 garbage, interrupt at 800 score.
-        register(new BossDef(0, 10_000, 2000L, new BossAttack[]{
-                BossAttack.addGarbage(5000, 2000, 1000, 800, 4, GarbageStyle.DEFAULT)
-        }, BossIntroAnim.FLOAT_IN));
+        register(
+            new BossDef(
+                0,
+                BossIntroAnim.FLOAT_IN,
+                new BossPhaseDef(
+                    6_000,
+                    2000L,
+                    new BossAttack[]{
+                        BossAttack.addGarbage(
+                            6000,
+                            2000,
+                            800,
+                            600,
+                            4,
+                            GarbageStyle.DEFAULT,
+                            false
+                        )
+                    },
+                    8f,
+                    48f
+                ),
+                new BossPhaseDef(
+                    6_000,
+                    2000L,
+                    new BossAttack[]{
+                        BossAttack.addGarbage(
+                            4000,
+                            2000,
+                            800,
+                            600,
+                            4,
+                            GarbageStyle.DEFAULT,
+                            false
+                        ),
+                        BossAttack.addGarbage(
+                            4000,
+                            1000,
+                            400,
+                            200,
+                            2,
+                            GarbageStyle.DEFAULT,
+                            false
+                        ),
+                        BossAttack.addGarbage(
+                            4000,
+                            1000,
+                            400,
+                            200,
+                            2,
+                            GarbageStyle.DEFAULT,
+                            false
+                        )
+                    },
+                    8f,
+                    48f
+                )
+            )
+        );
     }
 
     private BossRegistry() {}

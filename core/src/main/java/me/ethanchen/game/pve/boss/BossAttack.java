@@ -3,7 +3,7 @@ package me.ethanchen.game.pve.boss;
 import me.ethanchen.game.pve.GarbageStyle;
 
 /**
- * One entry in a {@link BossDef}'s attack pattern: idle wait, windup (interruptible), then attack
+ * One entry in a {@link BossPhaseDef}'s attack pattern: idle wait, windup (interruptible), then attack
  * animation (even instant effects keep a nonzero {@link #attackMs} for client feedback).
  */
 public final class BossAttack {
@@ -15,9 +15,12 @@ public final class BossAttack {
     public final BossAttackEffectType effectType;
     public final int amount;
     public final GarbageStyle style;
+    /** When false, the client skips the attack shockwave (for smaller hits). */
+    public final boolean shockwave;
 
     public BossAttack(long idleMs, long windupMs, long attackMs, long interruptScore,
-                      BossAttackEffectType effectType, int amount, GarbageStyle style) {
+                      BossAttackEffectType effectType, int amount, GarbageStyle style,
+                      boolean shockwave) {
         this.idleMs = idleMs;
         this.windupMs = windupMs;
         this.attackMs = attackMs;
@@ -25,11 +28,17 @@ public final class BossAttack {
         this.effectType = effectType;
         this.amount = amount;
         this.style = style != null ? style : GarbageStyle.DEFAULT;
+        this.shockwave = shockwave;
     }
 
     public static BossAttack addGarbage(long idleMs, long windupMs, long attackMs, long interruptScore,
                                          int amount, GarbageStyle style) {
+        return addGarbage(idleMs, windupMs, attackMs, interruptScore, amount, style, true);
+    }
+
+    public static BossAttack addGarbage(long idleMs, long windupMs, long attackMs, long interruptScore,
+                                         int amount, GarbageStyle style, boolean shockwave) {
         return new BossAttack(idleMs, windupMs, attackMs, interruptScore,
-                BossAttackEffectType.ADD_GARBAGE, amount, style);
+                BossAttackEffectType.ADD_GARBAGE, amount, style, shockwave);
     }
 }

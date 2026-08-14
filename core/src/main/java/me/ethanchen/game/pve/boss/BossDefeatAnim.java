@@ -7,9 +7,9 @@ package me.ethanchen.game.pve.boss;
  */
 public final class BossDefeatAnim {
     /** Portrait shake before the shatter. */
-    public static final long SHAKE_MS = 500;
+    public static final long SHAKE_MS = 1000;
     /** Time after shatter for shards to fall before the section advances. */
-    public static final long SHARD_MS = 800;
+    public static final long SHARD_MS = 1600;
     public static final long DURATION_MS = SHAKE_MS + SHARD_MS;
 
     private BossDefeatAnim() {}
