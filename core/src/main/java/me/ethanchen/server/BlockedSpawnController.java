@@ -10,6 +10,9 @@ import me.ethanchen.game.board.Piece;
  * simultaneously blocked. Extracted from {@link ServerGame}; one instance exists per board so the
  * hold lock and explode countdown never leak between boards.
  * <p>
+ * Once every seat is spawn-blocked, the board is locked into the explode animation: pieces keep
+ * cycling even if a later bag piece would fit, and hold is disabled for the rest of the countdown.
+ * <p>
  * All indices taken by this class ({@code seat}) are board-local seat indices, matching the
  * given {@link Board}'s own {@code activePieces} ordering — not global session slots.
  */
@@ -56,10 +59,20 @@ class BlockedSpawnController {
 
         long now = System.currentTimeMillis();
 
+        // Latch before cycling so a piece that would fit cannot cancel the animation.
+        if (explodeCountdown < 0f && allSeatsBlocked(board)) {
+            explodeCountdown = 0f;
+        }
+        boolean locked = explodeCountdown >= 0f;
+
         for (int i = 0; i < seats; i++) {
             if (i >= board.getActivePieces().size()) continue;
             Piece piece = board.getActivePieces().get(i);
             boolean blockedNow = piece.isBlockedFromSpawning;
+            if (locked && !blockedNow) {
+                piece.isBlockedFromSpawning = true;
+                blockedNow = true;
+            }
 
             if (blockedNow && !wasBlocked[i]) {
                 timeBetweenNextPiece[i] = GameConstants.CYCLE_START;
@@ -83,34 +96,22 @@ class BlockedSpawnController {
                 interval = effectiveInterval(i);
                 Piece newPiece = board.getActivePieces().get(i);
                 if (!newPiece.isBlockedFromSpawning) {
-                    wasBlocked[i] = false;
-                    cycleTimer[i] = 0f;
-                    if (explodeCountdown >= 0f) {
-                        explodeCountdown = -1f; // near-death save
+                    if (locked) {
+                        newPiece.isBlockedFromSpawning = true;
+                    } else {
+                        wasBlocked[i] = false;
+                        cycleTimer[i] = 0f;
+                        break;
                     }
-                    break;
                 }
             }
         }
 
-        boolean allBlocked = seats > 0;
-        for (int i = 0; i < seats; i++) {
-            if (i >= board.getActivePieces().size()) { allBlocked = false; break; }
-            Piece p = board.getActivePieces().get(i);
-            if (!p.isBlockedFromSpawning) {
-                allBlocked = false;
-                break;
-            }
-        }
-
-        if (allBlocked) {
-            if (explodeCountdown < 0f) explodeCountdown = 0f;
+        if (locked) {
             explodeCountdown += dtSec;
             if (explodeCountdown >= GameConstants.EXPLODE_DURATION) {
                 onBoardLost.run();
             }
-        } else if (explodeCountdown >= 0f) {
-            explodeCountdown = -1f;
         }
     }
 
@@ -120,11 +121,12 @@ class BlockedSpawnController {
 
     /**
      * Returns true when seat {@code seat}'s blocked piece may be held
-     * (cycling has reached minimum interval and this board's explode is not active).
+     * (cycling has reached minimum interval, not every seat is blocked, and explode is inactive).
      */
-    boolean canHoldWhileBlocked(int seat) {
+    boolean canHoldWhileBlocked(int seat, Board board) {
         if (timeBetweenNextPiece == null || seat < 0 || seat >= timeBetweenNextPiece.length) return false;
-        return timeBetweenNextPiece[seat] <= GameConstants.CYCLE_MIN && explodeCountdown < 0f;
+        if (explodeCountdown >= 0f || allSeatsBlocked(board)) return false;
+        return timeBetweenNextPiece[seat] <= GameConstants.CYCLE_MIN;
     }
 
     /**
@@ -133,8 +135,7 @@ class BlockedSpawnController {
     boolean computeHoldAvailable(int seat, Board board) {
         if (board.getActivePieces().size() > seat
                 && board.getActivePieces().get(seat).isBlockedFromSpawning) {
-            if (explodeCountdown >= 0f) return false;
-            return canHoldWhileBlocked(seat);
+            return canHoldWhileBlocked(seat, board);
         }
         long now = System.currentTimeMillis();
         boolean boardLock = lastHoldUsedMs > 0 && (now - lastHoldUsedMs) < GameConstants.HOLD_GLOBAL_LOCK_MS;
@@ -148,7 +149,7 @@ class BlockedSpawnController {
     boolean computeOwnPieceHoldGlow(int seat, Board board) {
         if (board.getActivePieces().size() <= seat) return false;
         Piece p = board.getActivePieces().get(seat);
-        return p.isBlockedFromSpawning && canHoldWhileBlocked(seat);
+        return p.isBlockedFromSpawning && canHoldWhileBlocked(seat, board);
     }
 
     /**
@@ -156,7 +157,7 @@ class BlockedSpawnController {
      * sound (addressed to {@code globalPlayerId}, for network identification) via {@code effects}.
      */
     void applyBlockedHold(int seat, int globalPlayerId, Board board, PlacementEffects effects) {
-        if (!canHoldWhileBlocked(seat)) return;
+        if (!canHoldWhileBlocked(seat, board)) return;
         if (board.getActivePieces().size() <= seat) return;
 
         long now = System.currentTimeMillis();
@@ -185,6 +186,15 @@ class BlockedSpawnController {
     long getLastHoldUsedMs()        { return lastHoldUsedMs; }
 
     // -------------------------------------------------------------------------
+
+    private boolean allSeatsBlocked(Board board) {
+        int seats = timeBetweenNextPiece.length;
+        if (seats <= 0 || board.getActivePieces().size() < seats) return false;
+        for (int i = 0; i < seats; i++) {
+            if (!board.getActivePieces().get(i).isBlockedFromSpawning) return false;
+        }
+        return true;
+    }
 
     private float effectiveInterval(int i) {
         if (explodeCountdown >= 0f) {

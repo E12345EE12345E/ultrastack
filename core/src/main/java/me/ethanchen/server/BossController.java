@@ -7,16 +7,20 @@ import me.ethanchen.game.board.Board;
 import me.ethanchen.game.pve.GarbageStyle;
 import me.ethanchen.game.pve.boss.BossAttack;
 import me.ethanchen.game.pve.boss.BossAttackEffectType;
+import me.ethanchen.game.pve.boss.BossDefeatAnim;
 import me.ethanchen.game.pve.boss.BossDef;
+import me.ethanchen.game.pve.boss.BossIntroAnim;
 
 /**
- * Per-boss-section phase machine: {@code IDLE -> WINDUP -> ATTACK -> IDLE} (plus {@code STUNNED}
- * on windup interrupt). Score gained since the boss section started depletes HP; score gained
- * during a windup counts toward that attack's interrupt threshold (implementation.md, Part 3).
+ * Per-boss-section phase machine: {@code ENTERING -> IDLE -> WINDUP -> ATTACK -> IDLE} (plus
+ * {@code STUNNED} on windup interrupt and {@code DEFEATED} before the section advances). Score
+ * gained since the boss section started depletes HP except during {@code ENTERING} and
+ * {@code DEFEATED}. Score gained during a windup counts toward that attack's interrupt
+ * threshold (implementation.md, Part 3).
  */
 public class BossController {
 
-    public enum Phase { IDLE, WINDUP, ATTACK, STUNNED }
+    public enum Phase { IDLE, WINDUP, ATTACK, STUNNED, ENTERING, DEFEATED }
 
     /** Applies an attack effect to every still-running board (e.g. garbage spawn). */
     public interface AttackEffectSink {
@@ -28,7 +32,7 @@ public class BossController {
     private final Random rng = new Random();
 
     private int attackIndex;
-    private Phase phase = Phase.IDLE;
+    private Phase phase = Phase.ENTERING;
     private long phaseElapsedMs;
     private long phaseDurationMs;
     private long windupScoreBaseline;
@@ -41,7 +45,7 @@ public class BossController {
         this.def = def;
         this.effects = effects;
         this.hp = def.maxHp;
-        beginAttack(0, 0L);
+        enterEntering();
     }
 
     public boolean isDefeated() { return defeated; }
@@ -63,19 +67,28 @@ public class BossController {
 
         long scoreDelta = Math.max(0L, sectionScore - lastSectionScore);
         lastSectionScore = sectionScore;
-        if (scoreDelta > 0) {
+        if (scoreDelta > 0 && phase != Phase.ENTERING && phase != Phase.DEFEATED) {
             long newHp = hp - scoreDelta;
             hp = (int) Math.max(0L, newHp);
-            if (hp <= 0) {
+            if (hp <= 0) enterDefeated();
+        }
+
+        if (phase == Phase.DEFEATED) {
+            phaseElapsedMs += deltaMs;
+            if (phaseElapsedMs >= phaseDurationMs) {
                 defeated = true;
                 return true;
             }
+            return false;
         }
 
         if (def.pattern.length == 0) return false;
 
         phaseElapsedMs += deltaMs;
         switch (phase) {
+            case ENTERING:
+                if (phaseElapsedMs >= phaseDurationMs) beginAttack(0, sectionScore);
+                break;
             case IDLE:
                 if (phaseElapsedMs >= phaseDurationMs) enterWindup(sectionScore);
                 break;
@@ -103,11 +116,19 @@ public class BossController {
             default:
                 break;
         }
-        return defeated;
+        return false;
     }
 
     private BossAttack currentAttack() {
         return def.pattern[attackIndex];
+    }
+
+    private void enterEntering() {
+        phase = Phase.ENTERING;
+        phaseElapsedMs = 0;
+        BossIntroAnim intro = def.intro != null ? def.intro : BossIntroAnim.FLASH_IN;
+        phaseDurationMs = intro.enteringDurationMs();
+        effectApplied = false;
     }
 
     private void beginAttack(int index, long sectionScore) {
@@ -133,6 +154,14 @@ public class BossController {
         phaseElapsedMs = 0;
         phaseDurationMs = Math.max(1L, currentAttack().attackMs);
         effectApplied = false;
+    }
+
+    private void enterDefeated() {
+        hp = 0;
+        phase = Phase.DEFEATED;
+        phaseElapsedMs = 0;
+        phaseDurationMs = BossDefeatAnim.DURATION_MS;
+        effectApplied = true;
     }
 
     private void enterStunned() {

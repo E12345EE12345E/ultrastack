@@ -43,6 +43,14 @@ public enum GameMode {
         return name().startsWith("CHARACTER_");
     }
 
+    /**
+     * Value written to {@code game_results.gamemode}. Differs from {@link #name()} only for
+     * {@link #PVE}, which is stored as {@code "Scenario"}.
+     */
+    public String resultName() {
+        return this == PVE ? "Scenario" : name();
+    }
+
     // -------------------------------------------------------------------------
     // Rule implementations (static singletons, one per non-NONE mode)
     // -------------------------------------------------------------------------

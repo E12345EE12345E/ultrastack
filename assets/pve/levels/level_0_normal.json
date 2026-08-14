@@ -16,43 +16,12 @@
   },
   "sections": [
     {
-      "pass": [[{ "type": "TIME", "value": 10000 }]],
+      "pass": [[{ "type": "TIME", "value": 1000 }]],
       "timeoutMs": -1,
       "display": "BOARD_DEFAULT",
       "env": {
         "bossId": -1,
         "garbage": []
-      }
-    },
-    {
-      "pass": [
-        [{ "type": "SCORE", "value": 4000 }],
-        [
-          { "type": "SCORE", "value": 2500 },
-          { "type": "TIME", "value": 60000 }
-        ]
-      ],
-      "timeoutMs": 60000,
-      "display": "BOARD_DEFAULT",
-      "env": {
-        "bossId": -1,
-        "garbage": []
-      }
-    },
-    {
-      "pass": [[{ "type": "TIME", "value": 30000 }]],
-      "timeoutMs": -1,
-      "display": "BOARD_DEFAULT",
-      "env": {
-        "bossId": -1,
-        "garbage": [
-          {
-            "intervalMs": 4000,
-            "initialMs": 0,
-            "style": "DEFAULT",
-            "amount": 1
-          }
-        ]
       }
     },
     {

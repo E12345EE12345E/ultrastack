@@ -10,14 +10,47 @@ import org.junit.jupiter.api.Test;
 
 import me.ethanchen.game.pve.GarbageStyle;
 import me.ethanchen.game.pve.boss.BossAttack;
+import me.ethanchen.game.pve.boss.BossDefeatAnim;
 import me.ethanchen.game.pve.boss.BossDef;
+import me.ethanchen.game.pve.boss.BossIntroAnim;
 
 class BossControllerTest {
 
     private static BossDef oneAttackBoss(long idle, long windup, long attack, long interrupt, int hp) {
         return new BossDef(99, hp, 500L, new BossAttack[]{
                 BossAttack.addGarbage(idle, windup, attack, interrupt, 2, GarbageStyle.DEFAULT)
-        });
+        }, BossIntroAnim.FLASH_IN);
+    }
+
+    /** Ticks past ENTERING (lane expand + FLASH_IN) at score 0 so later asserts match the attack cycle. */
+    private static void skipIntro(BossController boss) {
+        boss.tick((int) BossIntroAnim.FLASH_IN.enteringDurationMs(), 0);
+    }
+
+    @Test
+    void startsInEnteringAndIsInvulnerable() {
+        BossController boss = new BossController(oneAttackBoss(1000, 2000, 500, 99999, 100),
+                (a, s, r) -> {});
+        assertEquals(BossController.Phase.ENTERING, boss.getPhase());
+        assertEquals(BossIntroAnim.FLASH_IN.enteringDurationMs(), boss.getPhaseDurationMs());
+        assertFalse(boss.tick(10, 40));
+        assertEquals(100, boss.getHp());
+        assertEquals(BossController.Phase.ENTERING, boss.getPhase());
+
+        skipIntro(boss);
+        assertEquals(BossController.Phase.IDLE, boss.getPhase());
+        assertEquals(100, boss.getHp());
+        // Score after intro applies as damage.
+        boss.tick(10, 40);
+        assertEquals(60, boss.getHp());
+    }
+
+    @Test
+    void enteringThenIdleMsZeroGoesToWindup() {
+        BossController boss = new BossController(oneAttackBoss(0, 2000, 1000, 50, 10_000),
+                (a, s, r) -> {});
+        skipIntro(boss);
+        assertEquals(BossController.Phase.WINDUP, boss.getPhase());
     }
 
     @Test
@@ -25,11 +58,15 @@ class BossControllerTest {
         AtomicInteger garbage = new AtomicInteger();
         BossController boss = new BossController(oneAttackBoss(10_000, 10_000, 1000, 99999, 100),
                 (amount, style, rng) -> garbage.addAndGet(amount));
+        skipIntro(boss);
 
         assertFalse(boss.tick(10, 40));
         assertEquals(60, boss.getHp());
-        assertTrue(boss.tick(10, 100));
+        assertFalse(boss.tick(10, 100));
         assertEquals(0, boss.getHp());
+        assertEquals(BossController.Phase.DEFEATED, boss.getPhase());
+        assertFalse(boss.isDefeated());
+        assertTrue(boss.tick((int) BossDefeatAnim.DURATION_MS, 100));
         assertTrue(boss.isDefeated());
         assertEquals(0, garbage.get()); // never left idle into attack
     }
@@ -39,6 +76,7 @@ class BossControllerTest {
         AtomicInteger garbage = new AtomicInteger();
         BossController boss = new BossController(oneAttackBoss(0, 2000, 1000, 50, 10_000),
                 (amount, style, rng) -> garbage.addAndGet(amount));
+        skipIntro(boss);
 
         // idleMs=0 → immediately in WINDUP
         assertEquals(BossController.Phase.WINDUP, boss.getPhase());
@@ -58,6 +96,7 @@ class BossControllerTest {
         AtomicInteger garbage = new AtomicInteger();
         BossController boss = new BossController(oneAttackBoss(0, 0, 500, 99999, 10_000),
                 (amount, style, rng) -> garbage.addAndGet(amount));
+        skipIntro(boss);
 
         // idle+windup skipped → ATTACK, effect applied on first tick
         boss.tick(10, 0);
@@ -71,6 +110,7 @@ class BossControllerTest {
     void phaseDurationsMatchAttackDef() {
         BossController boss = new BossController(oneAttackBoss(1000, 2000, 500, 99999, 10_000),
                 (a, s, r) -> {});
+        skipIntro(boss);
         assertEquals(BossController.Phase.IDLE, boss.getPhase());
         assertEquals(1000L, boss.getPhaseDurationMs());
         boss.tick(1000, 0);

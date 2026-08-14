@@ -5,7 +5,7 @@ import me.ethanchen.game.pve.PveBoardDisplay;
 /**
  * Live PvE section / boss / scoring-visual state sent each net tick inside
  * {@code LightGameStateBroadcast}. Boss phase ints match {@code BossController.Phase} ordinals:
- * IDLE=0, WINDUP=1, ATTACK=2, STUNNED=3.
+ * IDLE=0, WINDUP=1, ATTACK=2, STUNNED=3, ENTERING=4, DEFEATED=5.
  *
  * <p>This is the sole live payload for PvE — it does not reuse {@link ScoreModeData}.
  */

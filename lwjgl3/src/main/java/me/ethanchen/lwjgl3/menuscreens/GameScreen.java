@@ -25,7 +25,13 @@ import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.music.AudioManager;
 import me.ethanchen.lwjgl3.music.MusicTag;
 import me.ethanchen.game.pve.PveBoardDisplay;
+import me.ethanchen.game.pve.boss.BossDefeatAnim;
+import me.ethanchen.game.pve.boss.BossDef;
+import me.ethanchen.game.pve.boss.BossIntroAnim;
+import me.ethanchen.game.pve.boss.BossRegistry;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
+import me.ethanchen.lwjgl3.render.BossTextureShard;
+import me.ethanchen.lwjgl3.render.CharacterAssets;
 import me.ethanchen.lwjgl3.render.CharacterMeterRenderer;
 import me.ethanchen.lwjgl3.render.Particle;
 import me.ethanchen.lwjgl3.render.shader.PlayerRipples;
@@ -49,6 +55,7 @@ import me.ethanchen.network.packets.s2c.gamemode.CharacterModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PuzzleModeData;
 import me.ethanchen.network.packets.s2c.gamemode.PveModeData;
 import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
+import me.ethanchen.server.BossController;
 
 /**
  * Thin coordinator for the in-progress game screen. Supports zero or more local players
@@ -81,13 +88,27 @@ public class GameScreen extends MenuScreen {
     private PveModeData latestPveMode;
     private RippleCircleRenderer bossRipple;
     private float bossRippleTime;
+    /** Displayed ripple radius (board units); springs toward {@link #bossRippleTargetRadius}. */
+    private float bossRippleRadius = 3.5f;
+    private float bossRippleRadiusVel;
+    private float bossRippleTargetRadius = 3.5f;
+    private static final float BOSS_RIPPLE_STIFFNESS = 22f;
+    private static final float BOSS_RIPPLE_DAMPING = 2f * (float) Math.sqrt(BOSS_RIPPLE_STIFFNESS);
     /** Locked 16:9 design rect for all in-game board/HUD placement. */
     private final AspectLockedViewport gameViewport =
             new AspectLockedViewport(DesignUi.DESIGN_W, DesignUi.DESIGN_H);
     /** 0 = default dual/single layout, 1 = parted boards with boss in the middle. */
     private float bossLayoutBlend;
     private float bossLayoutTarget;
-    private static final float BOSS_LAYOUT_DURATION_MS = 900f;
+    /** Previous {@link PveModeData#bossPhase} for HP-bar appear edges. */
+    private int prevBossPhase = -1;
+    /** 0–1 fade for the linear HP bar after non-flash intros. */
+    private float bossHpBarFade;
+    private boolean bossHpBarFading;
+    private static final float BOSS_HP_BAR_FADE_MS = 1000f;
+    /** Client-only shatter shards from the boss portrait (not networked). */
+    private final ArrayList<BossTextureShard> bossShards = new ArrayList<>();
+    private boolean bossShardsSpawned;
     /** Per-slot previous "meter full / ability ready" state for rising-edge available SFX. */
     private boolean[] abilityWasReady;
 
@@ -241,15 +262,19 @@ public class GameScreen extends MenuScreen {
         // Ease boards apart / together when entering or leaving a bossfight section.
         if (bossLayoutBlend < bossLayoutTarget) {
             bossLayoutBlend = Math.min(bossLayoutTarget,
-                    bossLayoutBlend + deltaTime / BOSS_LAYOUT_DURATION_MS);
+                    bossLayoutBlend + deltaTime / (float) BossIntroAnim.LANE_EXPAND_MS);
         } else if (bossLayoutBlend > bossLayoutTarget) {
             bossLayoutBlend = Math.max(bossLayoutTarget,
-                    bossLayoutBlend - deltaTime / BOSS_LAYOUT_DURATION_MS);
+                    bossLayoutBlend - deltaTime / (float) BossIntroAnim.LANE_EXPAND_MS);
         }
         if (bossLayoutTarget <= 0f && bossLayoutBlend <= 0.001f
                 && drawMode == GameDrawMode.BOSSFIGHT && game != null) {
             drawMode = game.getBoards().size() > 1 ? GameDrawMode.DUAL_BOARD : GameDrawMode.SINGLE_BOARD;
             bossLayoutBlend = 0f;
+        }
+        if (bossHpBarFading && bossHpBarFade < 1f) {
+            bossHpBarFade = Math.min(1f, bossHpBarFade + deltaTime / BOSS_HP_BAR_FADE_MS);
+            if (bossHpBarFade >= 1f) bossHpBarFading = false;
         }
 
         Iterator<Particle> pit = particles.iterator();
@@ -257,6 +282,12 @@ public class GameScreen extends MenuScreen {
             Particle p = pit.next();
             p.update(deltaTime);
             if (p.isDead()) pit.remove();
+        }
+        Iterator<BossTextureShard> sit = bossShards.iterator();
+        while (sit.hasNext()) {
+            BossTextureShard s = sit.next();
+            s.update(deltaTime);
+            if (s.isDead()) sit.remove();
         }
 
         if (exploded) {
@@ -304,6 +335,8 @@ public class GameScreen extends MenuScreen {
             default:
                 break;
         }
+
+        drawBossTextureShards();
 
         if (exploded) {
             float alpha = Math.min(1f, fadeTimerMs / 1000f);
@@ -536,17 +569,15 @@ public class GameScreen extends MenuScreen {
             renderBoardHud(left, leftX, originY, tileSize);
         }
 
-        if (t <= 0.001f) return;
+        if (t < 1f) return;
 
         float innerLeft = leftX + leftW;
         float innerRight = rightX;
         float laneWidth = Math.max(0f, innerRight - innerLeft);
-        float boxSize = Math.min(gameViewport.toScreenH(0.42f), laneWidth * 0.92f)
-                * (0.35f + 0.65f * t) * 0.65f;
+        float boxSize = Math.min(gameViewport.toScreenH(0.42f), laneWidth * 0.92f) * 0.65f;
         float panelX = innerLeft + (laneWidth - boxSize) * 0.5f;
-        // Drop in from slightly above as the boards part.
-        float centerY = gameViewport.toScreenY(0.5f) + (1f - t) * gameViewport.viewH * 0.12f;
-        renderBossPanel(panelX, centerY, boxSize);
+        float centerY = gameViewport.toScreenY(0.5f);
+        renderBossPanel(panelX, centerY, boxSize, innerLeft, innerRight, originY);
     }
 
     /**
@@ -567,7 +598,7 @@ public class GameScreen extends MenuScreen {
         float hudGutter = tileSize * 5.5f;
         float meterColumnW = hasSeatedCharacters() ? tileSize * 5.5f : 0f;
         float gap = tileSize * 1.5f;
-        float boxSize = gameViewport.toScreenH(0.42f) * 0.65f * (0.35f + 0.65f * t);
+        float boxSize = gameViewport.toScreenH(0.42f) * 0.65f;
 
         // Default: board alone, centered.
         float defX = BoardRenderer.centeredOriginX(board, tileSize, gameViewport.originX, gameViewport.viewW);
@@ -582,11 +613,13 @@ public class GameScreen extends MenuScreen {
         renderBoardContents(board, primaryBoardIndex(), originX, originY, tileSize);
         renderBoardHud(board, originX, originY, tileSize);
 
-        if (t <= 0.001f) return;
+        if (t < 1f) return;
 
         float panelX = originX + boardW + meterColumnW + gap;
-        float centerY = gameViewport.toScreenY(0.5f) + (1f - t) * gameViewport.viewH * 0.12f;
-        renderBossPanel(panelX, centerY, boxSize);
+        float centerY = gameViewport.toScreenY(0.5f);
+        float laneLeft = originX + boardW + meterColumnW;
+        float laneRight = panelX + boxSize;
+        renderBossPanel(panelX, centerY, boxSize, laneLeft, laneRight, originY);
     }
 
     private static float smoothstep(float x) {
@@ -603,65 +636,275 @@ public class GameScreen extends MenuScreen {
         return false;
     }
 
-    private void renderBossPanel(float panelX, float centerY, float boxSize) {
+    private void renderBossPanel(float panelX, float restCenterY, float boxSize,
+                                 float laneLeft, float laneRight, float boardOriginY) {
         if (latestPveMode == null || latestPveMode.bossId < 0 || boxSize <= 0f) return;
-        float panelUnit = boxSize / 6f;
+
+        BossDef def = BossRegistry.byId(latestPveMode.bossId);
+        BossIntroAnim intro = def != null && def.intro != null ? def.intro : BossIntroAnim.FLASH_IN;
+        boolean entering = latestPveMode.bossPhase == BossController.Phase.ENTERING.ordinal();
+        long elapsed = latestPveMode.bossPhaseElapsedMs;
+
+        if (entering && elapsed < BossIntroAnim.LANE_EXPAND_MS) return;
+
+        float introT = 1f;
+        if (entering) {
+            introT = intro.durationMs <= 0 ? 1f
+                    : Math.min(1f, (elapsed - BossIntroAnim.LANE_EXPAND_MS) / (float) intro.durationMs);
+        }
+
+        float alpha = 1f;
+        float centerY = restCenterY;
+        boolean flashWhite = false;
+        if (entering) {
+            switch (intro) {
+                case FLASH_IN:
+                    flashWhite = true;
+                    break;
+                case FLOAT_IN: {
+                    float ease = 1f - (1f - introT) * (1f - introT);
+                    float fromY = gameViewport.originY - boxSize;
+                    centerY = fromY + (restCenterY - fromY) * ease;
+                    break;
+                }
+                case FLOAT_IN_TOP: {
+                    float ease = 1f - (1f - introT) * (1f - introT);
+                    float fromY = gameViewport.originY + gameViewport.viewH + boxSize;
+                    centerY = fromY + (restCenterY - fromY) * ease;
+                    break;
+                }
+                case FADE_IN:
+                    alpha = introT;
+                    break;
+            }
+        }
+
+        boolean defeated = latestPveMode.bossPhase == BossController.Phase.DEFEATED.ordinal();
         float panelY = centerY - boxSize * 0.5f;
         float cx = panelX + boxSize * 0.5f;
         float cy = panelY + boxSize * 0.55f;
+        float panelUnit = boxSize / 6f;
 
-        // Boss ripple driven by phase / phase progress.
-        if (bossRipple == null) bossRipple = new RippleCircleRenderer();
-        bossRippleTime += deltaTime / 1000f;
-        float progress = latestPveMode.bossPhaseDurationMs > 0
-                ? Math.min(1f, latestPveMode.bossPhaseElapsedMs / (float) latestPveMode.bossPhaseDurationMs)
-                : 0f;
-        float radius;
-        RippleShaderColor color;
-        switch (latestPveMode.bossPhase) {
-            case 1: // WINDUP — grow + shift toward red
-                radius = 3.5f + 2.5f * progress;
-                color = new RippleShaderColor(
-                        new com.badlogic.gdx.graphics.Color(1f, 0.85f - 0.55f * progress, 0.2f, 1f));
-                break;
-            case 2: // ATTACK — fast shrink + snap to hot color
-                radius = 6f * (1f - progress) + 1.5f;
-                color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(1f, 0.15f, 0.1f, 1f));
-                break;
-            case 3: // STUNNED — dim steady
-                radius = 3f;
-                color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(0.5f, 0.7f, 1f, 1f));
-                break;
-            default: // IDLE
-                radius = 3.5f;
-                color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(0.9f, 0.9f, 1f, 1f));
-                break;
+        if (!entering && !defeated) {
+            if (bossRipple == null) bossRipple = new RippleCircleRenderer();
+            bossRippleTime += deltaTime / 1000f;
+            RippleShaderColor color;
+            switch (latestPveMode.bossPhase) {
+                case 1: // WINDUP — grow toward max + shift toward red
+                    float progress = latestPveMode.bossPhaseDurationMs > 0
+                            ? Math.min(1f, latestPveMode.bossPhaseElapsedMs / (float) latestPveMode.bossPhaseDurationMs)
+                            : 0f;
+                    bossRippleTargetRadius = 3.5f + 2.5f * progress;
+                    color = new RippleShaderColor(
+                            new com.badlogic.gdx.graphics.Color(1f, 0.85f - 0.55f * progress, 0.2f, 1f));
+                    break;
+                case 2: // ATTACK — shrink toward min + snap to hot color
+                    bossRippleTargetRadius = 1.5f;
+                    color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(1f, 0.15f, 0.1f, 1f));
+                    break;
+                case 3: // STUNNED — dim steady
+                    bossRippleTargetRadius = 3f;
+                    color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(0.5f, 0.7f, 1f, 1f));
+                    break;
+                default: // IDLE
+                    bossRippleTargetRadius = 3.5f;
+                    color = new RippleShaderColor(new com.badlogic.gdx.graphics.Color(0.9f, 0.9f, 1f, 1f));
+                    break;
+            }
+            float dt = Math.min(0.05f, deltaTime / 1000f);
+            bossRippleRadiusVel += (BOSS_RIPPLE_STIFFNESS * (bossRippleTargetRadius - bossRippleRadius)
+                    - BOSS_RIPPLE_DAMPING * bossRippleRadiusVel) * dt;
+            bossRippleRadius += bossRippleRadiusVel * dt;
+            if (bossRippleRadius < 0.25f) {
+                bossRippleRadius = 0.25f;
+                if (bossRippleRadiusVel < 0f) bossRippleRadiusVel = 0f;
+            }
+            float synthOriginX = cx - 0.5f * panelUnit;
+            float synthOriginY = cy - 0.5f * panelUnit;
+            bossRipple.draw(synthOriginX, synthOriginY, panelUnit, 0f, 0f, bossRippleRadius,
+                    1f, 1f, 0.35f, 0.55f, color, bossRippleTime, 1f);
         }
-        // RippleCircleRenderer expects board-space coords relative to an origin/tileSize; feed a
-        // synthetic board origin so the circle sits on the portrait center in screen space.
-        float synthOriginX = cx - 0.5f * panelUnit;
-        float synthOriginY = cy - 0.5f * panelUnit;
-        bossRipple.draw(synthOriginX, synthOriginY, panelUnit, 0f, 0f, radius,
-                1f, 1f, 0.35f, 0.55f, color, bossRippleTime, 1f);
 
-        CharacterMeterRenderer.draw(shapes, sprites, font,
-                0, "BOSS", latestPveMode.bossHp, Math.max(1, latestPveMode.bossMaxHp),
-                new com.badlogic.gdx.graphics.Color(1f, 0.35f, 0.25f, 1f),
-                panelX, panelY, boxSize);
+        com.badlogic.gdx.graphics.Texture portrait = CharacterAssets.portraitFor(0);
+        float portraitSize = boxSize * 0.85f;
+        float destX = cx - portraitSize * 0.5f;
+        float destY = cy - portraitSize * 0.5f;
+        boolean shattered = false;
+        if (defeated) {
+            if (elapsed < BossDefeatAnim.SHAKE_MS) {
+                float t = elapsed / (float) BossDefeatAnim.SHAKE_MS;
+                float amp = boxSize * (0.02f + 0.12f * t);
+                destX += amp * (float) Math.sin(elapsed * 0.093f);
+                destY += amp * (float) Math.cos(elapsed * 0.121f);
+            } else {
+                shattered = true;
+                if (!bossShardsSpawned) {
+                    spawnBossTextureShards(portrait, destX, destY, portraitSize, portraitSize);
+                    bossShardsSpawned = true;
+                }
+            }
+        }
 
-        // Explicit HP numerals under the ring.
+        if (!shattered) {
+            sprites.begin();
+            sprites.setColor(1f, 1f, 1f, alpha);
+            sprites.draw(portrait, destX, destY, portraitSize, portraitSize);
+            if (flashWhite) {
+                sprites.setBlendFunction(
+                        com.badlogic.gdx.graphics.GL20.GL_SRC_ALPHA,
+                        com.badlogic.gdx.graphics.GL20.GL_ONE);
+                sprites.setColor(1f, 1f, 1f, 1f);
+                sprites.draw(portrait, destX, destY, portraitSize, portraitSize);
+                sprites.draw(portrait, destX, destY, portraitSize, portraitSize);
+                sprites.setBlendFunction(
+                        com.badlogic.gdx.graphics.GL20.GL_SRC_ALPHA,
+                        com.badlogic.gdx.graphics.GL20.GL_ONE_MINUS_SRC_ALPHA);
+            }
+            sprites.setColor(com.badlogic.gdx.graphics.Color.WHITE);
+            sprites.end();
+        }
+
+        boolean showBar;
+        float barAlpha;
+        boolean barFlash = false;
+        if (entering) {
+            if (intro == BossIntroAnim.FLASH_IN) {
+                showBar = true;
+                barAlpha = 1f;
+                barFlash = true;
+            } else {
+                showBar = false;
+                barAlpha = 0f;
+            }
+        } else {
+            showBar = true;
+            barAlpha = intro == BossIntroAnim.FLASH_IN ? 1f : bossHpBarFade;
+        }
+        if (showBar && barAlpha > 0.001f && laneRight > laneLeft) {
+            drawBossHpBar(laneLeft, laneRight, boardOriginY, boxSize, barAlpha, barFlash);
+        }
+    }
+
+    private void drawBossHpBar(float laneLeft, float laneRight, float boardOriginY,
+                               float boxSize, float alpha, boolean flashWhite) {
+        float barW = laneRight - laneLeft;
+        float barH = Math.max(22f, boxSize * 0.18f);
+        float barY = boardOriginY;
+        float pct = latestPveMode.bossMaxHp > 0
+                ? Math.max(0f, Math.min(1f, latestPveMode.bossHp / (float) latestPveMode.bossMaxHp))
+                : 0f;
+
+        com.badlogic.gdx.Gdx.gl.glEnable(com.badlogic.gdx.graphics.GL20.GL_BLEND);
+        com.badlogic.gdx.Gdx.gl.glBlendFunc(
+                com.badlogic.gdx.graphics.GL20.GL_SRC_ALPHA,
+                com.badlogic.gdx.graphics.GL20.GL_ONE_MINUS_SRC_ALPHA);
+        shapes.begin(com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType.Filled);
+        if (flashWhite) {
+            shapes.setColor(1f, 1f, 1f, alpha);
+            shapes.rect(laneLeft, barY, barW, barH);
+        } else {
+            shapes.setColor(0.25f, 0.25f, 0.25f, alpha);
+            shapes.rect(laneLeft, barY, barW, barH);
+            shapes.setColor(1f, 0.35f, 0.25f, alpha);
+            shapes.rect(laneLeft, barY, barW * pct, barH);
+        }
+        shapes.end();
+
         String hpText = latestPveMode.bossHp + " / " + latestPveMode.bossMaxHp;
         com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout();
         float savedX = font.getScaleX(), savedY = font.getScaleY();
         font.getData().setScale(1f);
-        float fs = 0.45f * (boxSize / font.getData().lineHeight);
+        float fs = 0.65f * (barH / font.getData().lineHeight);
         font.getData().setScale(fs);
         layout.setText(font, hpText);
         sprites.begin();
-        font.setColor(com.badlogic.gdx.graphics.Color.WHITE);
-        font.draw(sprites, hpText, panelX + (boxSize - layout.width) * 0.5f, panelY - panelUnit * 0.1f);
+        font.setColor(1f, 1f, 1f, alpha);
+        font.draw(sprites, hpText,
+                laneLeft + (barW - layout.width) * 0.5f,
+                barY + (barH + layout.height) * 0.5f);
         sprites.end();
+        font.setColor(com.badlogic.gdx.graphics.Color.WHITE);
         font.getData().setScale(savedX, savedY);
+    }
+
+    private void spawnBossTextureShards(com.badlogic.gdx.graphics.Texture texture,
+                                        float destX, float destY, float destW, float destH) {
+        int tw = texture.getWidth();
+        int th = texture.getHeight();
+        if (tw <= 0 || th <= 0) return;
+        int chunk = 2;
+        com.badlogic.gdx.graphics.Pixmap pm = copyTexturePixmap(texture);
+        float unit = Math.max(8f, destH / 8f);
+        float gravity = BossTextureShard.gravityForUnit(unit);
+        for (int sy = 0; sy < th; sy += chunk) {
+            int ch = Math.min(chunk, th - sy);
+            for (int sx = 0; sx < tw; sx += chunk) {
+                int cw = Math.min(chunk, tw - sx);
+                if (pm != null && bossChunkIsEmpty(pm, sx, sy, cw, ch)) continue;
+                BossTextureShard s = new BossTextureShard();
+                s.texture = texture;
+                s.srcX = sx;
+                s.srcY = sy;
+                s.srcW = cw;
+                s.srcH = ch;
+                s.w = destW * cw / (float) tw;
+                s.h = destH * ch / (float) th;
+                s.x = destX + destW * sx / (float) tw;
+                s.y = destY + destH * (th - sy - ch) / (float) th;
+                float angle = particleRng.nextFloat() * (float) (Math.PI * 2);
+                float speed = (2f + particleRng.nextFloat() * 4f) * unit;
+                s.vx = (float) Math.cos(angle) * speed;
+                s.vy = (float) Math.sin(angle) * speed;
+                s.gravity = gravity;
+                s.lifetime = 0.35f + particleRng.nextFloat() * 0.25f;
+                bossShards.add(s);
+            }
+        }
+        if (pm != null) pm.dispose();
+    }
+
+    private static com.badlogic.gdx.graphics.Pixmap copyTexturePixmap(
+            com.badlogic.gdx.graphics.Texture texture) {
+        try {
+            com.badlogic.gdx.graphics.TextureData td = texture.getTextureData();
+            if (!td.isPrepared()) td.prepare();
+            com.badlogic.gdx.graphics.Pixmap src = td.consumePixmap();
+            if (src == null) return null;
+            com.badlogic.gdx.graphics.Pixmap copy = new com.badlogic.gdx.graphics.Pixmap(
+                    src.getWidth(), src.getHeight(), src.getFormat());
+            copy.drawPixmap(src, 0, 0);
+            if (td.disposePixmap()) src.dispose();
+            return copy;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static boolean bossChunkIsEmpty(com.badlogic.gdx.graphics.Pixmap pm,
+                                            int sx, int sy, int cw, int ch) {
+        for (int y = sy; y < sy + ch; y++) {
+            for (int x = sx; x < sx + cw; x++) {
+                int rgba = pm.getPixel(x, y);
+                int r = (rgba >>> 24) & 0xff;
+                int g = (rgba >>> 16) & 0xff;
+                int b = (rgba >>> 8) & 0xff;
+                int a = rgba & 0xff;
+                if (a > 8 && (r + g + b) > 12) return false;
+            }
+        }
+        return true;
+    }
+
+    private void drawBossTextureShards() {
+        if (bossShards.isEmpty()) return;
+        sprites.begin();
+        for (BossTextureShard s : bossShards) {
+            if (s.isDead() || s.texture == null) continue;
+            sprites.setColor(1f, 1f, 1f, s.alpha());
+            sprites.draw(s.texture, s.x, s.y, s.w, s.h, s.srcX, s.srcY, s.srcW, s.srcH, false, false);
+        }
+        sprites.setColor(com.badlogic.gdx.graphics.Color.WHITE);
+        sprites.end();
     }
 
     /** Draws every seated player's character portrait + meter donut to the right of the board. */
@@ -857,6 +1100,7 @@ public class GameScreen extends MenuScreen {
         if (p.pveMode != null) {
             latestPveMode = p.pveMode;
             updateDrawModeFromPve(p.pveMode);
+            noteBossPhase(p.pveMode);
         }
 
         game.setGravity(p.gravity);
@@ -1023,6 +1267,28 @@ public class GameScreen extends MenuScreen {
     private void handleBumpSound(BumpSoundBroadcast p) {
         boolean self = isLocalSlot(p.playerId) || isLocalSlot(p.otherPlayerId);
         AudioManager.getInstance().playBumpSound(self);
+    }
+
+    /** Starts the HP-bar appear animation when {@code ENTERING} ends. */
+    private void noteBossPhase(PveModeData mode) {
+        int phase = mode.bossPhase;
+        int entering = BossController.Phase.ENTERING.ordinal();
+        if (phase == entering) {
+            bossShards.clear();
+            bossShardsSpawned = false;
+        }
+        if (prevBossPhase == entering && phase != entering && phase >= 0) {
+            BossDef def = BossRegistry.byId(mode.bossId);
+            BossIntroAnim intro = def != null && def.intro != null ? def.intro : BossIntroAnim.FLASH_IN;
+            if (intro == BossIntroAnim.FLASH_IN) {
+                bossHpBarFade = 1f;
+                bossHpBarFading = false;
+            } else {
+                bossHpBarFade = 0f;
+                bossHpBarFading = true;
+            }
+        }
+        prevBossPhase = phase;
     }
 
     /** Switches between the default single/dual layout and the bossfight layout from live PvE data. */

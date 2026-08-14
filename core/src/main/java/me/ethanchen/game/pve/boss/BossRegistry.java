@@ -13,7 +13,7 @@ public final class BossRegistry {
         // Boss 0: 10k HP; idle 5s, windup 2s / attack 1s adding 4 garbage, interrupt at 800 score.
         register(new BossDef(0, 10_000, 2000L, new BossAttack[]{
                 BossAttack.addGarbage(5000, 2000, 1000, 800, 4, GarbageStyle.DEFAULT)
-        }));
+        }, BossIntroAnim.FLOAT_IN));
     }
 
     private BossRegistry() {}

@@ -24,7 +24,7 @@ public class GameResultData {
      */
     public static GameResultData from(GameEndInfo info, PlayerResultInfo[] players) {
         GameResultData data = new GameResultData();
-        data.gamemode = info.mode != null ? info.mode.name() : null;
+        data.gamemode = info.mode != null ? info.mode.resultName() : null;
         data.win = info.win;
         data.disconnected = info.disconnected;
         data.score = info.score;
