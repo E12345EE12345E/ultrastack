@@ -52,4 +52,26 @@ class PveLevelLoaderTest {
         assertEquals(level.board1, level.boardSpecFor(1));
         assertEquals(level.board2, level.boardSpecFor(2));
     }
+
+    @Test
+    void parsesGarbageIntervalIncludingInitialMs() {
+        String json = "{"
+                + "\"sections\": [{"
+                + "  \"pass\": [[]],"
+                + "  \"env\": {\"garbage\": [{"
+                + "    \"intervalMs\": 2000,"
+                + "    \"initialMs\": 1900,"
+                + "    \"style\": \"DEFAULT\","
+                + "    \"amount\": 1"
+                + "  }]}"
+                + "}]"
+                + "}";
+        PveLevelData level = PveLevelLoader.fromJson(json);
+        GarbageInterval[] garbage = level.sections[0].env.garbage;
+        assertEquals(1, garbage.length);
+        assertEquals(2000L, garbage[0].intervalMs);
+        assertEquals(1900L, garbage[0].initialMs);
+        assertEquals(GarbageStyle.DEFAULT, garbage[0].style);
+        assertEquals(1, garbage[0].amount);
+    }
 }

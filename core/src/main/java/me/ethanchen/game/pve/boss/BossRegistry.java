@@ -19,13 +19,13 @@ public final class BossRegistry {
                     2000L,
                     new BossAttack[]{
                         BossAttack.addGarbage(
-                            6000,
+                            4000,
                             2000,
                             800,
                             600,
                             4,
                             GarbageStyle.DEFAULT,
-                            false
+                            true
                         )
                     },
                     8f,
@@ -42,10 +42,10 @@ public final class BossRegistry {
                             600,
                             4,
                             GarbageStyle.DEFAULT,
-                            false
+                            true
                         ),
                         BossAttack.addGarbage(
-                            4000,
+                            1000,
                             1000,
                             400,
                             200,
@@ -54,7 +54,7 @@ public final class BossRegistry {
                             false
                         ),
                         BossAttack.addGarbage(
-                            4000,
+                            1000,
                             1000,
                             400,
                             200,

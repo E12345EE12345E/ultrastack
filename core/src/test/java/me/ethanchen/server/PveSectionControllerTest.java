@@ -17,6 +17,7 @@ import me.ethanchen.game.pve.PveEnvironment;
 import me.ethanchen.game.pve.PveLevelData;
 import me.ethanchen.game.pve.PveRules;
 import me.ethanchen.game.pve.PveSection;
+import me.ethanchen.network.packets.s2c.gamemode.PveModeData;
 
 /** Unit tests for {@link PveSectionController}: criteria evaluation, timeouts, and section advance. */
 class PveSectionControllerTest {
@@ -175,6 +176,49 @@ class PveSectionControllerTest {
         assertFalse(game.getBoards().get(0).hasGarbage());
         ctrl.tick(150, 0); // crosses the 100ms interval once
         assertTrue(game.getBoards().get(0).hasGarbage());
+    }
+
+    @Test
+    void populateModeDataFillsScoreHudFromLowestUnmetRequirement() {
+        PveLevelData level = new PveLevelData();
+        PveSection section = new PveSection();
+        section.pass = new PveCriterion[][]{
+                { new PveCriterion(PveCriterionType.SCORE, 4000) },
+                { new PveCriterion(PveCriterionType.SCORE, 500), new PveCriterion(PveCriterionType.TIME, 20000) },
+        };
+        level.sections = new PveSection[]{ section };
+        level.board1 = oneSeatBoard();
+
+        GameHandler game = newSinglePlayerGame(level);
+        PveSectionController ctrl = new PveSectionController(level, game, game.getBoards().size(), new Recorder());
+        PveModeData data = new PveModeData();
+
+        ctrl.populateModeData(data, 0);
+        assertEquals(0L, data.sectionScore);
+        assertEquals(500L, data.scoreHudTarget);
+        assertFalse(data.scoreHudPassed);
+
+        ctrl.populateModeData(data, 500);
+        assertEquals(500L, data.sectionScore);
+        assertEquals(4000L, data.scoreHudTarget);
+        assertTrue(data.scoreHudPassed);
+    }
+
+    @Test
+    void populateModeDataOmitsScoreHudWhenSectionHasNoScoreRequirement() {
+        PveLevelData level = new PveLevelData();
+        PveSection section = new PveSection();
+        section.pass = new PveCriterion[][]{{ new PveCriterion(PveCriterionType.TIME, 10000) }};
+        level.sections = new PveSection[]{ section };
+        level.board1 = oneSeatBoard();
+
+        GameHandler game = newSinglePlayerGame(level);
+        PveSectionController ctrl = new PveSectionController(level, game, game.getBoards().size(), new Recorder());
+        PveModeData data = new PveModeData();
+
+        ctrl.populateModeData(data, 9999);
+        assertEquals(-1L, data.scoreHudTarget);
+        assertFalse(data.scoreHudPassed);
     }
 
     @Test

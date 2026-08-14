@@ -461,6 +461,12 @@ public class GameScreen extends MenuScreen {
         }
 
         BoardRenderer.getInstance().drawBoardGrid(board, originX, originY, tileSize, shapes);
+        if (game.getMode() == GameMode.PVE && latestPveMode != null) {
+            BoardRenderer.getInstance().drawPveScoreRequirement(
+                    board, originX, originY, tileSize, sprites, font,
+                    latestPveMode.sectionScore, latestPveMode.scoreHudTarget,
+                    latestPveMode.scoreHudPassed);
+        }
         if (ripples != null && !exploded && boardIndex == primaryBoardIndex()) {
             ripples.draw(originX, originY, tileSize);
         }
@@ -762,7 +768,7 @@ public class GameScreen extends MenuScreen {
                     spawnBossTextureShards(portrait, destX, destY, portraitSize, portraitSize);
                     bossShardsSpawned = true;
                     spawnBossShockwave(cx, cy,
-                            ShockwaveRenderer.AMPLITUDE_VERY_LOW, ShockwaveRenderer.SPEED_LOW);
+                            ShockwaveRenderer.AMPLITUDE_LOW, ShockwaveRenderer.SPEED_NORMAL);
                 }
             }
         }
@@ -963,7 +969,7 @@ public class GameScreen extends MenuScreen {
             }
             if (latestPveMode.bossAttackShockwave) {
                 spawnBossShockwave(cx, cy,
-                        ShockwaveRenderer.AMPLITUDE_LOW, ShockwaveRenderer.SPEED_NORMAL);
+                        ShockwaveRenderer.AMPLITUDE_VERY_LOW, ShockwaveRenderer.SPEED_LOW);
             }
         }
     }

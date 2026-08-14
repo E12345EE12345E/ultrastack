@@ -20,27 +20,25 @@ public final class PveLevelRegistry {
         public final String name;
         public final String[] difficultyJsonPaths;
         public final PveLootTable loot;
-        private final PveLevelData[] cache;
 
         private Entry(int id, String name, String[] difficultyJsonPaths, PveLootTable loot) {
             this.id = id;
             this.name = name;
             this.difficultyJsonPaths = difficultyJsonPaths;
             this.loot = loot;
-            this.cache = new PveLevelData[difficultyJsonPaths.length];
         }
 
         public int difficultyCount() {
             return difficultyJsonPaths.length;
         }
 
-        /** Loads (and caches) the level data for {@code difficulty}, or {@code null} if out of range. */
+        /**
+         * Loads the level data for {@code difficulty} from disk, or {@code null} if out of range.
+         * Reloads every call so JSON edits apply on the next game start without restarting the process.
+         */
         public synchronized PveLevelData load(int difficulty) {
             if (difficulty < 0 || difficulty >= difficultyJsonPaths.length) return null;
-            if (cache[difficulty] == null) {
-                cache[difficulty] = PveLevelLoader.load(difficultyJsonPaths[difficulty]);
-            }
-            return cache[difficulty];
+            return PveLevelLoader.load(difficultyJsonPaths[difficulty]);
         }
     }
 

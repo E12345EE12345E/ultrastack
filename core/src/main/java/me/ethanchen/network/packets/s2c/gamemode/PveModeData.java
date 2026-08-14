@@ -16,6 +16,13 @@ public class PveModeData {
     public long sectionTimeoutMs = -1;
     /** Score gained during the current section (drives SCORE criteria). */
     public long sectionScore;
+    /**
+     * Lowest unmet SCORE requirement for the playfield overlay, or the highest SCORE
+     * requirement once all are met. {@code -1} when the section has no SCORE criterion.
+     */
+    public long scoreHudTarget = -1;
+    /** True when at least one SCORE criterion of the current section is already satisfied. */
+    public boolean scoreHudPassed;
     /** Session-wide aggregate score across every board. */
     public long totalScore;
     /** This broadcast board's own accumulated score. */

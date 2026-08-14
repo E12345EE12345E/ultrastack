@@ -48,7 +48,7 @@
         "garbage": [
           {
             "intervalMs": 2000,
-            "initialMs": 1999,
+            "initialMs": 0,
             "style": "DEFAULT",
             "amount": 1
           }
@@ -79,7 +79,7 @@
         "garbage": [
           {
           "intervalMs": 4000,
-          "initialMs": 3999,
+          "initialMs": 0,
           "style": "DEFAULT",
           "amount": 1
           }

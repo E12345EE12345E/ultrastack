@@ -102,6 +102,8 @@ public class PveSectionController {
         PveSection section = (level.sections != null && sectionIndex >= 0 && sectionIndex < level.sections.length)
                 ? level.sections[sectionIndex] : null;
         out.sectionTimeoutMs = (section != null && section.hasTimeout()) ? section.timeoutMs : -1L;
+        out.scoreHudTarget = (section != null) ? section.hudScoreTarget(out.sectionScore) : -1L;
+        out.scoreHudPassed = section != null && section.anyScoreRequirementMet(out.sectionScore);
         out.displayMode = (section != null && section.display != null) ? section.display : PveBoardDisplay.BOARD_DEFAULT;
         if (bossController != null) {
             out.bossId = bossController.getBossId();

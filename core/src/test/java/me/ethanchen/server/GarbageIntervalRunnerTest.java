@@ -23,12 +23,21 @@ class GarbageIntervalRunnerTest {
         runner.reset(new GarbageInterval[]{ new GarbageInterval(1000, 500, GarbageStyle.DEFAULT, 2) });
 
         assertEquals(0, runner.tick(400));
-        // Crossing the 500ms initial mark should immediately count toward the first interval too,
-        // but not fire until a full intervalMs (1000ms) has additionally elapsed.
-        assertEquals(0, runner.tick(100)); // now at 500ms elapsed (initial just crossed)
-        assertEquals(0, runner.tick(900)); // 1400ms total: 900ms past the initial mark, not yet 1000
-        assertEquals(2, runner.tick(100)); // 1500ms total: 1000ms past the initial mark -> fires
+        // First wave fires at initialMs (500), not at initialMs + intervalMs.
+        assertEquals(2, runner.tick(100)); // 500ms: first wave
+        assertEquals(0, runner.tick(900)); // 1400ms: next wave is due at 1500
+        assertEquals(2, runner.tick(100)); // 1500ms: second wave
         assertEquals(GarbageStyle.DEFAULT, runner.style());
+    }
+
+    @Test
+    void initialMsZeroFiresImmediatelyThenOnInterval() {
+        GarbageIntervalRunner runner = new GarbageIntervalRunner();
+        runner.reset(new GarbageInterval[]{ new GarbageInterval(1000, 0, GarbageStyle.DEFAULT, 1) });
+
+        assertEquals(1, runner.tick(1)); // first wave at t=0
+        assertEquals(0, runner.tick(998));
+        assertEquals(1, runner.tick(1)); // second wave at t=1000
     }
 
     @Test
@@ -36,8 +45,8 @@ class GarbageIntervalRunnerTest {
         GarbageIntervalRunner runner = new GarbageIntervalRunner();
         runner.reset(new GarbageInterval[]{ new GarbageInterval(100, 0, GarbageStyle.DOUBLE_HOLE, 1) });
 
-        // A single large tick spanning 3.5 intervals should fire 3 times (amount=1 each).
-        assertEquals(3, runner.tick(350));
+        // initialMs=0 fires at t=0, then 100/200/300 → 4 waves in a 350ms tick.
+        assertEquals(4, runner.tick(350));
         assertEquals(GarbageStyle.DOUBLE_HOLE, runner.style());
     }
 
@@ -49,18 +58,20 @@ class GarbageIntervalRunnerTest {
                 new GarbageInterval(300, 0, GarbageStyle.DEFAULT, 5),
         });
 
-        // At t=300: interval 1 has fired once (200), interval 2 has fired once (300) -> total 1+5=6
-        assertEquals(6, runner.tick(300));
+        // initialMs=0: each interval also fires immediately at t=0, then on its own cadence.
+        // t=300: (0+200) + (0+300) → 1+1+5+5=12
+        assertEquals(12, runner.tick(300));
     }
 
     @Test
     void resetClearsAccumulatedProgress() {
         GarbageIntervalRunner runner = new GarbageIntervalRunner();
-        runner.reset(new GarbageInterval[]{ new GarbageInterval(1000, 0, GarbageStyle.DEFAULT, 1) });
-        runner.tick(900);
+        runner.reset(new GarbageInterval[]{ new GarbageInterval(1000, 500, GarbageStyle.DEFAULT, 1) });
+        assertEquals(0, runner.tick(400));
 
-        runner.reset(new GarbageInterval[]{ new GarbageInterval(1000, 0, GarbageStyle.DEFAULT, 1) });
-        assertEquals(0, runner.tick(200)); // would have fired at 900+200=1100 if not reset
+        runner.reset(new GarbageInterval[]{ new GarbageInterval(1000, 500, GarbageStyle.DEFAULT, 1) });
+        assertEquals(0, runner.tick(400)); // would have fired at 500 if not reset
+        assertEquals(1, runner.tick(100));
     }
 
     @Test

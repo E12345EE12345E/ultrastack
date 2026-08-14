@@ -227,6 +227,61 @@ public class BoardRenderer {
     }
 
     /**
+     * Draws the current PvE SCORE requirement as a translucent watermark in the upper center
+     * of the playfield. Drawn after the grid and before tiles so pieces cover it. No-op when
+     * {@code target < 0} (section has no SCORE criterion).
+     *
+     * <p>Caller must NOT have an open SpriteBatch or ShapeRenderer begin/end around this call.
+     */
+    public void drawPveScoreRequirement(Board board, float originX, float originY, float tileSize,
+                                        SpriteBatch sprites, BitmapFont font,
+                                        long sectionScore, long target, boolean passed) {
+        if (board == null || font == null || sprites == null || target < 0L) return;
+
+        String text = sectionScore + "/" + target;
+        GlyphLayout layout = new GlyphLayout();
+        float savedX = font.getScaleX();
+        float savedY = font.getScaleY();
+        Color saved = font.getColor();
+        float sr = saved.r, sg = saved.g, sb = saved.b, sa = saved.a;
+
+        font.getData().setScale(1f);
+        float lh = font.getData().lineHeight;
+        if (lh <= 0f) {
+            font.getData().setScale(savedX, savedY);
+            return;
+        }
+        float boardW = board.bw() * tileSize;
+        float boardH = board.bh() * tileSize;
+        float fs = 2.4f * tileSize / lh;
+        font.getData().setScale(fs);
+        layout.setText(font, text);
+        float maxW = boardW * 0.82f;
+        if (layout.width > maxW && layout.width > 0f) {
+            fs *= maxW / layout.width;
+            font.getData().setScale(fs);
+            layout.setText(font, text);
+        }
+
+        float x = originX + (boardW - layout.width) * 0.5f;
+        float y = originY + boardH * 0.78f + layout.height * 0.5f;
+
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        sprites.begin();
+        if (passed) {
+            font.setColor(0.35f, 0.85f, 0.40f, 0.32f);
+        } else {
+            font.setColor(0.55f, 0.55f, 0.55f, 0.32f);
+        }
+        font.draw(sprites, text, x, y);
+        sprites.end();
+
+        font.setColor(sr, sg, sb, sa);
+        font.getData().setScale(savedX, savedY);
+    }
+
+    /**
      * Draws all live particles.
      * Each particle's board-space position is converted to screen pixels using the same
      * {@code originX/Y} and {@code tileSize} passed to {@link #drawBoard}.
