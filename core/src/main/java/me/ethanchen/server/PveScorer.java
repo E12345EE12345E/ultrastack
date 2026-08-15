@@ -37,7 +37,7 @@ class PveScorer {
 
     long scoreHardDrop(LineClearResult result, PlacementEffects effects) {
         // PvE keeps a fixed gravity unless a section/boss env overrides it — no clear-based ramp.
-        return ScoreFormulas.scoreHardDrop(state, game, boardIndex, result, effects, bonusProvider, false);
+        return ScoreFormulas.scoreHardDrop(state, game, boardIndex, result, effects, bonusProvider, false, false);
     }
 
     long scoreFallingClear(LineClearResult result, PlacementEffects effects) {

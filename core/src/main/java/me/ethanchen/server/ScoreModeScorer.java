@@ -35,7 +35,7 @@ class ScoreModeScorer {
     long getTotalScore() { return state.totalScore; }
 
     long scoreHardDrop(LineClearResult result, PlacementEffects effects) {
-        return ScoreFormulas.scoreHardDrop(state, game, boardIndex, result, effects, bonusProvider, true);
+        return ScoreFormulas.scoreHardDrop(state, game, boardIndex, result, effects, bonusProvider, true, true);
     }
 
     long scoreFallingClear(LineClearResult result, PlacementEffects effects) {

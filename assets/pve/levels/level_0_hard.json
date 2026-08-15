@@ -100,7 +100,7 @@
       "timeoutMs": -1,
       "display": "BOARD_BOSSFIGHT",
       "env": {
-        "bossId": 0,
+        "bossId": 1,
         "garbage": []
       }
     }

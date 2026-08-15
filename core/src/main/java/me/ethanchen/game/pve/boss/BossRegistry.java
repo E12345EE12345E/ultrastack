@@ -20,7 +20,7 @@ public final class BossRegistry {
                     new BossAttack[]{
                         BossAttack.addGarbage(
                             4000,
-                            2000,
+                            3000,
                             800,
                             600,
                             4,
@@ -33,6 +33,64 @@ public final class BossRegistry {
                 ),
                 new BossPhaseDef(
                     6_000,
+                    2000L,
+                    new BossAttack[]{
+                        BossAttack.addGarbage(
+                            4000,
+                            3000,
+                            800,
+                            600,
+                            4,
+                            GarbageStyle.DEFAULT,
+                            true
+                        ),
+                        BossAttack.addGarbage(
+                            1000,
+                            2000,
+                            400,
+                            200,
+                            2,
+                            GarbageStyle.DEFAULT,
+                            false
+                        ),
+                        BossAttack.addGarbage(
+                            1000,
+                            2000,
+                            400,
+                            200,
+                            2,
+                            GarbageStyle.DEFAULT,
+                            false
+                        )
+                    },
+                    8f,
+                    48f
+                )
+            )
+        );
+        register(
+            new BossDef(
+                1,
+                BossIntroAnim.FLOAT_IN,
+                new BossPhaseDef(
+                    8_000,
+                    2000L,
+                    new BossAttack[]{
+                        BossAttack.addGarbage(
+                            4000,
+                            2000,
+                            800,
+                            600,
+                            4,
+                            GarbageStyle.DEFAULT,
+                            true
+                        )
+                    },
+                    8f,
+                    48f
+                ),
+                new BossPhaseDef(
+                    8_000,
                     2000L,
                     new BossAttack[]{
                         BossAttack.addGarbage(

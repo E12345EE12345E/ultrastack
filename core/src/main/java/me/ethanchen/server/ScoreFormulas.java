@@ -72,12 +72,13 @@ final class ScoreFormulas {
      * {@code rampGravityOnClear} is true (score modes), gravity ramps after each clear; PvE
      * passes false so gravity stays fixed unless a section/boss env sets it.
      *
+     * @param spawnMultiplierPopup when false (PvE), only the {@code +N} score popup is queued
      * @return points awarded (0 when no lines cleared)
      */
     static long scoreHardDrop(BoardScoreState state, GameHandler game, int boardIndex,
                               LineClearResult result, PlacementEffects effects,
                               CharacterScoreBonusProvider bonusProvider,
-                              boolean rampGravityOnClear) {
+                              boolean rampGravityOnClear, boolean spawnMultiplierPopup) {
         int lines = result.numClearedRows();
         if (lines == 0) {
             game.applyClearToCounters(result);
@@ -113,7 +114,7 @@ final class ScoreFormulas {
                 | (diffColBonus ? 2 : 0)
                 | (comboBonus ? 4 : 0)
                 | (glowBonus ? 8 : 0);
-        queueScorePopups(effects, boardIndex, result, points, bonusBits);
+        queueScorePopups(effects, boardIndex, result, points, spawnMultiplierPopup ? bonusBits : 0);
 
         if (glowBonus) state.glowPlayerId = -1;
         if (eligible && state.boardSlots.length > 1) {
