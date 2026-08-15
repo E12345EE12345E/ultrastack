@@ -4,9 +4,11 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 
@@ -132,9 +134,7 @@ public class ShockwaveRenderer implements ShaderRenderer {
      */
     public void begin() {
         if (capturing) return;
-        int sw = Gdx.graphics.getWidth();
-        int sh = Gdx.graphics.getHeight();
-        ensureFboSize(sw, sh);
+        ensureFboSize(bufferW(), bufferH());
         if (fbo == null) return;
 
         fbo.begin();
@@ -156,6 +156,8 @@ public class ShockwaveRenderer implements ShaderRenderer {
     private void blit() {
         if (fboRegion == null || shader == null || !shader.isCompiled()) return;
 
+        // Match the app's logical-camera + HDPI viewport so the copy is 1:1 with a normal frame.
+        HdpiUtils.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         int sw = Gdx.graphics.getWidth();
         int sh = Gdx.graphics.getHeight();
         proj.setToOrtho2D(0, 0, sw, sh);
@@ -169,7 +171,7 @@ public class ShockwaveRenderer implements ShaderRenderer {
 
         shader.bind();
         if (shader.hasUniform("u_resolution")) {
-            shader.setUniformf("u_resolution", sw, sh);
+            shader.setUniformf("u_resolution", (float) bufferW(), (float) bufferH());
         }
         if (shader.hasUniform("u_waveCount")) {
             shader.setUniformi("u_waveCount", waveCount);
@@ -193,10 +195,14 @@ public class ShockwaveRenderer implements ShaderRenderer {
             shader.setUniformf("u_thickness", THICKNESS);
         }
 
+        // The FBO already holds the composited scene. A second SRC_ALPHA blend would
+        // restripe translucent grid lines (alpha 0.5) and pop when the effect ends.
+        batch.disableBlending();
         batch.begin();
         batch.setColor(Color.WHITE);
         batch.draw(fboRegion, 0, 0, sw, sh);
         batch.end();
+        batch.enableBlending();
         batch.setShader(null);
     }
 
@@ -226,12 +232,23 @@ public class ShockwaveRenderer implements ShaderRenderer {
         if (w == fboWidth && h == fboHeight && fbo != null) return;
         if (fbo != null) fbo.dispose();
         fbo = new FrameBuffer(Pixmap.Format.RGBA8888, w, h, false);
-        fboRegion = new TextureRegion(fbo.getColorBufferTexture());
+        Texture tex = fbo.getColorBufferTexture();
+        tex.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        tex.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+        fboRegion = new TextureRegion(tex);
         fboRegion.flip(false, true);
         fboWidth = w;
         fboHeight = h;
         proj.setToOrtho2D(0, 0, w, h);
         batch.setProjectionMatrix(proj);
+    }
+
+    private static int bufferW() {
+        return Math.max(1, Gdx.graphics.getBackBufferWidth());
+    }
+
+    private static int bufferH() {
+        return Math.max(1, Gdx.graphics.getBackBufferHeight());
     }
 
     private static float aspectLen(float x0, float y0, float x1, float y1, float aspectX) {

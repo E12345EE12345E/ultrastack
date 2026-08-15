@@ -1,5 +1,5 @@
 {
-  "difficultyRank": 20,
+  "difficultyRank": 40,
   "board1": {
     "width": 10,
     "height": 24,
@@ -26,9 +26,9 @@
     },
     {
       "pass": [
-        [{ "type": "SCORE", "value": 8000 }],
+        [{ "type": "SCORE", "value": 12000 }],
         [
-          { "type": "SCORE", "value": 3500 },
+          { "type": "SCORE", "value": 6000 },
           { "type": "TIME", "value": 90000 }
         ]
       ],
@@ -47,7 +47,7 @@
         "bossId": -1,
         "garbage": [
           {
-            "intervalMs": 2000,
+            "intervalMs": 1200,
             "initialMs": 0,
             "style": "DEFAULT",
             "amount": 1
@@ -66,9 +66,9 @@
     },
     {
       "pass": [
-        [{ "type": "SCORE", "value": 6000 }],
+        [{ "type": "SCORE", "value": 8000 }],
         [
-          { "type": "SCORE", "value": 2500 },
+          { "type": "SCORE", "value": 4000 },
           { "type": "TIME", "value": 90000 }
         ]
       ],
@@ -87,7 +87,7 @@
       }
     },
     {
-      "pass": [[{ "type": "TIME", "value": 10000 }]],
+      "pass": [[{ "type": "TIME", "value": 5000 }]],
       "timeoutMs": -1,
       "display": "BOARD_DEFAULT",
       "env": {

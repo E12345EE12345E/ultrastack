@@ -33,6 +33,26 @@ public final class PveLevelRegistry {
         }
 
         /**
+         * Display name for {@code difficulty}, taken from the JSON filename: the text after the
+         * last {@code _} and before {@code .json} (e.g. {@code level_0_normal.json} → {@code Normal}).
+         * The first character is capitalized when it is a letter.
+         */
+        public String difficultyName(int difficulty) {
+            if (difficulty < 0 || difficulty >= difficultyJsonPaths.length) return String.valueOf(difficulty + 1);
+            String path = difficultyJsonPaths[difficulty];
+            int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+            String file = slash >= 0 ? path.substring(slash + 1) : path;
+            int dot = file.lastIndexOf('.');
+            if (dot >= 0) file = file.substring(0, dot);
+            int under = file.lastIndexOf('_');
+            String name = (under >= 0 && under < file.length() - 1) ? file.substring(under + 1) : file;
+            if (!name.isEmpty() && Character.isLetter(name.charAt(0))) {
+                return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+            }
+            return name;
+        }
+
+        /**
          * Loads the level data for {@code difficulty} from disk, or {@code null} if out of range.
          * Reloads every call so JSON edits apply on the next game start without restarting the process.
          */
@@ -52,10 +72,10 @@ public final class PveLevelRegistry {
 
     private static void registerBuiltins() {
         // Level 0: T-piece artifacts at random level 2 or 3 (implementation.md, Part 4).
-        register(0, "Level 0", new String[]{ "pve/levels/level_0_normal.json" }, (rng, xp) -> {
-            int level = rng.nextBoolean() ? 2 : 3;
-            float baseQuality = 20f + rng.nextFloat() * 20f;
-            return ArtifactRoller.roll(Piece.T, level, baseQuality, rng != null ? rng : new Random());
+        register(0, "Level 0", new String[]{ "pve/levels/level_0_normal.json", "pve/levels/level_0_hard.json" }, (rng, xp, difficulty) -> {
+            int level = difficulty == 0 ? 1 : 2;
+            float baseQuality = (difficulty == 0 ? 60f : 20f) + rng.nextFloat() * 20f;
+            return ArtifactRoller.roll((byte) rng.nextInt(7), level, baseQuality, rng);
         });
     }
 

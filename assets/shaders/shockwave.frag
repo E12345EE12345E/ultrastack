@@ -1,5 +1,5 @@
 #ifdef GL_ES
-precision mediump float;
+precision highp float;
 #endif
 
 varying vec4 v_color;
@@ -27,13 +27,14 @@ void addWave(inout vec2 offset, inout float highlight,
     float radius = progress * maxRadius;
     float x = (dist - radius) / max(u_thickness, 1e-4);
     float envelope = exp(-x * x);
-    // Derivative-of-Gaussian: pixels just inside the front pull out, just outside push away.
-    float disp = envelope * x * amplitude * (1.0 - progress);
+    // Reach zero displacement before the wave is culled so the last frames are an identity blit.
+    float ampFade = 1.0 - smoothstep(0.70, 0.92, progress);
+    float disp = envelope * x * amplitude * ampFade;
     vec2 dir = fromCenter / dist;
     vec2 o = dir * disp;
     o.x /= aspect.x;
     offset += o;
-    highlight += envelope * 0.18 * crest;
+    highlight += envelope * 0.18 * crest * ampFade;
 }
 
 void main() {
@@ -47,6 +48,10 @@ void main() {
     if (u_waveCount > 1) addWave(offset, highlight, uv, aspect, u_centers[1], u_progress[1], u_maxRadius[1], u_amplitudes[1], u_crest[1]);
     if (u_waveCount > 2) addWave(offset, highlight, uv, aspect, u_centers[2], u_progress[2], u_maxRadius[2], u_amplitudes[2], u_crest[2]);
     if (u_waveCount > 3) addWave(offset, highlight, uv, aspect, u_centers[3], u_progress[3], u_maxRadius[3], u_amplitudes[3], u_crest[3]);
+
+    vec2 texel = 1.0 / max(u_resolution, vec2(1.0));
+    if (abs(offset.x) < texel.x * 0.5) offset.x = 0.0;
+    if (abs(offset.y) < texel.y * 0.5) offset.y = 0.0;
 
     vec4 color = texture2D(u_texture, uv + offset);
     color.rgb = mix(color.rgb, vec3(1.0), clamp(highlight, 0.0, 0.28));

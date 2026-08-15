@@ -3,7 +3,10 @@ package me.ethanchen.lwjgl3.menuscreens;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.pve.PveLevelRegistry;
@@ -22,9 +25,14 @@ import me.ethanchen.network.packets.c2s.StartGameRequest;
  * launch, and (for PvE) which level/difficulty. Reached from {@link MultiplayerLobby}.
  */
 public class LobbySettingsScreen extends MenuScreen {
+    private static final double DIFFICULTY_X = 0.18;
+    private static final double DIFFICULTY_Y = 0.125;
+    private static final double DIFFICULTY_W = 0.32;
+    private static final double DIFFICULTY_H = 0.1;
+
     private final MultiplayerLobby chatScreen;
     private final UIButton modeButton;
-    private UIButton difficultyButton;
+    private final UIButton difficultyButton;
     private final LobbySettings settings;
 
     public LobbySettingsScreen(ClientApp app, MultiplayerLobby chatScreen) {
@@ -44,12 +52,30 @@ public class LobbySettingsScreen extends MenuScreen {
             } else {
                 clampSelectionToUnlocked();
             }
-            rebuildDifficultyButton();
+            syncDifficultyButton();
             sendLobbySettings();
         };
         elements.add(modeButton);
 
-        rebuildDifficultyButton();
+        // Keep this in `elements` for the screen's lifetime. Adding/removing it from a click
+        // handler races MenuScreen's for-each over the same list (ConcurrentModificationException).
+        difficultyButton = new UIButton(DIFFICULTY_X, DIFFICULTY_Y, DIFFICULTY_W, DIFFICULTY_H,
+                "Difficulty: 1", null) {
+            @Override
+            public void render(ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
+                if (width <= 0 || height <= 0) return;
+                super.render(shapes, sprites, font);
+            }
+        };
+        difficultyButton.action = () -> {
+            PveLevelRegistry.Entry e = PveLevelRegistry.byId(settings.pveLevelId);
+            if (e == null || e.difficultyCount() <= 1) return;
+            settings.pveDifficulty = (settings.pveDifficulty + 1) % e.difficultyCount();
+            syncDifficultyButton();
+            sendLobbySettings();
+        };
+        elements.add(difficultyButton);
+        syncDifficultyButton();
 
         elements.add(new UIButton(0.5, 0.125, 0.3, 0.1, "Start Game", () -> {
             StartGameRequest p = new StartGameRequest();
@@ -59,24 +85,22 @@ public class LobbySettingsScreen extends MenuScreen {
         elements.add(new UIButton(0.82, 0.125, 0.28, 0.1, "View Chat", () -> app.switchMenu(chatScreen)));
     }
 
-    private void rebuildDifficultyButton() {
-        if (difficultyButton != null) {
-            elements.remove(difficultyButton);
-            difficultyButton = null;
+    /** Shows the difficulty cycle button only for PvE levels that register more than one JSON. */
+    private void syncDifficultyButton() {
+        PveLevelRegistry.Entry entry = settings.gamemode == GameMode.PVE
+                ? PveLevelRegistry.byId(settings.pveLevelId) : null;
+        boolean show = entry != null && entry.difficultyCount() > 1;
+        if (show) {
+            difficultyButton.centerX = DIFFICULTY_X;
+            difficultyButton.centerY = DIFFICULTY_Y;
+            difficultyButton.width = DIFFICULTY_W;
+            difficultyButton.height = DIFFICULTY_H;
+            difficultyButton.text = "Difficulty: " + entry.difficultyName(settings.pveDifficulty);
+        } else {
+            difficultyButton.width = 0;
+            difficultyButton.height = 0;
+            difficultyButton.centerY = -1;
         }
-        if (settings.gamemode != GameMode.PVE) return;
-        PveLevelRegistry.Entry entry = PveLevelRegistry.byId(settings.pveLevelId);
-        if (entry == null || entry.difficultyCount() <= 1) return;
-        difficultyButton = new UIButton(0.5, 0.175, 0.32, 0.07,
-                "Difficulty: " + (settings.pveDifficulty + 1), null);
-        difficultyButton.action = () -> {
-            PveLevelRegistry.Entry e = PveLevelRegistry.byId(settings.pveLevelId);
-            if (e == null || e.difficultyCount() <= 1) return;
-            settings.pveDifficulty = (settings.pveDifficulty + 1) % e.difficultyCount();
-            difficultyButton.text = "Difficulty: " + (settings.pveDifficulty + 1);
-            sendLobbySettings();
-        };
-        elements.add(difficultyButton);
     }
 
     private void sendLobbySettings() {
@@ -137,6 +161,7 @@ public class LobbySettingsScreen extends MenuScreen {
     public void update() {
         // Keep the mode label in sync if a LobbySettingsBroadcast arrives while this screen is open.
         modeButton.text = modeLabel(settings.gamemode);
+        syncDifficultyButton();
     }
 
     @Override
@@ -247,7 +272,7 @@ public class LobbySettingsScreen extends MenuScreen {
             if (screenX >= x && screenX <= x + size && mouseY >= y && mouseY <= y + size) {
                 settings.pveLevelId = levelId;
                 settings.pveDifficulty = 0;
-                rebuildDifficultyButton();
+                syncDifficultyButton();
                 sendLobbySettings();
                 return true;
             }

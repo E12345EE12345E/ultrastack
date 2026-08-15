@@ -842,7 +842,7 @@ public class GameRoom implements Runnable, GameRoomContext {
             for (Seat s : m.seats) {
                 if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
                 PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
-                Artifact artifact = session.loot.roll(artifactRng, xp);
+                Artifact artifact = session.loot.roll(artifactRng, xp, session.difficulty);
                 if (artifact == null) continue;
                 profile.inventory.add(artifact);
                 profile.sortInventory();

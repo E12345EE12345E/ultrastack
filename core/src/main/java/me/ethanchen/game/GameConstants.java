@@ -34,9 +34,9 @@ public final class GameConstants {
     public static final long HARD_DROP_SUPPRESS_MS = 250L;
 
     // Blocked-spawn cycling / explode countdown tuning.
-    public static final float CYCLE_START = 1.2f;
+    public static final float CYCLE_START = 1.6f;
     public static final float CYCLE_MULT = 0.8f;
-    public static final float CYCLE_MIN = 0.35f;
+    public static final float CYCLE_MIN = 0.5f;
     public static final long COYOTE_MS = 50L;
     public static final float EXPLODE_DURATION = 1.6f;
     public static final float EXPLODE_MIN_INTERVAL = 0.1f;
