@@ -243,9 +243,9 @@ public class UIInventoryButton extends UIElement {
 
     @Override
     public void handleClick(int screenX, int screenY, int button) {
-        // Use the same screen-space rect as hover drawing. {@link #isClicked} goes through
-        // relative+HDPI conversion which can disagree with that rect (especially near the top
-        // of an aspect-locked canvas), so hover would light up but the click would miss.
+        // Same screen-space rect as hover drawing. Simple UI draws a square from width
+        // ({@code pxH = pxW}), which {@link #isClicked} would interpret as a window-relative
+        // height and miss.
         if (!containsScreenPoint(screenX, screenY)) return;
         if (button == Input.Buttons.RIGHT) {
             if (secondaryAction != null) {

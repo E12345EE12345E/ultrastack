@@ -7,7 +7,6 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 
@@ -112,13 +111,13 @@ public abstract class MenuScreen extends InputAdapter {
     public static float convertToRelCoordsX(int screenX) {
         AspectLockedViewport vp = AspectLockedViewport.current();
         if (vp != null) return vp.toRelX(screenX);
-        return (float) HdpiUtils.toBackBufferX(screenX) / Gdx.graphics.getWidth();
+        return (float) screenX / Gdx.graphics.getWidth();
     }
 
     public static float convertToRelCoordsY(int screenY) {
         AspectLockedViewport vp = AspectLockedViewport.current();
         if (vp != null) return vp.toRelY(screenY);
-        return (float) (Gdx.graphics.getHeight() - HdpiUtils.toBackBufferY(screenY)) / Gdx.graphics.getHeight();
+        return (float) (Gdx.graphics.getHeight() - screenY) / Gdx.graphics.getHeight();
     }
 
     /**

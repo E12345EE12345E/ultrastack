@@ -1,7 +1,6 @@
 package me.ethanchen.lwjgl3.menuscreens.ui;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 
 /**
  * Fits a fixed design resolution (e.g. 1920×1080) into the current window using the largest
@@ -71,13 +70,11 @@ public final class AspectLockedViewport {
     }
 
     public float toRelX(int screenX) {
-        float backX = HdpiUtils.toBackBufferX(screenX);
-        return (backX - originX) / viewW;
+        return (screenX - originX) / viewW;
     }
 
     public float toRelY(int screenY) {
-        float backYFromTop = HdpiUtils.toBackBufferY(screenY);
-        float backYFromBottom = Gdx.graphics.getHeight() - backYFromTop;
-        return (backYFromBottom - originY) / viewH;
+        float yFromBottom = Gdx.graphics.getHeight() - screenY;
+        return (yFromBottom - originY) / viewH;
     }
 }

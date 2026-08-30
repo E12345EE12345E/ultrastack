@@ -45,7 +45,7 @@ public final class BossRegistry {
                             true
                         ),
                         BossAttack.addGarbage(
-                            1000,
+                            2000,
                             2000,
                             400,
                             200,
@@ -54,7 +54,7 @@ public final class BossRegistry {
                             false
                         ),
                         BossAttack.addGarbage(
-                            1000,
+                            2000,
                             2000,
                             400,
                             200,

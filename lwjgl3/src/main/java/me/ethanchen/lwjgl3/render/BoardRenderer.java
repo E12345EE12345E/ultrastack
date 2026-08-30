@@ -253,7 +253,7 @@ public class BoardRenderer {
         }
         float boardW = board.bw() * tileSize;
         float boardH = board.bh() * tileSize;
-        float fs = 2.4f * tileSize / lh;
+        float fs = 3.0f * tileSize / lh;
         font.getData().setScale(fs);
         layout.setText(font, text);
         float maxW = boardW * 0.82f;
@@ -270,9 +270,9 @@ public class BoardRenderer {
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         sprites.begin();
         if (passed) {
-            font.setColor(0.35f, 0.85f, 0.40f, 0.32f);
+            font.setColor(0.35f, 0.85f, 0.40f, 0.50f);
         } else {
-            font.setColor(0.55f, 0.55f, 0.55f, 0.32f);
+            font.setColor(0.55f, 0.55f, 0.55f, 0.50f);
         }
         font.draw(sprites, text, x, y);
         sprites.end();
