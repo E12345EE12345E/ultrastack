@@ -41,6 +41,32 @@ public class PieceQueue {
         return (byte)(int)this.pieceIDs.remove(0);
     }
 
+    /** Returns the upcoming piece at {@code index} (0 = next to spawn) without consuming it. */
+    public byte peek(int index) {
+        if (index < 0) return 0;
+        ensureAvailable(index + 1);
+        return (byte) (int) pieceIDs.get(index);
+    }
+
+    /** Returns the next {@code count} upcoming piece types without consuming them. */
+    public byte[] peekMany(int count) {
+        int n = Math.max(0, count);
+        byte[] out = new byte[n];
+        if (n == 0) return out;
+        ensureAvailable(n);
+        for (int i = 0; i < n; i++) {
+            out[i] = (byte) (int) pieceIDs.get(i);
+        }
+        return out;
+    }
+
+    private void ensureAvailable(int count) {
+        refill();
+        while (pieceIDs.size() < count) {
+            pieceIDs.addAll(generateNextBag());
+        }
+    }
+
     private static final byte[] BAG_3MINO_EXTRAS = {
         Piece.J, Piece.L, Piece.S, Piece.Z, Piece.O
     };

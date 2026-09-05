@@ -12,7 +12,7 @@ import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.Tile;
 
 /**
- * Stateless HUD draw helpers extracted from {@link BoardRenderer}: hold box, timer boxes.
+ * Stateless HUD draw helpers extracted from {@link BoardRenderer}: hold box, next box, timer boxes.
  *
  * <p>All methods are package-private statics — they are only meant to be called by
  * {@link BoardRenderer}, which owns the GL resources and the public API surface.
@@ -40,36 +40,44 @@ final class BoardHudRenderer {
                             ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font,
                             BoardRenderer renderer) {
         drawOutlinedBox("HOLD", x, y, boxSize, tileSize, shapes, sprites, font);
-
         if (heldType == 0) return;
-
-        Piece piece = Piece.defaultPiece(heldType);
-        float minTX = Float.MAX_VALUE, maxTX = -Float.MAX_VALUE;
-        float minTY = Float.MAX_VALUE, maxTY = -Float.MAX_VALUE;
-        for (Vector2 t : piece.tiles) {
-            minTX = Math.min(minTX, t.x);
-            maxTX = Math.max(maxTX, t.x + 1f);
-            minTY = Math.min(minTY, t.y);
-            maxTY = Math.max(maxTY, t.y + 1f);
-        }
-        float centerX = x + boxSize * 0.5f;
-        float centerY = y + boxSize * 0.35f;
-        float offsetX = centerX - (minTX + (maxTX - minTX) * 0.5f) * tileSize;
-        float offsetY = centerY - (minTY + (maxTY - minTY) * 0.5f) * tileSize;
-
-        Color tint = available ? PieceTints.forType(heldType) : HOLD_GRAYSCALE;
         sprites.begin();
-        for (int i = 0; i < piece.tiles.length; i++) {
-            float sx = offsetX + piece.tiles[i].x * tileSize;
-            float sy = offsetY + piece.tiles[i].y * tileSize;
-            byte connection = (piece.tileconnectionstates != null && i < piece.tileconnectionstates.length)
-                    ? piece.tileconnectionstates[i] : Tile.SINGLE_TILE;
-            Color bg = available ? PieceTints.forTileBackground(heldType)
-                                 : new Color(0.2f, 0.2f, 0.2f, 1f);
-            sprites.setColor(bg);
-            sprites.draw(renderer.tileBackground, sx, sy, tileSize, tileSize);
-            sprites.setColor(tint);
-            sprites.draw(renderer.tileRegions[connection & 0xF], sx, sy, tileSize, tileSize);
+        drawPreviewPiece(heldType, available, x, y, boxSize, boxSize, tileSize, true, sprites, renderer);
+        sprites.setColor(Color.WHITE);
+        sprites.end();
+    }
+
+    // -------------------------------------------------------------------------
+    // Next box
+    // -------------------------------------------------------------------------
+
+    static final float NEXT_EXTRA_SLOT_TILES = 3f;
+
+    /** Height of a NEXT box: HOLD-sized when showing one piece, then extra slots downward. */
+    static float nextBoxHeight(float boxWidth, float tileSize, int previewCount) {
+        int count = Math.max(1, previewCount);
+        return boxWidth + (count - 1) * tileSize * NEXT_EXTRA_SLOT_TILES;
+    }
+
+    /**
+     * Draws the next-piece box to the right of the board. {@code previewCount} controls how many
+     * upcoming pieces are shown (defaults to 1 at the call site); the box grows downward.
+     */
+    static void drawNextBox(byte[] types, int previewCount,
+                            float x, float y, float boxWidth, float tileSize,
+                            ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font,
+                            BoardRenderer renderer) {
+        int count = Math.max(1, previewCount);
+        float height = nextBoxHeight(boxWidth, tileSize, count);
+        drawOutlinedBox("NEXT", x, y, boxWidth, height, tileSize, shapes, sprites, font);
+
+        sprites.begin();
+        for (int i = 0; i < count; i++) {
+            byte type = (types != null && i < types.length) ? types[i] : 0;
+            if (type == 0) continue;
+            float slotH = (i == 0) ? boxWidth : tileSize * NEXT_EXTRA_SLOT_TILES;
+            float slotY = y + height - boxWidth - i * tileSize * NEXT_EXTRA_SLOT_TILES;
+            drawPreviewPiece(type, true, x, slotY, boxWidth, slotH, tileSize, i == 0, sprites, renderer);
         }
         sprites.setColor(Color.WHITE);
         sprites.end();
@@ -207,6 +215,44 @@ final class BoardHudRenderer {
     // -------------------------------------------------------------------------
     // Shared helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Draws a piece centred in {@code (slotX, slotY, slotW × slotH)}. First slots sit lower
+     * ({@code 0.35}) to clear the box label; later slots are vertically centred.
+     * Caller must have an open SpriteBatch.
+     */
+    private static void drawPreviewPiece(byte type, boolean available,
+                                         float slotX, float slotY, float slotW, float slotH,
+                                         float tileSize, boolean firstSlot,
+                                         SpriteBatch sprites, BoardRenderer renderer) {
+        Piece piece = Piece.defaultPiece(type);
+        float minTX = Float.MAX_VALUE, maxTX = -Float.MAX_VALUE;
+        float minTY = Float.MAX_VALUE, maxTY = -Float.MAX_VALUE;
+        for (Vector2 t : piece.tiles) {
+            minTX = Math.min(minTX, t.x);
+            maxTX = Math.max(maxTX, t.x + 1f);
+            minTY = Math.min(minTY, t.y);
+            maxTY = Math.max(maxTY, t.y + 1f);
+        }
+        float centerX = slotX + slotW * 0.5f;
+        float centerY = slotY + slotH * (firstSlot ? 0.35f : 0.5f);
+        float offsetX = centerX - (minTX + (maxTX - minTX) * 0.5f) * tileSize;
+        float offsetY = centerY - (minTY + (maxTY - minTY) * 0.5f) * tileSize;
+
+        Color tint = available ? PieceTints.forType(type) : HOLD_GRAYSCALE;
+        for (int i = 0; i < piece.tiles.length; i++) {
+            float sx = offsetX + piece.tiles[i].x * tileSize;
+            float sy = offsetY + piece.tiles[i].y * tileSize;
+            byte connection = (piece.tileconnectionstates != null && i < piece.tileconnectionstates.length)
+                    ? piece.tileconnectionstates[i] : Tile.SINGLE_TILE;
+            Color bg = available ? PieceTints.forTileBackground(type)
+                                 : new Color(0.2f, 0.2f, 0.2f, 1f);
+            sprites.setColor(bg);
+            sprites.draw(renderer.tileBackground, sx, sy, tileSize, tileSize);
+            sprites.setColor(tint);
+            sprites.draw(renderer.tileRegions[connection & 0xF], sx, sy, tileSize, tileSize);
+        }
+    }
 
     /**
      * Draws a white-outline square at {@code (x, y, boxSize × boxSize)} and a centred

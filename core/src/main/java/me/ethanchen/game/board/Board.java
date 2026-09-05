@@ -52,6 +52,8 @@ public class Board {
     // Hold state (shared across all players on this board)
     private byte heldPieceType = 0;   // 0 = empty
     private boolean[] playerHoldUsed; // indexed by player; true until that player hard drops
+    /** Seat-major upcoming types from the last light snapshot / queue peek. */
+    private byte[] upcomingPieceTypes;
 
     public boolean[][] getAllowedTiles() { return allowedTiles; }
     public Tile[][] getBoard() { return board; }
@@ -68,6 +70,26 @@ public class Board {
     public ArrayList<FallingColumn> getFallingColumns() { return fallingColumns; }
     public byte getHeldPieceType() { return heldPieceType; }
     public void setHeldPieceType(byte type) { heldPieceType = type; }
+
+    /**
+     * Upcoming piece types for {@code seat}, soonest first. Missing entries are {@code 0}.
+     * On the server this peeks live queues; on the client it reads the last light snapshot.
+     */
+    public byte[] getUpcomingPieceTypes(int seat, int count) {
+        int n = Math.max(0, count);
+        byte[] out = new byte[n];
+        byte[] src = upcomingPieceTypes;
+        if (src == null && pieceQueues != null) {
+            src = peekUpcomingFromQueues();
+        }
+        if (src == null || seat < 0) return out;
+        int stride = GameConstants.NEXT_PREVIEW_MAX;
+        int base = seat * stride;
+        if (base >= src.length) return out;
+        int available = Math.min(n, Math.min(stride, src.length - base));
+        System.arraycopy(src, base, out, 0, available);
+        return out;
+    }
     public boolean isPlayerHoldUsed(int id) {
         return playerHoldUsed != null && id >= 0 && id < playerHoldUsed.length && playerHoldUsed[id];
     }
@@ -133,6 +155,7 @@ public class Board {
         }
         activePieces = new ArrayList<Piece>();
         updateFromNetBoardLight(lightNetBoardFrom(nb));
+        refreshUpcomingFromQueues();
     }
 
     /**
@@ -368,6 +391,7 @@ public class Board {
             piece.justSpawned = true;
             activePieces.add(piece);
         }
+        refreshUpcomingFromQueues();
     }
 
     private Tile[][] emptyBoard() {
@@ -896,6 +920,7 @@ public class Board {
         for (int i = 0; i < fallingColumns.size(); i++) {
             retval.falling[i] = BoardFallingBlocks.toNet(fallingColumns.get(i));
         }
+        retval.nextPieceTypes = peekUpcomingFromQueues();
         return retval;
     }
 
@@ -959,7 +984,25 @@ public class Board {
         if (in.playerHoldUsed != null) {
             playerHoldUsed = Arrays.copyOf(in.playerHoldUsed, in.playerHoldUsed.length);
         }
+        if (in.nextPieceTypes != null) {
+            upcomingPieceTypes = Arrays.copyOf(in.nextPieceTypes, in.nextPieceTypes.length);
+        }
         BoardFallingBlocks.reconcileFromNet(this, in.falling);
+    }
+
+    private void refreshUpcomingFromQueues() {
+        upcomingPieceTypes = peekUpcomingFromQueues();
+    }
+
+    private byte[] peekUpcomingFromQueues() {
+        int seats = pieceQueues != null ? pieceQueues.length : 0;
+        byte[] out = new byte[seats * GameConstants.NEXT_PREVIEW_MAX];
+        for (int s = 0; s < seats; s++) {
+            if (pieceQueues[s] == null) continue;
+            byte[] peeked = pieceQueues[s].peekMany(GameConstants.NEXT_PREVIEW_MAX);
+            System.arraycopy(peeked, 0, out, s * GameConstants.NEXT_PREVIEW_MAX, peeked.length);
+        }
+        return out;
     }
 
     // Static

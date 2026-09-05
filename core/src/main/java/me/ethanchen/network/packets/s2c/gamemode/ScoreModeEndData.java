@@ -26,4 +26,6 @@ public class ScoreModeEndData {
     public int[] tSpinTriples;
     /** Per-player count of all-spin line clears (non-T pieces), indexed by player slot. */
     public int[] allSpinClears;
+    /** True when this game showed a next-piece queue ({@code nextPreviewCount != 0}). Absent on legacy rows. */
+    public boolean hasNext;
 }

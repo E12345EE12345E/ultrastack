@@ -30,6 +30,19 @@ public final class GameConstants {
     /** Minimum global cooldown between hold actions across all players on a board. */
     public static final long HOLD_GLOBAL_LOCK_MS = 500;
 
+    /**
+     * Upcoming piece types sent per seat in {@code NetBoardLight}. The NEXT box may show fewer
+     * than this (its {@code previewCount} defaults to {@link #NEXT_PREVIEW_COUNT}) without a
+     * protocol change.
+     */
+    public static final int NEXT_PREVIEW_MAX = 5;
+
+    /**
+     * How many upcoming pieces the NEXT box displays. Nonzero marks finished games with
+     * {@code hasNext} in {@code extra_json} so they can be told apart from legacy no-next rows.
+     */
+    public static final int NEXT_PREVIEW_COUNT = 1;
+
     /** How long hard drops are suppressed for a player right after an auto-lock. */
     public static final long HARD_DROP_SUPPRESS_MS = 250L;
 

@@ -8,4 +8,9 @@ public class NetBoardLight {
     public byte heldPieceType;
     public boolean[] playerHoldUsed;
     public NetFallingColumn[] falling;
+    /**
+     * Upcoming piece types, seat-major: index {@code seat * NEXT_PREVIEW_MAX + preview}.
+     * {@code 0} means empty / unknown.
+     */
+    public byte[] nextPieceTypes;
 }

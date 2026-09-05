@@ -127,6 +127,8 @@ public class GameScreen extends MenuScreen {
     private long gameEndTargetMs;
     private long startTimeMS;
     private String[] playerNames;
+    /** How many upcoming pieces the NEXT box displays. Defaults to {@link GameConstants#NEXT_PREVIEW_COUNT}. */
+    private int nextPreviewCount = GameConstants.NEXT_PREVIEW_COUNT;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = buildDispatcher();
 
@@ -498,7 +500,7 @@ public class GameScreen extends MenuScreen {
         BoardRenderer.getInstance().drawTextParticles(particles, originX, originY, tileSize, sprites, font, boardIndex);
     }
 
-    /** Draws the shared HUD (hold box, timer, countdown, names, meters) attached to one board. */
+    /** Draws the shared HUD (hold box, next box, timer, countdown, names, meters) attached to one board. */
     private void renderBoardHud(Board board, float originX, float originY, float tileSize) {
         float holdBoxSize = tileSize * 4f;
         float holdBoxX = originX - holdBoxSize - tileSize * 0.5f;
@@ -506,6 +508,18 @@ public class GameScreen extends MenuScreen {
         boolean holdAvail = localPlayers.isEmpty() || localPlayers.get(0).holdAvailable;
         BoardRenderer.getInstance().drawHoldBox(board.getHeldPieceType(), holdAvail,
                 holdBoxX, holdBoxY, holdBoxSize, tileSize, shapes, sprites, font);
+
+        int previewCount = Math.max(1, nextPreviewCount);
+        float nextBoxH = BoardRenderer.nextBoxHeight(holdBoxSize, tileSize, previewCount);
+        float nextBoxX = originX + board.bw() * tileSize + tileSize * 0.5f;
+        float nextBoxY = originY + board.bh() * tileSize - nextBoxH;
+        int nextSeat = 0;
+        if (!localPlayers.isEmpty() && boardFor(localPlayers.get(0).slot) == board) {
+            nextSeat = seatFor(localPlayers.get(0).slot);
+        }
+        BoardRenderer.getInstance().drawNextBox(
+                board.getUpcomingPieceTypes(nextSeat, previewCount), previewCount,
+                nextBoxX, nextBoxY, holdBoxSize, tileSize, shapes, sprites, font);
 
         float timerBoxSize = tileSize * 5f;
         float timerBoxX = originX - timerBoxSize - tileSize * 0.5f;
@@ -572,7 +586,7 @@ public class GameScreen extends MenuScreen {
         // Part toward the edges of the 16:9 rect, leaving a center lane for the boss.
         float hudGutter = tileSize * 5.5f;
         float bossLeftX = gameViewport.toScreenX(0.02f) + hudGutter;
-        float bossRightX = gameViewport.toScreenX(0.98f) - rightW;
+        float bossRightX = gameViewport.toScreenX(0.98f) - rightW - hudGutter;
         float leftX = defLeftX + (bossLeftX - defLeftX) * t;
         float rightX = defRightX + (bossRightX - defRightX) * t;
 
@@ -615,7 +629,7 @@ public class GameScreen extends MenuScreen {
 
         float boardW = board.bw() * tileSize;
         float hudGutter = tileSize * 5.5f;
-        float meterColumnW = hasSeatedCharacters() ? tileSize * 5.5f : 0f;
+        float meterColumnW = tileSize * 5.5f;
         float gap = tileSize * 1.5f;
         float boxSize = gameViewport.toScreenH(0.42f) * 0.65f;
 
@@ -645,15 +659,6 @@ public class GameScreen extends MenuScreen {
     private static float smoothstep(float x) {
         x = Math.max(0f, Math.min(1f, x));
         return x * x * (3f - 2f * x);
-    }
-
-    /** True when the live character payload has at least one seated character id. */
-    private boolean hasSeatedCharacters() {
-        if (latestCharacterMode == null || latestCharacterMode.characterIds == null) return false;
-        for (int id : latestCharacterMode.characterIds) {
-            if (id >= 0) return true;
-        }
-        return false;
     }
 
     private void renderBossPanel(float panelX, float restCenterY, float boxSize,
@@ -1044,7 +1049,10 @@ public class GameScreen extends MenuScreen {
 
         float boxSize = tileSize * 4.5f;
         float boxX = originX + board.bw() * tileSize + tileSize * 0.5f;
-        float boxY = originY + (board.bh() - 4) * tileSize;
+        float holdBoxSize = tileSize * 4f;
+        float nextBoxH = BoardRenderer.nextBoxHeight(holdBoxSize, tileSize, Math.max(1, nextPreviewCount));
+        float nextBoxY = originY + board.bh() * tileSize - nextBoxH;
+        float boxY = nextBoxY - tileSize * 0.5f - boxSize;
         int drawn = 0;
         int n = Math.min(ids.length, Math.min(fill.length, max.length));
         for (int slot = 0; slot < n; slot++) {

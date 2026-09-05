@@ -431,7 +431,7 @@ public class BoardRenderer {
     }
 
     // -------------------------------------------------------------------------
-    // HUD boxes (hold / timers) — delegated to BoardHudRenderer
+    // HUD boxes (hold / next / timers) — delegated to BoardHudRenderer
     // -------------------------------------------------------------------------
 
     /**
@@ -442,6 +442,22 @@ public class BoardRenderer {
                             float x, float y, float boxSize, float tileSize,
                             ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
         BoardHudRenderer.drawHoldBox(heldType, available, x, y, boxSize, tileSize,
+                shapes, sprites, font, this);
+    }
+
+    /** Height of a NEXT box for the given preview count (HOLD-sized when {@code previewCount <= 1}). */
+    public static float nextBoxHeight(float boxWidth, float tileSize, int previewCount) {
+        return BoardHudRenderer.nextBoxHeight(boxWidth, tileSize, previewCount);
+    }
+
+    /**
+     * Draws the next-piece box to the right of the board.
+     * Caller must NOT have an open SpriteBatch or ShapeRenderer begin/end around this call.
+     */
+    public void drawNextBox(byte[] types, int previewCount,
+                            float x, float y, float boxWidth, float tileSize,
+                            ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
+        BoardHudRenderer.drawNextBox(types, previewCount, x, y, boxWidth, tileSize,
                 shapes, sprites, font, this);
     }
 

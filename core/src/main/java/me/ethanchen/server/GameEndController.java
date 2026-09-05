@@ -172,6 +172,7 @@ class GameEndController {
             frozenScoreEnd.piecesPlaced = copyOf(piecesPlaced);
             applyBumpStats(frozenScoreEnd, frozenBumps);
             applyClearSpinStats(frozenScoreEnd, frozenClears);
+            frozenScoreEnd.hasNext = hasNextPreview();
         } else if (mode == GameMode.MULTIPLAYER_PUZZLE) {
             // Puzzle mode still has a single board today; boardElapsedMs[0] is that board's own
             // finish time. A future multi-board puzzle mode would report each player's own
@@ -183,6 +184,7 @@ class GameEndController {
             frozenPuzzleEnd.piecesPlaced = copyOf(piecesPlaced);
             applyBumpStats(frozenPuzzleEnd, frozenBumps);
             applyClearSpinStats(frozenPuzzleEnd, frozenClears);
+            frozenPuzzleEnd.hasNext = hasNextPreview();
         } else if (mode == GameMode.PVE) {
             frozenPveEnd = new PveModeEndData();
             frozenPveEnd.sectionsCleared = pvePendingSectionsCleared;
@@ -191,7 +193,13 @@ class GameEndController {
             frozenPveEnd.piecesPlaced = copyOf(piecesPlaced);
             applyBumpStats(frozenPveEnd, frozenBumps);
             applyClearSpinStats(frozenPveEnd, frozenClears);
+            frozenPveEnd.hasNext = hasNextPreview();
         }
+    }
+
+    /** True when this session showed a next-piece queue (nonzero {@link GameConstants#NEXT_PREVIEW_COUNT}). */
+    private static boolean hasNextPreview() {
+        return GameConstants.NEXT_PREVIEW_COUNT != 0;
     }
 
     private static void applyBumpStats(ScoreModeEndData end, BumpStats stats) {

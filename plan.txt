@@ -1,3 +1,1 @@
-dying sound should play faster
-
-other gamemodes
+auto updater
