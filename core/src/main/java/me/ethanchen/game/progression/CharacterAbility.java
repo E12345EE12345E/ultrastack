@@ -14,6 +14,8 @@ public enum CharacterAbility {
      * While gravity is disabled, all players' passive meter fill is multiplied by
      * {@code 1 + activationCount}. Additional activations during the disable window stack only
      * the meter multiplier; activations during the ramp window restart the 10s disable.
+     * Also converts every locked tile that is not solidly supported down to the floor (or a
+     * disallowed ledge) into a falling column (board-wide overhang avalanche).
      */
     DISABLE_AND_RAMP_GRAVITY
 }

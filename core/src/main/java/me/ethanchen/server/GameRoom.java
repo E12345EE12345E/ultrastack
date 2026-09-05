@@ -17,6 +17,7 @@ import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.AbilityRequest;
 import me.ethanchen.network.packets.c2s.LobbySettingsRequest;
+import me.ethanchen.network.packets.c2s.SpectateRequest;
 import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.MoveListRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
@@ -160,7 +161,8 @@ public class GameRoom implements Runnable, GameRoomContext {
                 .on(LobbySettingsRequest.class, this::handleLobbySettingsRequest)
                 .on(MoveListRequest.class, this::handleMoveListRequest)
                 .on(LocalPlayerCountRequest.class, this::handleLocalPlayerCountRequest)
-                .on(AbilityRequest.class, this::handleAbilityRequest);
+                .on(AbilityRequest.class, this::handleAbilityRequest)
+                .on(SpectateRequest.class, this::handleSpectateRequest);
     }
 
     // -------------------------------------------------------------------------
@@ -570,6 +572,10 @@ public class GameRoom implements Runnable, GameRoomContext {
         int slot = slots[localIndex];
         if (slot < 0) return;
         serverGame.activateAbility(slot);
+    }
+
+    private void handleSpectateRequest(ServerPacketWrapper w) {
+        sendSpectatorStartGame(w.connectionID);
     }
 
     private void sendSpectatorStartGame(int connId) {

@@ -11,6 +11,10 @@ public class PveModeEndData {
     public int[] bumpCounts;
     /** Per-player count of hard drops blocked by resting on another player's piece, indexed by player slot. */
     public int[] blockedCounts;
+    /** Per-player count of lateral moves cancelled by another player's stationary piece, indexed by player slot. */
+    public int[] stationaryBumpCounts;
+    /** Per-player count of hard drops blocked by another player's stationary piece, indexed by player slot. */
+    public int[] stationaryBlockedCounts;
     /** Per-player count of pieces locked this game, indexed by player slot. */
     public int[] piecesPlaced;
     /** Per-player count of 4-line clears, indexed by player slot. */

@@ -38,7 +38,8 @@ public final class GameConstants {
     public static final float CYCLE_MULT = 0.8f;
     public static final float CYCLE_MIN = 0.5f;
     public static final long COYOTE_MS = 50L;
-    public static final float EXPLODE_DURATION = 1.6f;
+    /** Seconds from all seats spawn-blocked until the board explodes. */
+    public static final float EXPLODE_DURATION = 3.2f;
     public static final float EXPLODE_MIN_INTERVAL = 0.1f;
 
     // Score multipliers (MULTIPLAYER_SCORE mode).

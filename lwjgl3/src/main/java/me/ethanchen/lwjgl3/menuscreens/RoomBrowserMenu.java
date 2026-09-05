@@ -116,7 +116,7 @@ public class RoomBrowserMenu extends MenuScreen {
                 // Also open the lobby so chat/list work if the game ends before the broadcast.
                 messageText.set(res.spectatorOnly ? "Joining as spectator..." : "Joining...");
             }
-            app.switchMenu(new MultiplayerLobby(app, res.isHost));
+            app.switchMenu(new MultiplayerLobby(app, res.isHost, res.gameInProgress));
         } else {
             messageText.set(res.reason != null && !res.reason.isEmpty() ? res.reason : "Could not join room.");
         }

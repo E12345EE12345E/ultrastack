@@ -198,7 +198,7 @@ class BlockedSpawnController {
 
     private float effectiveInterval(int i) {
         if (explodeCountdown >= 0f) {
-            float frac = Math.min(explodeCountdown, 1f);
+            float frac = Math.min(explodeCountdown / GameConstants.EXPLODE_DURATION, 1f);
             return GameConstants.CYCLE_MIN + (GameConstants.EXPLODE_MIN_INTERVAL - GameConstants.CYCLE_MIN) * frac;
         }
         return timeBetweenNextPiece[i];

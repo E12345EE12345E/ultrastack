@@ -117,6 +117,7 @@ public class ServerCore implements PacketSender, Runnable {
         d.on(MoveListRequest.class, forward);
         d.on(LocalPlayerCountRequest.class, forward);
         d.on(AbilityRequest.class, forward);
+        d.on(SpectateRequest.class, forward);
         return d;
     }
 

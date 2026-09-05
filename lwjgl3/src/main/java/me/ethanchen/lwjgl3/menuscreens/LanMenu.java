@@ -174,7 +174,7 @@ public class LanMenu extends MenuScreen {
 
     private void handleJoinResponse(JoinResponse res) {
         if (res.accepted) {
-            app.switchMenu(new MultiplayerLobby(app, isHosting));
+            app.switchMenu(new MultiplayerLobby(app, isHosting, res.gameInProgress));
         } else {
             String reason = (res.reason != null && !res.reason.isEmpty()) ? res.reason : "Join denied.";
             messageText.set(reason);

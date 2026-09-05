@@ -83,13 +83,13 @@ class GameEndController {
      * {@code game.isStarted() && isBoardRunning(boardIndex)}.
      */
     void checkWinCondition(int boardIndex, GameMode mode, GameHandler game, long globalScore,
-                            long[] boardScorePerPlayer, int[] bumpCounts, int[] blockedCounts,
+                            long[] boardScorePerPlayer, BumpStats bumpStats,
                             int[] piecesPlaced, ClearSpinStats clearSpinStats) {
         if (mode == GameMode.NONE || sessionEnded) return;
         GameModeRules rules = mode.rules();
         if (rules.isWinConditionMet(game, boardIndex, gameEndTargetMs)) {
             resolveBoard(boardIndex, true, mode, globalScore, boardScorePerPlayer,
-                    bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+                    bumpStats, piecesPlaced, clearSpinStats);
         }
     }
 
@@ -99,9 +99,9 @@ class GameEndController {
 
     /** Called by a board's {@link BlockedSpawnController} when that board's explode countdown expires. */
     void beginBoardLoss(int boardIndex, GameMode mode, long globalScore, long[] boardScorePerPlayer,
-                         int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+                         BumpStats bumpStats, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
         resolveBoard(boardIndex, false, mode, globalScore, boardScorePerPlayer,
-                bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+                bumpStats, piecesPlaced, clearSpinStats);
     }
 
     /**
@@ -111,28 +111,28 @@ class GameEndController {
      * way a session-wide win condition does for the other modes.
      */
     void beginPveSessionEnd(boolean win, int sectionsCleared, GameMode mode, long globalScore, long[] boardScorePerPlayer,
-                             int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+                             BumpStats bumpStats, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
         if (sessionEnded) return;
         pvePendingSectionsCleared = sectionsCleared;
         for (int b = 0; b < numBoards; b++) {
             if (!boardResolved[b]) markResolved(b, win);
         }
-        finalizeSession(mode, globalScore, boardScorePerPlayer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+        finalizeSession(mode, globalScore, boardScorePerPlayer, bumpStats, piecesPlaced, clearSpinStats);
     }
 
     /** Called when a player disconnects mid-game: ends the whole session immediately (no board keeps running). */
     void beginGameEndDisconnect(GameMode mode, long globalScore, long[] boardScorePerPlayer,
-                                 int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+                                 BumpStats bumpStats, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
         if (sessionEnded) return;
         pendingDisconnected = true;
         for (int b = 0; b < numBoards; b++) {
             if (!boardResolved[b]) markResolved(b, false);
         }
-        finalizeSession(mode, globalScore, boardScorePerPlayer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+        finalizeSession(mode, globalScore, boardScorePerPlayer, bumpStats, piecesPlaced, clearSpinStats);
     }
 
     private void resolveBoard(int boardIndex, boolean win, GameMode mode, long globalScore, long[] boardScorePerPlayer,
-                               int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+                               BumpStats bumpStats, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
         if (sessionEnded || boardIndex < 0 || boardIndex >= boardResolved.length || boardResolved[boardIndex]) return;
         markResolved(boardIndex, win);
         // A session-wide win condition (e.g. score mode's shared timer) resolves every
@@ -141,7 +141,7 @@ class GameEndController {
         boolean allResolved = true;
         for (boolean r : boardResolved) if (!r) { allResolved = false; break; }
         if (allResolved) {
-            finalizeSession(mode, globalScore, boardScorePerPlayer, bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+            finalizeSession(mode, globalScore, boardScorePerPlayer, bumpStats, piecesPlaced, clearSpinStats);
         }
     }
 
@@ -152,7 +152,7 @@ class GameEndController {
     }
 
     private void finalizeSession(GameMode mode, long globalScore, long[] boardScorePerPlayer,
-                                  int[] bumpCounts, int[] blockedCounts, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
+                                  BumpStats bumpStats, int[] piecesPlaced, ClearSpinStats clearSpinStats) {
         sessionEnded = true;
         pendingWin = false;
         for (boolean w : boardWon) if (w) { pendingWin = true; break; }
@@ -163,14 +163,14 @@ class GameEndController {
         frozenPuzzleEnd = null;
         frozenPveEnd    = null;
         ClearSpinStats frozenClears = clearSpinStats != null ? clearSpinStats.copy() : null;
+        BumpStats frozenBumps = bumpStats != null ? bumpStats.copy() : null;
         if (mode == GameMode.MULTIPLAYER_SCORE || mode == GameMode.CHARACTER_SCORE) {
             frozenScoreEnd = new ScoreModeEndData();
             frozenScoreEnd.finalScore = globalScore;
             frozenScoreEnd.boardScore = boardScorePerPlayer;
             frozenScoreEnd.timeSurvivedMs = System.currentTimeMillis() - gameStartMs;
-            frozenScoreEnd.bumpCounts = copyOf(bumpCounts);
-            frozenScoreEnd.blockedCounts = copyOf(blockedCounts);
             frozenScoreEnd.piecesPlaced = copyOf(piecesPlaced);
+            applyBumpStats(frozenScoreEnd, frozenBumps);
             applyClearSpinStats(frozenScoreEnd, frozenClears);
         } else if (mode == GameMode.MULTIPLAYER_PUZZLE) {
             // Puzzle mode still has a single board today; boardElapsedMs[0] is that board's own
@@ -180,20 +180,42 @@ class GameEndController {
             frozenPuzzleEnd = new PuzzleModeEndData();
             frozenPuzzleEnd.timeMs = frozenPuzzleElapsedMs;
             frozenPuzzleEnd.score = (int)(Integer.MAX_VALUE - Math.min(frozenPuzzleElapsedMs, Integer.MAX_VALUE));
-            frozenPuzzleEnd.bumpCounts = copyOf(bumpCounts);
-            frozenPuzzleEnd.blockedCounts = copyOf(blockedCounts);
             frozenPuzzleEnd.piecesPlaced = copyOf(piecesPlaced);
+            applyBumpStats(frozenPuzzleEnd, frozenBumps);
             applyClearSpinStats(frozenPuzzleEnd, frozenClears);
         } else if (mode == GameMode.PVE) {
             frozenPveEnd = new PveModeEndData();
             frozenPveEnd.sectionsCleared = pvePendingSectionsCleared;
             frozenPveEnd.timeMs = System.currentTimeMillis() - gameStartMs;
             frozenPveEnd.finalScore = globalScore;
-            frozenPveEnd.bumpCounts = copyOf(bumpCounts);
-            frozenPveEnd.blockedCounts = copyOf(blockedCounts);
             frozenPveEnd.piecesPlaced = copyOf(piecesPlaced);
+            applyBumpStats(frozenPveEnd, frozenBumps);
             applyClearSpinStats(frozenPveEnd, frozenClears);
         }
+    }
+
+    private static void applyBumpStats(ScoreModeEndData end, BumpStats stats) {
+        if (stats == null) return;
+        end.bumpCounts = copyOf(stats.bumps);
+        end.blockedCounts = copyOf(stats.blocks);
+        end.stationaryBumpCounts = copyOf(stats.stationaryBumps);
+        end.stationaryBlockedCounts = copyOf(stats.stationaryBlocks);
+    }
+
+    private static void applyBumpStats(PuzzleModeEndData end, BumpStats stats) {
+        if (stats == null) return;
+        end.bumpCounts = copyOf(stats.bumps);
+        end.blockedCounts = copyOf(stats.blocks);
+        end.stationaryBumpCounts = copyOf(stats.stationaryBumps);
+        end.stationaryBlockedCounts = copyOf(stats.stationaryBlocks);
+    }
+
+    private static void applyBumpStats(PveModeEndData end, BumpStats stats) {
+        if (stats == null) return;
+        end.bumpCounts = copyOf(stats.bumps);
+        end.blockedCounts = copyOf(stats.blocks);
+        end.stationaryBumpCounts = copyOf(stats.stationaryBumps);
+        end.stationaryBlockedCounts = copyOf(stats.stationaryBlocks);
     }
 
     private static void applyClearSpinStats(ScoreModeEndData end, ClearSpinStats stats) {

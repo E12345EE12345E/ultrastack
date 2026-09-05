@@ -33,7 +33,7 @@ import java.util.ArrayList;
 
 public class NetworkRegister {
     // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
-    public static final byte PROTOCOL_VERSION = 29;
+    public static final byte PROTOCOL_VERSION = 30;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -130,5 +130,6 @@ public class NetworkRegister {
         kryo.register(FusionResultBroadcast.class);
         kryo.register(AbilityRequest.class);
         kryo.register(CharacterModeData.class);
+        kryo.register(SpectateRequest.class);
     }
 }

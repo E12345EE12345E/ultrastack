@@ -39,8 +39,8 @@ import me.ethanchen.network.packets.s2c.gamemode.ScoreModeData;
  *
  * <p>Board-specific mechanics (abilities, meter fill, scoring, combo/gravity, blocked/explode)
  * are always resolved through {@link GameHandler#boardFor}/{@code seatOf}/{@code slotsOnBoard} so
- * they act only on the acting player's own board; {@code piecesPlaced}, {@code bumpCounts},
- * {@code blockedCounts}, {@code clearSpinStats}, and {@link #globalScore} remain session-wide
+ * they act only on the acting player's own board; {@code piecesPlaced}, {@link BumpStats},
+ * {@code clearSpinStats}, and {@link #globalScore} remain session-wide
  * (indexed by global slot) since they describe the whole game session, not a single board.
  */
 public class ServerGame {
@@ -55,8 +55,7 @@ public class ServerGame {
     private int[] highestMoveId;
     private int[] piecesPlaced;
     private long[] hardDropBlockedUntilMs;
-    private int[] bumpCounts;
-    private int[] blockedCounts;
+    private BumpStats bumpStats;
     private ClearSpinStats clearSpinStats;
     /** Session-wide aggregate score, updated in real time as every board's scorer scores points. */
     private long globalScore;
@@ -133,8 +132,7 @@ public class ServerGame {
         this.highestMoveId = new int[players];
         this.piecesPlaced = new int[players];
         this.hardDropBlockedUntilMs = new long[players];
-        this.bumpCounts = new int[players];
-        this.blockedCounts = new int[players];
+        this.bumpStats = new BumpStats(players);
         this.clearSpinStats = new ClearSpinStats(players);
         Arrays.fill(this.highestMoveId, -1);
         globalScore = 0;
@@ -168,7 +166,7 @@ public class ServerGame {
         if (this.pveSession != null) {
             pveSectionController = new PveSectionController(this.pveSession.levelData, game, numBoards,
                     (win, sectionsCleared) -> endCtrl.beginPveSessionEnd(win, sectionsCleared, this.gameMode,
-                            globalScore, computeBoardScorePerPlayer(), bumpCounts, blockedCounts, piecesPlaced, clearSpinStats));
+                            globalScore, computeBoardScorePerPlayer(), bumpStats, piecesPlaced, clearSpinStats));
         } else {
             pveSectionController = null;
         }
@@ -448,31 +446,51 @@ public class ServerGame {
     private void checkBump(Board board, int playerA, int playerB) {
         int seatA = game.seatOf(playerA);
         int seatB = game.seatOf(playerB);
-        if (board.getActivePiece(seatA).movementTimer < BUMP_TIMER_THRESHOLD_MS
-                && board.getActivePiece(seatB).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
-            bumpedEvent(playerA, playerB, game.boardIndexOf(playerA));
+        int boardIndex = game.boardIndexOf(playerA);
+        boolean moverRecent = board.getActivePiece(seatA).movementTimer < BUMP_TIMER_THRESHOLD_MS;
+        boolean blockerRecent = board.getActivePiece(seatB).movementTimer < BUMP_TIMER_THRESHOLD_MS;
+        if (moverRecent && blockerRecent) {
+            bumpedEvent(playerA, playerB, boardIndex);
+        } else {
+            stationaryBumpEvent(playerA, playerB, boardIndex);
         }
     }
 
     private void checkBlocked(Board board, int droppedPlayerId, int blockingPlayerId) {
         int blockingSeat = game.seatOf(blockingPlayerId);
+        int boardIndex = game.boardIndexOf(droppedPlayerId);
         if (board.getActivePiece(blockingSeat).movementTimer < BUMP_TIMER_THRESHOLD_MS) {
-            blockedEvent(droppedPlayerId, blockingPlayerId, game.boardIndexOf(droppedPlayerId));
+            blockedEvent(droppedPlayerId, blockingPlayerId, boardIndex);
+        } else {
+            stationaryBlockedEvent(droppedPlayerId, blockingPlayerId, boardIndex);
         }
     }
 
-    /** Stub: fired when two players mutually block each other's lateral movement while
-     *  both moved/rotated/soft-dropped recently. More functionality to come later. */
+    /** Fired when two players mutually block each other's lateral movement while
+     *  both moved/rotated/soft-dropped recently. */
     private void bumpedEvent(int playerA, int playerB, int boardIndex) {
-        if (playerA >= 0 && playerA < bumpCounts.length) bumpCounts[playerA]++;
-        if (playerB >= 0 && playerB < bumpCounts.length) bumpCounts[playerB]++;
+        bumpStats.incrementBump(playerA, playerB);
         effects.addBumpSound((byte) playerA, (byte) playerB, (byte) boardIndex, false);
     }
 
-    /** Stub: fired when a hard-dropped piece rests on another player's recently-moved
-     *  piece without locking. More functionality to come later. */
+    /** Fired when a hard-dropped piece rests on another player's recently-moved
+     *  piece without locking. */
     private void blockedEvent(int droppedPlayerId, int blockingPlayerId, int boardIndex) {
-        if (droppedPlayerId >= 0 && droppedPlayerId < blockedCounts.length) blockedCounts[droppedPlayerId]++;
+        bumpStats.incrementBlock(droppedPlayerId);
+        effects.addBumpSound((byte) droppedPlayerId, (byte) blockingPlayerId, (byte) boardIndex, true);
+    }
+
+    /** Fired when a lateral move is cancelled by another player's piece but the pair does not
+     *  qualify as a mutual bump. Credits only the mover. */
+    private void stationaryBumpEvent(int mover, int blocker, int boardIndex) {
+        bumpStats.incrementStationaryBump(mover);
+        effects.addBumpSound((byte) mover, (byte) blocker, (byte) boardIndex, false);
+    }
+
+    /** Fired when a hard drop is blocked by another player's piece that has not moved recently.
+     *  Credits only the dropper. */
+    private void stationaryBlockedEvent(int droppedPlayerId, int blockingPlayerId, int boardIndex) {
+        bumpStats.incrementStationaryBlock(droppedPlayerId);
         effects.addBumpSound((byte) droppedPlayerId, (byte) blockingPlayerId, (byte) boardIndex, true);
     }
 
@@ -541,12 +559,12 @@ public class ServerGame {
                 int boardIndex = b;
                 blocked[b].update(deltaTime / 1000f, game.getBoards().get(b),
                         () -> endCtrl.beginBoardLoss(boardIndex, gameMode, globalScore, boardScorePerPlayer,
-                                bumpCounts, blockedCounts, piecesPlaced, clearSpinStats));
+                                bumpStats, piecesPlaced, clearSpinStats));
             }
             for (int b = 0; b < game.getBoards().size(); b++) {
                 if (!endCtrl.isBoardRunning(b)) continue;
                 endCtrl.checkWinCondition(b, gameMode, game, globalScore, boardScorePerPlayer,
-                        bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+                        bumpStats, piecesPlaced, clearSpinStats);
             }
         }
     }
@@ -686,8 +704,8 @@ public class ServerGame {
     /**
      * Activates {@code playerId}'s character ability if their meter is full (implementation.md,
      * Part 1/4): 3-Mino fills skyline gaps with garbage, Wizard forces an I, The Noob disables
-     * gravity. Every effect is scoped to the activator's own board. No-op (returns false) for
-     * non-character modes, an unready meter, or an invalid player.
+     * gravity and avalanches unsupported tiles. Every effect is scoped to the activator's own
+     * board. No-op (returns false) for non-character modes, an unready meter, or an invalid player.
      */
     public synchronized boolean activateAbility(int playerId) {
         if (loadouts == null || !canActivateAbility(playerId)) return false;
@@ -718,6 +736,7 @@ public class ServerGame {
                 noobGravity[boardIndex].activate();
                 game.setGravitySpeedFactor(boardIndex, noobGravity[boardIndex].gravitySpeedFactor());
                 meterController.setExternalPassiveFillMultiplier(boardIndex, noobGravity[boardIndex].passiveMeterFillMultiplier());
+                board.triggerOverhangFall(playerId);
                 activated = true;
                 break;
             default:
@@ -797,6 +816,6 @@ public class ServerGame {
      */
     public synchronized void handleDisconnectedPlayer(int id) {
         endCtrl.beginGameEndDisconnect(gameMode, globalScore, computeBoardScorePerPlayer(),
-                bumpCounts, blockedCounts, piecesPlaced, clearSpinStats);
+                bumpStats, piecesPlaced, clearSpinStats);
     }
 }

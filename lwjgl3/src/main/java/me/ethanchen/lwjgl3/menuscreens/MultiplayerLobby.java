@@ -8,6 +8,7 @@ import me.ethanchen.lwjgl3.menuscreens.ui.*;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.c2s.LobbySettingsRequest;
+import me.ethanchen.network.packets.c2s.SpectateRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
@@ -37,6 +38,10 @@ public class MultiplayerLobby extends MenuScreen {
             .on(HostChangedBroadcast.class, w -> handleHostChanged((HostChangedBroadcast) w.packet));
 
     public MultiplayerLobby(ClientApp app, boolean isHost) {
+        this(app, isHost, false);
+    }
+
+    public MultiplayerLobby(ClientApp app, boolean isHost, boolean gameInProgress) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
 
         this.isHost = isHost;
@@ -47,6 +52,9 @@ public class MultiplayerLobby extends MenuScreen {
 
         // Leave button — top-left corner
         elements.add(new UIButton(0.08, 0.93, 0.12, 0.07, "Leave", this::leaveRoom));
+        if (gameInProgress) {
+            elements.add(new UIButton(0.88, 0.93, 0.16, 0.07, "Spectate", this::requestSpectate));
+        }
 
         chatoutput = new TextBoxOutput();
         chat = new TextInput();
@@ -106,6 +114,10 @@ public class MultiplayerLobby extends MenuScreen {
         req.pveLevelId = app.getLobbySettings().pveLevelId;
         req.pveDifficulty = app.getLobbySettings().pveDifficulty;
         app.sendTCP(req);
+    }
+
+    private void requestSpectate() {
+        app.sendTCP(new SpectateRequest());
     }
 
     private void leaveRoom() {

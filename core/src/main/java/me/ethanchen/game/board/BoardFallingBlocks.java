@@ -111,6 +111,43 @@ final class BoardFallingBlocks {
     }
 
     /**
+     * The Noob active ability: converts every locked tile that is not solidly supported
+     * down to the floor (or a disallowed ledge) into a falling column. An allowed empty cell
+     * breaks support; a disallowed cell re-establishes it. Contiguous unsupported runs in a
+     * column become one falling column. Already-empty cells (including those occupied only by
+     * existing falling columns) are left untouched.
+     */
+    static void triggerOverhangs(Board b, int playerId) {
+        for (int x = 0; x < b.width; x++) {
+            boolean supported = true;
+            int runStart = -1;
+            for (int y = 0; y < b.height; y++) {
+                if (!b.allowedTiles[y][x]) {
+                    if (runStart >= 0) {
+                        detachRun(b, playerId, x, runStart, y - 1, false);
+                        runStart = -1;
+                    }
+                    supported = true;
+                    continue;
+                }
+                if (b.board[y][x].get() == Tile.EMPTY) {
+                    if (runStart >= 0) {
+                        detachRun(b, playerId, x, runStart, y - 1, false);
+                        runStart = -1;
+                    }
+                    supported = false;
+                    continue;
+                }
+                if (supported) continue;
+                if (runStart < 0) runStart = y;
+            }
+            if (runStart >= 0) {
+                detachRun(b, playerId, x, runStart, b.height - 1, false);
+            }
+        }
+    }
+
+    /**
      * Erases board cells {@code [bottom..top]} in column {@code x} and creates a falling
      * column from their types. Cells that are already empty are skipped (should not happen
      * for a well-formed run).

@@ -441,7 +441,7 @@ public class GameScreen extends MenuScreen {
         }
 
         float blockedWhiteAmt = (latestExplodeProgress >= 0f)
-                ? Math.min(1f, latestExplodeProgress / 1f) : 0f;
+                ? Math.min(1f, latestExplodeProgress / GameConstants.EXPLODE_DURATION) : 0f;
 
         // Spectators (no local players): keep full colour. Otherwise ramp grayscale for remotes.
         float otherPlayerGrayscaleAmt = 0f;

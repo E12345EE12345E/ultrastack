@@ -16,7 +16,7 @@ public class LightGameStateBroadcast extends NetworkPacket {
     public boolean[] holdAvailable = new boolean[0];
 
     // Blocked-spawn / explode countdown state
-    /** Seconds into the explode countdown [0, 2]; -1 when inactive. */
+    /** Seconds into the explode countdown [0, {@link me.ethanchen.game.GameConstants#EXPLODE_DURATION}]; -1 when inactive. */
     public float explodeProgress = -1f;
     /** Per local player: true when that player's blocked piece may be held. */
     public boolean[] ownPieceHoldGlow = new boolean[0];

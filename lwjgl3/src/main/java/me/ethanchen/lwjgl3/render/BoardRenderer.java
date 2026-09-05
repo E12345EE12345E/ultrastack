@@ -20,10 +20,12 @@ import me.ethanchen.lwjgl3.render.shader.GlowRenderer;
 
 
 /**
- * Renders a {@link Board}: locked tiles, active pieces, grid outline, and optional per-piece glow.
+ * Renders a {@link Board}: locked tiles, cluster outlines, active pieces, grid outline, and
+ * optional per-piece glow.
  *
  * <p>The glow pipeline is managed by the contained {@link GlowRenderer}; the HUD boxes
- * (hold / timer) are drawn by {@link BoardHudRenderer}.
+ * (hold / timer) are drawn by {@link BoardHudRenderer}; locked-tile silhouettes are drawn by
+ * {@link ClusterOutline}.
  *
  * <p>Call {@link #dispose()} when done.
  */
@@ -51,6 +53,7 @@ public class BoardRenderer {
     private static final Color FALL_TRIGGER_BG    = new Color(0.8f, 0.8f, 0.8f, 1f);
 
     private final GlowRenderer glowRenderer;
+    private final ClusterOutline clusterOutline;
 
     public GlowRenderer getGlowRenderer() {
         return glowRenderer;
@@ -81,6 +84,7 @@ public class BoardRenderer {
                     TILE_SHEET_TILE_SIZE, TILE_SHEET_TILE_SIZE);
         }
         glowRenderer = new GlowRenderer();
+        clusterOutline = new ClusterOutline();
     }
 
     // -------------------------------------------------------------------------
@@ -180,6 +184,9 @@ public class BoardRenderer {
         if (drawActivePieces) drawGlow(board, originX, originY, tileSize, glowStrengths);
         sprites.begin();
         drawLockedTiles(board, originX, originY, tileSize, sprites);
+        sprites.end();
+        clusterOutline.draw(board, originX, originY, tileSize, sprites.getProjectionMatrix());
+        sprites.begin();
         drawFallingColumns(board, originX, originY, tileSize, sprites);
         if (drawActivePieces) {
             drawShadowPieces(board, shadows, originX, originY, tileSize, sprites,
@@ -476,6 +483,7 @@ public class BoardRenderer {
         tileSheet.dispose();
         tileBackground.dispose();
         glowRenderer.dispose();
+        clusterOutline.dispose();
         if (instance == this) instance = null;
     }
 

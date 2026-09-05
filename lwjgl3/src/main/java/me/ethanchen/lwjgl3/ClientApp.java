@@ -172,6 +172,11 @@ public class ClientApp extends ApplicationAdapter {
 
         menuScreen = new MainMenu(this);
         //menuScreen = new ShaderTestScreen(this);
+
+        // create()/resize() run before glfwPollEvents, so the first size can miss the
+        // monitor DPI. Sync after those events and re-apply the projection.
+        WindowDpi.scheduleInitialSync(() ->
+                resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight()));
     }
 
 
@@ -250,6 +255,9 @@ public class ClientApp extends ApplicationAdapter {
     public void resize(int width, int height) {
         if (width <= 0 || height <= 0) {
             return;
+        }
+        if (Gdx.gl != null) {
+            Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         }
         if (batch != null) {
             batch.setProjectionMatrix(batch.getProjectionMatrix().setToOrtho2D(0, 0, width, height));

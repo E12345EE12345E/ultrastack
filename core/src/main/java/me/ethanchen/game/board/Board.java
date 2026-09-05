@@ -333,6 +333,14 @@ public class Board {
         return filled.toArray(new int[filled.size()][]);
     }
 
+    /**
+     * The Noob active ability: converts every locked tile that is not solidly supported
+     * down to the floor (or a disallowed ledge) into a falling column.
+     */
+    public void triggerOverhangFall(int playerId) {
+        BoardFallingBlocks.triggerOverhangs(this, playerId);
+    }
+
     /** Marks every board cell currently covered by an active player piece. */
     private boolean[][] buildActivePieceOccupancy() {
         boolean[][] occupied = new boolean[height][width];

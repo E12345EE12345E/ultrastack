@@ -86,9 +86,9 @@ public final class CharacterDef {
     /** id 1: (Placeholder Name) Wizard. */
     public static final CharacterDef WIZARD = new CharacterDef(
             1, "Wizard",
-            "Replaces current piece with an I.",
+            "Replaces current piece with an avalanche I.",
             "Queue {J, L, S, T, Z}. I clears score 50% more and fills other meters 4x.",
-            2.0f, 2000f, 2000f,
+            2.0f, 20f, 2000f,
             CharacterAbility.FORCE_I, PieceQueue.BagTypes.BAG_WIZARD,
             new byte[]{Piece.I}, 50f,
             4.0f, 0.0f, 1.0f);
@@ -96,7 +96,7 @@ public final class CharacterDef {
     /** id 2: (Placeholder Name) The Noob. Default selected character for new accounts. */
     public static final CharacterDef NOOB = new CharacterDef(
             2, "The Noob",
-            "Disables gravity and increases passive meter fill for everyone for 10s.",
+            "Disables gravity and increases passive meter fill for everyone for 10s. Causes an avalanche.",
             "Always has half gravity for self.",
             1.0f, 200f, 10000f,
             CharacterAbility.DISABLE_AND_RAMP_GRAVITY, null,
