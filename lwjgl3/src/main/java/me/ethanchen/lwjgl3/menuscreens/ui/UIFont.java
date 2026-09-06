@@ -9,7 +9,8 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
  * <p>A "unit" multiplier ({@code mult = 1}) scales the font so that a typical glyph is
  * approximately {@value #REF_LINE_HEIGHT}px tall at a {@value #REF_HEIGHT}px reference height,
  * then scales linearly with the active UI height (window height for Simple UI, fitted design
- * rect height for Aspect-locked UI).
+ * rect height for Aspect-locked UI). The final scale is snapped to an integer atlas-pixel
+ * line height so Nearest-filtered pixel fonts stay sharp.
  */
 public final class UIFont {
 
@@ -26,10 +27,15 @@ public final class UIFont {
      */
     public static void setScale(BitmapFont font, float mult) {
         font.getData().setScale(1f);
-        float adj = REF_LINE_HEIGHT / font.getData().lineHeight;
+        float line = font.getData().lineHeight;
+        if (line < 1f) line = 1f;
+        float adj = REF_LINE_HEIGHT / line;
         AspectLockedViewport vp = AspectLockedViewport.current();
         float height = vp != null ? vp.viewH : Gdx.graphics.getHeight();
-        font.getData().setScale(mult * adj * (height / REF_HEIGHT));
+        float desired = mult * adj * (height / REF_HEIGHT);
+        // Integer atlas-pixel height so Nearest-filtered pixel fonts stay crisp.
+        float snapped = Math.max(1f, Math.round(desired * line)) / line;
+        font.getData().setScale(snapped);
     }
 
     /**

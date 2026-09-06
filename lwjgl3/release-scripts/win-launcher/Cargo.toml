@@ -1,0 +1,14 @@
+[package]
+name = "ultrastack-start"
+version = "1.0.0"
+edition = "2021"
+description = "In-process UltraStack launcher with discrete-GPU exports"
+
+[dependencies]
+jni = { version = "0.21", features = ["invocation"] }
+
+[profile.release]
+lto = true
+opt-level = "z"
+strip = true
+codegen-units = 1

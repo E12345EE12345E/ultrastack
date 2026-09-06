@@ -47,5 +47,11 @@ accounts.db
 accounts.db-wal
 accounts.db-shm
 
+# Downloaded / extracted Temurin JDKs used by packageReleaseZips
+jdk-cache/
+
+# Windows start.exe crate
+lwjgl3/release-scripts/win-launcher/target/
+
 # Notes
 server host commands.txt

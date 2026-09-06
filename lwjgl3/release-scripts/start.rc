@@ -1,0 +1,4 @@
+#include <winuser.h>
+
+1 ICON "../icons/logo.ico"
+1 24 "start.manifest"

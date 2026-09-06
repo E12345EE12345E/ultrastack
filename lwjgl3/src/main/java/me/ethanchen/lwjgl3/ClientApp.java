@@ -132,8 +132,12 @@ public class ClientApp extends ApplicationAdapter {
     /** Most recent victory-granted artifact, consumed by {@link me.ethanchen.lwjgl3.menuscreens.EndGameScreen}. */
     private volatile Artifact pendingVictoryArtifact;
 
+    /** Wall-clock start of this process; used by decorated menus for intro timelines. */
+    private long appStartMs;
+
     @Override
     public void create() {
+        appStartMs = System.currentTimeMillis();
         settings = SettingsManager.load();
         Controllers.addListener(controllerRoster);
         controllerRoster.seedFromConnected();
@@ -154,21 +158,7 @@ public class ClientApp extends ApplicationAdapter {
 
         batch = new SpriteBatch();
         shapes = new ShapeRenderer();
-        
-        com.badlogic.gdx.files.FileHandle fontFile = Gdx.files.absolute("C:/Windows/Fonts/arial.ttf");
-        if (fontFile.exists()) {
-            FreeTypeFontGenerator generator = new FreeTypeFontGenerator(fontFile);
-            FreeTypeFontParameter parameter = new FreeTypeFontParameter();
-            parameter.size = 48;
-            parameter.minFilter = Texture.TextureFilter.Linear;
-            parameter.magFilter = Texture.TextureFilter.Linear;
-            font = generator.generateFont(parameter);
-            generator.dispose();
-        } else {
-            font = new BitmapFont();
-            font.getRegion().getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-        }
-        font.setUseIntegerPositions(false);
+        font = createGameFont();
 
         menuScreen = new MainMenu(this);
         //menuScreen = new ShaderTestScreen(this);
@@ -793,5 +783,37 @@ public class ClientApp extends ApplicationAdapter {
 
     public BitmapFont getFont() {
         return this.font;
+    }
+
+    /**
+     * Pixel Minecraft face from {@code assets/font}. Nearest filtering and integer glyph
+     * positions keep it sharp when {@link me.ethanchen.lwjgl3.menuscreens.ui.UIFont} snaps scale.
+     */
+    private static BitmapFont createGameFont() {
+        com.badlogic.gdx.files.FileHandle fontFile = Gdx.files.internal("font/MinecraftRegular-Bmg3.otf");
+        if (fontFile.exists()) {
+            FreeTypeFontGenerator generator = new FreeTypeFontGenerator(fontFile);
+            FreeTypeFontParameter parameter = new FreeTypeFontParameter();
+            parameter.size = 32;
+            parameter.minFilter = Texture.TextureFilter.Nearest;
+            parameter.magFilter = Texture.TextureFilter.Nearest;
+            parameter.hinting = FreeTypeFontGenerator.Hinting.None;
+            BitmapFont generated = generator.generateFont(parameter);
+            generator.dispose();
+            generated.getRegion().getTexture().setFilter(
+                    Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+            generated.setUseIntegerPositions(true);
+            return generated;
+        }
+        BitmapFont fallback = new BitmapFont();
+        fallback.getRegion().getTexture().setFilter(
+                Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        fallback.setUseIntegerPositions(true);
+        return fallback;
+    }
+
+    /** Milliseconds since {@link #create()} started. Decorated intro animations key off this. */
+    public long getAppElapsedMs() {
+        return System.currentTimeMillis() - appStartMs;
     }
 }

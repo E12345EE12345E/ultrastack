@@ -1,0 +1,333 @@
+// Bundles the signed fat JAR with a Temurin 21 JDK for each desktop platform.
+// Invoked as lwjgl3:packageReleaseZips (also from buildall.bat).
+
+import java.net.HttpURLConnection
+import java.net.URI
+
+def temurinBase = 'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.10%2B7'
+
+def releasePlatforms = [
+    [
+        id         : 'linux-aarch64',
+        family     : 'linux',
+        format     : 'tar.gz',
+        archiveName: 'OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.10_7.tar.gz',
+        url        : "${temurinBase}/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.10_7.tar.gz",
+    ],
+    [
+        id         : 'linux-x64',
+        family     : 'linux',
+        format     : 'tar.gz',
+        archiveName: 'OpenJDK21U-jdk_x64_linux_hotspot_21.0.10_7.tar.gz',
+        url        : "${temurinBase}/OpenJDK21U-jdk_x64_linux_hotspot_21.0.10_7.tar.gz",
+    ],
+    [
+        id         : 'mac-aarch64',
+        family     : 'mac',
+        format     : 'tar.gz',
+        archiveName: 'OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.10_7.tar.gz',
+        url        : "${temurinBase}/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.10_7.tar.gz",
+    ],
+    [
+        id         : 'mac-x64',
+        family     : 'mac',
+        format     : 'tar.gz',
+        archiveName: 'OpenJDK21U-jdk_x64_mac_hotspot_21.0.10_7.tar.gz',
+        url        : "${temurinBase}/OpenJDK21U-jdk_x64_mac_hotspot_21.0.10_7.tar.gz",
+    ],
+    [
+        id         : 'windows-x64',
+        family     : 'windows',
+        format     : 'zip',
+        archiveName: 'OpenJDK21U-jdk_x64_windows_hotspot_21.0.10_7.zip',
+        url        : "${temurinBase}/OpenJDK21U-jdk_x64_windows_hotspot_21.0.10_7.zip",
+    ],
+]
+
+boolean isJdkHome(File dir) {
+    dir != null && dir.isDirectory() && (
+        new File(dir, 'bin/java').isFile() || new File(dir, 'bin/java.exe').isFile()
+    )
+}
+
+File findJdkHome(File extractDir) {
+    File macHome = null
+    extractDir.eachDirRecurse { dir ->
+        if (macHome == null && dir.name == 'Home' && dir.parentFile?.name == 'Contents' && isJdkHome(dir)) {
+            macHome = dir
+        }
+    }
+    if (macHome != null) {
+        return macHome
+    }
+    if (isJdkHome(extractDir)) {
+        return extractDir
+    }
+    File found = null
+    extractDir.eachDir { dir ->
+        if (found == null && isJdkHome(dir)) {
+            found = dir
+        }
+    }
+    if (found != null) {
+        return found
+    }
+    throw new GradleException("Could not locate JDK home under ${extractDir}")
+}
+
+void writeUnixText(File file, String text) {
+    String normalized = text.replace('\r\n', '\n').replace('\r', '\n')
+    if (!normalized.endsWith('\n')) {
+        normalized += '\n'
+    }
+    file.bytes = normalized.getBytes('UTF-8')
+}
+
+void writeWindowsText(File file, String text) {
+    String normalized = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+    if (!normalized.endsWith('\r\n')) {
+        normalized += '\r\n'
+    }
+    file.bytes = normalized.getBytes('UTF-8')
+}
+
+void downloadJdkArchive(String url, File dest) {
+    if (dest.exists() && dest.length() > 1_000_000L) {
+        logger.quiet("  Using cached ${dest.name}")
+        return
+    }
+    dest.parentFile.mkdirs()
+    File tmp = new File(dest.absolutePath + '.part')
+    if (tmp.exists()) {
+        tmp.delete()
+    }
+    logger.quiet("  Downloading ${dest.name} ...")
+
+    boolean windows = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')
+    String curl = windows ? 'curl.exe' : 'curl'
+    try {
+        ProcessBuilder pb = new ProcessBuilder(
+            curl, '-fL', '--retry', '3', '--retry-delay', '2',
+            '-A', 'UltraStack-release-packager',
+            '-o', tmp.absolutePath, url
+        )
+        pb.inheritIO()
+        int code = pb.start().waitFor()
+        if (code != 0) {
+            throw new GradleException("curl exited ${code}")
+        }
+    } catch (Exception curlFailed) {
+        logger.quiet("  curl failed (${curlFailed.message}); falling back to Java downloader")
+        downloadJdkArchiveJava(url, tmp)
+    }
+
+    if (!tmp.exists() || tmp.length() < 1_000_000L) {
+        tmp.delete()
+        throw new GradleException("Failed to download JDK from ${url}")
+    }
+    if (dest.exists()) {
+        dest.delete()
+    }
+    java.nio.file.Files.move(
+        tmp.toPath(),
+        dest.toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+    )
+}
+
+void downloadJdkArchiveJava(String url, File tmp) {
+    URI uri = URI.create(url)
+    HttpURLConnection conn = null
+    int redirects = 0
+    while (true) {
+        conn = (HttpURLConnection) uri.toURL().openConnection()
+        conn.instanceFollowRedirects = true
+        conn.connectTimeout = 30_000
+        conn.readTimeout = 300_000
+        conn.setRequestProperty('User-Agent', 'UltraStack-release-packager')
+        int code = conn.responseCode
+        String location = conn.getHeaderField('Location')
+        if (code >= 300 && code < 400 && location != null && redirects < 10) {
+            conn.disconnect()
+            uri = uri.resolve(location)
+            redirects++
+            continue
+        }
+        if (code != 200) {
+            conn.disconnect()
+            throw new GradleException("Download failed HTTP ${code} for ${url}")
+        }
+        break
+    }
+    tmp.withOutputStream { os ->
+        conn.inputStream.with { is -> is.transferTo(os) }
+    }
+    conn.disconnect()
+}
+
+File prepareFlattenedJdk(Map spec, File cacheDir, File workRoot) {
+    String archiveBase = spec.archiveName.replaceFirst(/\.tar\.gz$/, '').replaceFirst(/\.zip$/, '')
+    File flattened = new File(cacheDir, "extracted/${archiveBase}")
+    if (isJdkHome(flattened)) {
+        logger.quiet("  Using extracted cache ${archiveBase}")
+        return flattened
+    }
+    if (flattened.exists()) {
+        project.delete(flattened)
+    }
+
+    File archive = new File(cacheDir, spec.archiveName)
+    downloadJdkArchive(spec.url as String, archive)
+
+    File extractDir = new File(workRoot, "extract-${spec.id}")
+    if (extractDir.exists()) {
+        project.delete(extractDir)
+    }
+    extractDir.mkdirs()
+    logger.quiet("  Extracting ${spec.archiveName} ...")
+    if (spec.format == 'tar.gz') {
+        ant.untar(src: archive.absolutePath, dest: extractDir.absolutePath, compression: 'gzip')
+    } else {
+        ant.unzip(src: archive.absolutePath, dest: extractDir.absolutePath)
+    }
+
+    File home = findJdkHome(extractDir)
+    flattened.parentFile.mkdirs()
+    ant.copy(todir: flattened.absolutePath) {
+        fileset(dir: home.absolutePath)
+    }
+    project.delete(extractDir)
+    if (!isJdkHome(flattened)) {
+        throw new GradleException("Extracted JDK for ${spec.id} is missing bin/java")
+    }
+    return flattened
+}
+
+void ensureWindowsStartExe(File scripts) {
+    File startExe = new File(scripts, 'start.exe')
+    if (startExe.isFile() && startExe.length() > 0) {
+        return
+    }
+    File buildBat = new File(scripts, 'build-start.bat')
+    boolean windows = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')
+    if (windows && buildBat.isFile()) {
+        logger.quiet("  Building start.exe ...")
+        ProcessBuilder pb = new ProcessBuilder(buildBat.absolutePath)
+        pb.directory(scripts)
+        pb.inheritIO()
+        int code = pb.start().waitFor()
+        if (code != 0) {
+            throw new GradleException("build-start.bat exited ${code}")
+        }
+    }
+    if (!startExe.isFile() || startExe.length() == 0) {
+        throw new GradleException(
+            "Windows start.exe is missing. Run lwjgl3/release-scripts/build-start.bat on Windows.")
+    }
+}
+
+void copyBundleScripts(File bundleDir, String family) {
+    File scripts = project.file('release-scripts')
+    writeUnixText(new File(bundleDir, 'Update.java'), new File(scripts, 'Update.java').getText('UTF-8'))
+    if (family == 'windows') {
+        ensureWindowsStartExe(scripts)
+        ant.copy(file: new File(scripts, 'start.exe').absolutePath, tofile: new File(bundleDir, 'start.exe').absolutePath)
+        writeWindowsText(new File(bundleDir, 'update.bat'), new File(scripts, 'update.bat').getText('UTF-8'))
+        return
+    }
+    String unixStart = new File(scripts, 'start.sh').getText('UTF-8')
+    String unixUpdate = new File(scripts, 'update.sh').getText('UTF-8')
+    if (family == 'mac') {
+        writeUnixText(new File(bundleDir, 'start.command'), unixStart)
+        writeUnixText(new File(bundleDir, 'update.command'), unixUpdate)
+    } else {
+        writeUnixText(new File(bundleDir, 'start.sh'), unixStart)
+        writeUnixText(new File(bundleDir, 'update.sh'), unixUpdate)
+    }
+}
+
+void zipBundle(File bundleDir, File zipFile) {
+    if (zipFile.exists()) {
+        zipFile.delete()
+    }
+    String folderName = bundleDir.name
+    File parent = bundleDir.parentFile
+    List<String> execIncludes = []
+    ['start.sh', 'start.command', 'update.sh', 'update.command', 'start.exe'].each { name ->
+        if (new File(bundleDir, name).isFile()) {
+            execIncludes.add("${folderName}/${name}")
+        }
+    }
+    execIncludes.add("${folderName}/jdk/bin/**")
+    ['jdk/lib/jspawnhelper', 'jdk/lib/jexec'].each { rel ->
+        if (new File(bundleDir, rel).isFile()) {
+            execIncludes.add("${folderName}/${rel}")
+        }
+    }
+
+    ant.zip(destfile: zipFile.absolutePath) {
+        zipfileset(dir: parent.absolutePath, includes: "${folderName}/**", filemode: '644', dirmode: '755') {
+            execIncludes.each { pattern ->
+                exclude(name: pattern)
+            }
+        }
+        zipfileset(dir: parent.absolutePath, includes: execIncludes.join(','), filemode: '755', dirmode: '755')
+    }
+}
+
+tasks.register('packageReleaseZips') {
+    group = 'distribution'
+    description = 'Create JDK-bundled zip releases for linux/mac/windows (x64 and aarch64 where applicable).'
+    dependsOn 'jar'
+
+    doLast {
+        File jarFile = tasks.named('jar').get().archiveFile.get().asFile
+        if (!jarFile.isFile()) {
+            throw new GradleException("Client jar not found: ${jarFile}")
+        }
+        String jarName = jarFile.name
+        File libsDir = jarFile.parentFile
+        File cacheDir = rootProject.file('jdk-cache')
+        File workRoot = layout.buildDirectory.dir('release-staging').get().asFile
+        if (workRoot.exists()) {
+            project.delete(workRoot)
+        }
+        workRoot.mkdirs()
+
+        ['', '-win'].each { suffix ->
+            File leftover = new File(libsDir, "${appName}-${projectVersion}${suffix}.zip")
+            if (leftover.exists()) {
+                leftover.delete()
+            }
+        }
+
+        logger.quiet("Packaging ${releasePlatforms.size()} platform zips from ${jarName}")
+        releasePlatforms.each { spec ->
+            logger.quiet("[${spec.id}]")
+            File flattenedJdk = prepareFlattenedJdk(spec, cacheDir, workRoot)
+            String folderName = "${appName}-${projectVersion}-${spec.id}"
+            File bundleDir = new File(workRoot, folderName)
+            bundleDir.mkdirs()
+            ant.copy(file: jarFile.absolutePath, todir: bundleDir.absolutePath)
+            File destJdk = new File(bundleDir, 'jdk')
+            ant.copy(todir: destJdk.absolutePath) {
+                fileset(dir: flattenedJdk.absolutePath)
+            }
+            copyBundleScripts(bundleDir, spec.family as String)
+
+            File zipFile = new File(libsDir, "${folderName}.zip")
+            logger.quiet("  Writing ${zipFile.name} ...")
+            zipBundle(bundleDir, zipFile)
+            logger.quiet("  ${zipFile.name} (${(zipFile.length() / 1024 / 1024).toLong()} MB)")
+            project.delete(bundleDir)
+        }
+        project.delete(workRoot)
+
+        logger.quiet("")
+        logger.quiet("Release outputs in ${libsDir}:")
+        logger.quiet("  ${jarName}")
+        releasePlatforms.each { spec ->
+            logger.quiet("  ${appName}-${projectVersion}-${spec.id}.zip")
+        }
+    }
+}
