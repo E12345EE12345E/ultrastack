@@ -1,5 +1,7 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
+import java.util.function.Supplier;
+
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIButton;
 import me.ethanchen.lwjgl3.menuscreens.ui.UISlider;
@@ -23,9 +25,11 @@ public class SoundSettingsScreen extends MenuScreen {
     private final UISlider masterSlider;
     private final UISlider sfxSlider;
     private final UISlider musicSlider;
+    private final Supplier<MenuScreen> returnTo;
 
-    public SoundSettingsScreen(ClientApp app) {
+    public SoundSettingsScreen(ClientApp app, Supplier<MenuScreen> returnTo) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
+        this.returnTo = returnTo;
 
         GameSettings.VolumeSettings vol = app.getSettings().volume;
 
@@ -65,13 +69,13 @@ public class SoundSettingsScreen extends MenuScreen {
         vol.music  = musicSlider.getValue();
         AudioManager.getInstance().setVolumeSettings(vol);
         SettingsManager.save(app.getSettings());
-        app.switchMenu(new MainSettingsScreen(app));
+        app.switchMenu(returnTo.get());
     }
 
     @Override
     protected void onEscPressed() {
         AudioManager.getInstance().setVolumeSettings(app.getSettings().volume);
-        app.switchMenu(new MainSettingsScreen(app));
+        app.switchMenu(returnTo.get());
     }
 
     @Override

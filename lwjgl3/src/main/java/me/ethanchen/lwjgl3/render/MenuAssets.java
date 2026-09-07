@@ -43,6 +43,10 @@ public final class MenuAssets {
         return loadNearest("exit_icon.png");
     }
 
+    public static Texture upArrowIcon() {
+        return loadNearest("up_arrow_icon.png");
+    }
+
     /** Top-left selection corner; drawn four times (rotated) around a keyboard/controller-focused button. */
     public static Texture hoveredCorner() {
         return loadNearest("hovered_corner.png");

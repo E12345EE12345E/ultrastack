@@ -4,12 +4,18 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import com.badlogic.gdx.Gdx;
+
+import me.ethanchen.lwjgl3.AppLinks;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollableList;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollbar;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
+import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
+import me.ethanchen.lwjgl3.render.MenuAssets;
 import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
@@ -24,11 +30,23 @@ import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 public class RoomBrowserMenu extends DecoratedMenuScreen {
     private static final int ROOM_LIST_INTERVAL = 120;
     private static final int SLOT_COUNT = 6;
+    private static final float LIST_CX = 960f;
+    private static final float LIST_TOP_SLOT_Y = 880f;
+    private static final float SLOT_W = 720f;
+    private static final float SLOT_H = 72f;
+    private static final float SLOT_GAP = 12f;
+    private static final float SCROLL_BTN = 64f;
+    private static final float SCROLL_GAP = 20f;
+    private static final float SCROLL_THUMB_W = 22f;
+    /** Gap between each scroll button's inner edge and the track (also clears the button outline). */
+    private static final float TRACK_INSET = 12f;
+    private static final float ICON_BTN = 96f;
 
     private int tickCount;
     private final DecoratedScrollableList roomList;
     private final DecoratedTextBox joinIdBox;
     private final DecoratedText statusText;
+    private final Widget settingsWidget;
     private final AuroraBackgroundRenderer aurora;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
@@ -44,18 +62,31 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
         DecoratedText title = new DecoratedText(960f, 1000f, "Multiplayer", 3.4f);
         addDecorated(title);
 
-        roomList = new DecoratedScrollableList(960f, 880f, 720f, 72f, SLOT_COUNT, 12f)
+        roomList = new DecoratedScrollableList(LIST_CX, LIST_TOP_SLOT_Y, SLOT_W, SLOT_H, SLOT_COUNT, SLOT_GAP)
                 .onSelect(this::joinRoom);
         addDecorated(roomList);
 
-        DecoratedText joinLabel = new DecoratedText(850f, 360f, "Join by Room ID", 1.35f);
-        joinIdBox = new DecoratedTextBox(850f, 280f, 480f, 84f);
-        joinIdBox.onEnter(this::joinByTypedId);
+        float listH = SLOT_COUNT * SLOT_H + (SLOT_COUNT - 1) * SLOT_GAP;
+        float listTop = LIST_TOP_SLOT_Y + SLOT_H * 0.5f;
+        float listBottom = listTop - listH;
+        float scrollX = LIST_CX + SLOT_W * 0.5f + SCROLL_GAP + SCROLL_BTN * 0.5f;
+        float upY = listTop - SCROLL_BTN * 0.5f;
+        float downY = listBottom + SCROLL_BTN * 0.5f;
+        float trackTop = upY - SCROLL_BTN * 0.5f - TRACK_INSET;
+        float trackBottom = downY + SCROLL_BTN * 0.5f + TRACK_INSET;
+        float trackH = trackTop - trackBottom;
+        float trackY = (trackTop + trackBottom) * 0.5f;
 
-        DecoratedButton upBtn = new DecoratedButton(1170f, 280f, 72f, 72f, "^", () -> roomList.scrollBy(-2));
-        upBtn.fontSize = 1.6f;
-        DecoratedButton downBtn = new DecoratedButton(1260f, 280f, 72f, 72f, "v", () -> roomList.scrollBy(2));
-        downBtn.fontSize = 1.6f;
+        DecoratedButton upBtn = DecoratedButton.icon(scrollX, upY, SCROLL_BTN,
+                MenuAssets.upArrowIcon(), () -> roomList.scrollBy(-2));
+        DecoratedButton downBtn = DecoratedButton.icon(scrollX, downY, SCROLL_BTN,
+                MenuAssets.upArrowIcon(), () -> roomList.scrollBy(2));
+        downBtn.iconRotationDeg = 180f;
+        DecoratedScrollbar scrollbar = new DecoratedScrollbar(scrollX, trackY, SCROLL_THUMB_W, trackH, roomList);
+
+        DecoratedText joinLabel = new DecoratedText(960f, 360f, "Join by Room ID", 1.35f);
+        joinIdBox = new DecoratedTextBox(960f, 280f, 480f, 84f);
+        joinIdBox.onEnter(this::joinByTypedId);
 
         DecoratedButton createBtn = new DecoratedButton(960f, 170f, 360f, 80f, "Create Room", this::createRoom);
         createBtn.fill(0.95f, 0.32f, 0.68f);
@@ -67,15 +98,33 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
         DecoratedButton backBtn = new DecoratedButton(200f, 80f, 200f, 68f, "Back", this::leaveToMain);
         backBtn.fontSize = 1.4f;
 
+        DecoratedButton settingsBtn = DecoratedButton.icon(1712f, 80f, ICON_BTN, MenuAssets.settingsIcon(),
+                this::openSettingsWidget);
+        DecoratedButton helpBtn = DecoratedButton.icon(1832f, 80f, ICON_BTN, MenuAssets.wikiIcon(),
+                () -> Gdx.net.openURI(AppLinks.WIKI_URL));
+        settingsBtn.fill(0.95f, 0.70f, 0.22f);
+        helpBtn.fill(0.35f, 0.78f, 1.00f);
+        settingsBtn.info("Settings");
+        helpBtn.info("Wiki");
+
         addDecorated(joinLabel);
         addDecorated(joinIdBox);
         addDecorated(upBtn);
+        addDecorated(scrollbar);
         addDecorated(downBtn);
         addDecorated(createBtn);
         addDecorated(statusText);
         addDecorated(backBtn);
+        addDecorated(settingsBtn);
+        addDecorated(helpBtn);
 
+        settingsWidget = SettingsHub.createWidget(app, this, () -> new RoomBrowserMenu(app));
         aurora = new AuroraBackgroundRenderer();
+    }
+
+    private void openSettingsWidget() {
+        if (hasOpenWidget()) return;
+        openWidget(settingsWidget);
     }
 
     private void joinByTypedId() {

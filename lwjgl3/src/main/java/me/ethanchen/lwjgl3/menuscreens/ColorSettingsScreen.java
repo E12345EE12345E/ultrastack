@@ -3,6 +3,8 @@ package me.ethanchen.lwjgl3.menuscreens;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.math.Vector2;
 
+import java.util.function.Supplier;
+
 import me.ethanchen.game.board.Piece;
 import me.ethanchen.game.board.Tile;
 import me.ethanchen.lwjgl3.ClientApp;
@@ -72,13 +74,15 @@ public class ColorSettingsScreen extends MenuScreen {
 
     /** Live working copy; written to settings only on Done. */
     private final GameSettings.ColorTweaks tempTweaks = new GameSettings.ColorTweaks();
+    private final Supplier<MenuScreen> returnTo;
 
     // -------------------------------------------------------------------------
     // Constructor
     // -------------------------------------------------------------------------
 
-    public ColorSettingsScreen(ClientApp app) {
+    public ColorSettingsScreen(ClientApp app, Supplier<MenuScreen> returnTo) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
+        this.returnTo = returnTo;
 
         // Initialise temp copy from saved settings
         copyTweaks(app.getSettings().colors, tempTweaks);
@@ -137,13 +141,13 @@ public class ColorSettingsScreen extends MenuScreen {
     private void saveAndExit() {
         copyTweaks(tempTweaks, app.getSettings().colors);
         SettingsManager.save(app.getSettings());
-        app.switchMenu(new MainSettingsScreen(app));
+        app.switchMenu(returnTo.get());
     }
 
     @Override
     protected void onEscPressed() {
         PieceTints.applyColorOffsets(app.getSettings().colors);
-        app.switchMenu(new MainSettingsScreen(app));
+        app.switchMenu(returnTo.get());
     }
 
     // -------------------------------------------------------------------------

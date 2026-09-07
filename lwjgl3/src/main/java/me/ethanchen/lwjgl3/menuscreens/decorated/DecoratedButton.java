@@ -16,6 +16,8 @@ import me.ethanchen.lwjgl3.music.AudioManager;
 public class DecoratedButton extends DecoratedElement {
     public String text;
     public Texture icon;
+    /** Degrees clockwise; 180 draws the up-arrow asset as a down arrow. */
+    public float iconRotationDeg;
     public Runnable action;
     public float fontSize = 1.7f;
     /** Panel tint; RGB is recolorable, default white at partial alpha. */
@@ -101,7 +103,8 @@ public class DecoratedButton extends DecoratedElement {
             float ix = Math.round(x + (w - iw) * 0.5f);
             float iy = Math.round(y + (h - ih) * 0.5f);
             ctx.sprites.setColor(1f, 1f, 1f, a);
-            ctx.sprites.draw(icon, ix, iy, iw, ih);
+            ctx.sprites.draw(icon, ix, iy, iw * 0.5f, ih * 0.5f, iw, ih, 1f, 1f,
+                    iconRotationDeg, 0, 0, tw, th, false, false);
         } else if (text != null && !text.isEmpty()) {
             float[] saved = UIFont.saveAndSetScale(ctx.font, fontSize);
             GlyphLayout layout = new GlyphLayout(ctx.font, text);

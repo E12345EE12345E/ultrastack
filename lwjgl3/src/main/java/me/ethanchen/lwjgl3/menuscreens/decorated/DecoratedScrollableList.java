@@ -5,6 +5,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
+import com.badlogic.gdx.graphics.Color;
+
 import me.ethanchen.game.GameMode;
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.network.dto.RoomInfo;
@@ -60,6 +62,26 @@ public class DecoratedScrollableList extends DecoratedElement {
         offset += delta;
         clampOffset();
         rebind();
+    }
+
+    public boolean canScroll() {
+        return items.size() > slotCount;
+    }
+
+    public int offset() {
+        return offset;
+    }
+
+    public int maxOffset() {
+        return Math.max(0, items.size() - slotCount);
+    }
+
+    public int slotCount() {
+        return slotCount;
+    }
+
+    public int itemCount() {
+        return items.size();
     }
 
     @Override
@@ -136,6 +158,7 @@ public class DecoratedScrollableList extends DecoratedElement {
                 slot.action = null;
                 slot.infoText = null;
                 slot.focused = false;
+                slot.fill(1f, 1f, 1f);
                 continue;
             }
             RoomInfo room = items.get(index);
@@ -143,6 +166,7 @@ public class DecoratedScrollableList extends DecoratedElement {
             slot.focusable = true;
             slot.text = formatLabel(room);
             slot.info(formatInfo(room));
+            applyRoomTint(slot, room.roomId);
             slot.action = () -> {
                 if (onSelect != null) onSelect.accept(room);
             };
@@ -156,6 +180,23 @@ public class DecoratedScrollableList extends DecoratedElement {
 
     private static float listCenterY(float topSlotCenterY, float slotH, int slotCount, float gap) {
         return topSlotCenterY - (listHeight(slotH, slotCount, gap) - slotH) * 0.5f;
+    }
+
+    /** Deterministic HSV tint so the same room id always gets the same hue. */
+    static void applyRoomTint(DecoratedListButton slot, String roomId) {
+        float hue = hueFromRoomId(roomId);
+        Color c = new Color().fromHsv(hue * 360f, 0.55f, 0.95f);
+        slot.fill(c.r, c.g, c.b);
+    }
+
+    static float hueFromRoomId(String roomId) {
+        int h = roomId == null ? 0 : roomId.hashCode();
+        h ^= (h >>> 16);
+        h *= 0x7feb352d;
+        h ^= (h >>> 15);
+        h *= 0x846ca68b;
+        h ^= (h >>> 16);
+        return (h & 0xFFFFFF) / (float) 0x1000000;
     }
 
     static String formatLabel(RoomInfo room) {

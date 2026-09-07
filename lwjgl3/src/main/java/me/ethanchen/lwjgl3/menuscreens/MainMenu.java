@@ -9,7 +9,6 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.Anim;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedImage;
-import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.render.MenuAssets;
@@ -95,38 +94,9 @@ public class MainMenu extends DecoratedMenuScreen {
             addDecorated(b);
         }
 
-        settingsWidget = buildSettingsWidget();
+        settingsWidget = SettingsHub.createWidget(app, this, () -> new MainMenu(app));
         aurora = new AuroraBackgroundRenderer();
         applyIntro(appElapsedMs());
-    }
-
-    private Widget buildSettingsWidget() {
-        Widget w = new Widget(960f, 520f, 580f, 580f);
-        w.add(new DecoratedText(0f, 0f, "Settings", 2.2f), 0f, 228f);
-        DecoratedButton movement = new DecoratedButton(0f, 0f, 440f, 78f, "Movement",
-                () -> app.switchMenu(new MovementSettingsScreen(app)));
-        DecoratedButton color = new DecoratedButton(0f, 0f, 440f, 78f, "Color",
-                () -> app.switchMenu(new ColorSettingsScreen(app)));
-        DecoratedButton sound = new DecoratedButton(0f, 0f, 440f, 78f, "Sound",
-                () -> app.switchMenu(new SoundSettingsScreen(app)));
-        DecoratedButton back = new DecoratedButton(0f, 0f, 300f, 68f, "Back", this::closeTopWidget);
-        movement.fontSize = 1.55f;
-        color.fontSize = 1.55f;
-        sound.fontSize = 1.55f;
-        back.fontSize = 1.4f;
-
-        float btnH = 78f;
-        float backH = 68f;
-        float gap = 32f;
-        float movementY = 118f;
-        float colorY = movementY - btnH - gap;
-        float soundY = colorY - btnH - gap;
-        float backY = soundY - btnH * 0.5f - gap - backH * 0.5f;
-        w.add(movement, 0f, movementY);
-        w.add(color, 0f, colorY);
-        w.add(sound, 0f, soundY);
-        w.add(back, 0f, backY);
-        return w;
     }
 
     private void openSettingsWidget() {

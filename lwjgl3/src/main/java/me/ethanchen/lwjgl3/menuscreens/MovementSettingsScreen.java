@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.controllers.Controller;
@@ -19,6 +20,7 @@ import me.ethanchen.lwjgl3.settings.GameSettings;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
 
 public class MovementSettingsScreen extends MenuScreen {
+    private final Supplier<MenuScreen> returnTo;
     // Column centers (relative coords)
     private static final double LABEL_X  = 0.12;
     private static final double KEY1_X   = 0.32;
@@ -88,8 +90,9 @@ public class MovementSettingsScreen extends MenuScreen {
         }
     };
 
-    public MovementSettingsScreen(ClientApp app) {
+    public MovementSettingsScreen(ClientApp app, Supplier<MenuScreen> returnTo) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
+        this.returnTo = returnTo;
         GameSettings.MovementKeys keys = app.getSettings().movement;
 
         elements.add(new UIText(0.5, 0.94, "Movement Settings", 3));
@@ -157,7 +160,7 @@ public class MovementSettingsScreen extends MenuScreen {
     @Override
     protected void onEscPressed() {
         Controllers.removeListener(controllerListener);
-        app.switchMenu(new MainSettingsScreen(app));
+        app.switchMenu(returnTo.get());
     }
 
     @Override
@@ -214,6 +217,6 @@ public class MovementSettingsScreen extends MenuScreen {
             CTRL2_SETTERS.get(i).accept(m, ctrl2Btns[i].getBoundButton());
         }
         SettingsManager.save(settings);
-        app.switchMenu(new MainSettingsScreen(app));
+        app.switchMenu(returnTo.get());
     }
 }
