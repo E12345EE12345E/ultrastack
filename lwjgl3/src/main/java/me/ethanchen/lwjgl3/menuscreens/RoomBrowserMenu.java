@@ -1,21 +1,35 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 import me.ethanchen.lwjgl3.ClientApp;
-import me.ethanchen.lwjgl3.menuscreens.ui.*;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollableList;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
+import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
+import me.ethanchen.network.dto.RoomInfo;
 import me.ethanchen.network.packets.s2c.RoomJoinResponse;
 import me.ethanchen.network.packets.s2c.RoomListBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
-public class RoomBrowserMenu extends MenuScreen {
+/**
+ * Decorated room browser MVP: centered list, join-by-id, create room.
+ */
+public class RoomBrowserMenu extends DecoratedMenuScreen {
     private static final int ROOM_LIST_INTERVAL = 120;
+    private static final int SLOT_COUNT = 6;
 
     private int tickCount;
-    private TextInput roomListText;
-    private TextInput messageText;
-    private final LocalPlayerSidebar sidebar;
-    private final CharacterSidebar characterSidebar;
+    private final DecoratedScrollableList roomList;
+    private final DecoratedTextBox joinIdBox;
+    private final DecoratedText statusText;
+    private final AuroraBackgroundRenderer aurora;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(RoomListBroadcast.class, w -> handleRoomList((RoomListBroadcast) w.packet))
@@ -25,63 +39,102 @@ public class RoomBrowserMenu extends MenuScreen {
     public RoomBrowserMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
 
-        tickCount = ROOM_LIST_INTERVAL - 1; // fires on first tick
+        tickCount = ROOM_LIST_INTERVAL - 1;
 
-        roomListText = new TextInput();
-        roomListText.set("Fetching rooms...");
-        messageText = new TextInput();
+        DecoratedText title = new DecoratedText(960f, 1000f, "Multiplayer", 3.4f);
+        addDecorated(title);
 
-        TextBoxOutput joinIdOutput = new TextBoxOutput();
+        roomList = new DecoratedScrollableList(960f, 880f, 720f, 72f, SLOT_COUNT, 12f)
+                .onSelect(this::joinRoom);
+        addDecorated(roomList);
 
-        elements.add(new UIText(0.5, 0.88, "Room Browser", 4));
+        DecoratedText joinLabel = new DecoratedText(850f, 360f, "Join by Room ID", 1.35f);
+        joinIdBox = new DecoratedTextBox(850f, 280f, 480f, 84f);
+        joinIdBox.onEnter(this::joinByTypedId);
 
-        elements.add(new UIText(0.5, 0.77, roomListText, 1, UIText.TextAlign.TOP_LEFT));
+        DecoratedButton upBtn = new DecoratedButton(1170f, 280f, 72f, 72f, "^", () -> roomList.scrollBy(-2));
+        upBtn.fontSize = 1.6f;
+        DecoratedButton downBtn = new DecoratedButton(1260f, 280f, 72f, 72f, "v", () -> roomList.scrollBy(2));
+        downBtn.fontSize = 1.6f;
 
-        elements.add(new UIText(0.5, 0.38, "Join by Room ID", 1));
-        elements.add(new UITextBox(0.5, 0.31, 0.35, 0.08, joinIdOutput));
+        DecoratedButton createBtn = new DecoratedButton(960f, 170f, 360f, 80f, "Create Room", this::createRoom);
+        createBtn.fill(0.95f, 0.32f, 0.68f);
+        createBtn.fontSize = 1.45f;
+        createBtn.info("Host a new room.");
 
-        elements.add(new UIText(0.5, 0.22, messageText, 1));
+        statusText = new DecoratedText(960f, 90f, "Fetching rooms...", 1.2f);
 
-        elements.add(new UIButton(0.3, 0.125, 0.25, 0.1, "Join", () -> {
-            String roomId = joinIdOutput.get().trim();
-            if (roomId.isEmpty()) {
-                messageText.set("Enter a room ID.");
-                return;
-            }
-            app.sendJoinRoomRequest(roomId);
-        }));
+        DecoratedButton backBtn = new DecoratedButton(200f, 80f, 200f, 68f, "Back", this::leaveToMain);
+        backBtn.fontSize = 1.4f;
 
-        elements.add(new UIButton(0.7, 0.125, 0.3, 0.1, "Create Room", () -> {
-            app.sendCreateRoomRequest();
-        }));
+        addDecorated(joinLabel);
+        addDecorated(joinIdBox);
+        addDecorated(upBtn);
+        addDecorated(downBtn);
+        addDecorated(createBtn);
+        addDecorated(statusText);
+        addDecorated(backBtn);
 
-        elements.add(new UIButton(0.5, 0.04, 0.3, 0.07, "Disconnect", () -> {
-            app.sendLeaveRoomRequest();
-            app.disconnect();
-            app.switchMenu(new MainMenu(app));
-        }));
-
-        sidebar = new LocalPlayerSidebar(app, elements, () -> {});
-        characterSidebar = new CharacterSidebar(app, elements, this, () -> true);
+        aurora = new AuroraBackgroundRenderer();
     }
 
-    @Override
-    protected void onEscPressed() {
+    private void joinByTypedId() {
+        String roomId = joinIdBox.get().trim();
+        if (roomId.isEmpty()) {
+            setStatus("Enter a room ID.");
+            return;
+        }
+        joinRoomId(roomId);
+    }
+
+    private void joinRoom(RoomInfo room) {
+        if (room == null || room.roomId == null || room.roomId.isEmpty()) return;
+        joinRoomId(room.roomId);
+    }
+
+    private void joinRoomId(String roomId) {
+        setStatus("Joining...");
+        app.sendJoinRoomRequest(roomId);
+    }
+
+    private void createRoom() {
+        setStatus("Creating room...");
+        app.sendCreateRoomRequest();
+    }
+
+    private void setStatus(String message) {
+        statusText.text = message != null ? message : "";
+    }
+
+    private void leaveToMain() {
         app.sendLeaveRoomRequest();
         app.disconnect();
         app.switchMenu(new MainMenu(app));
     }
 
     @Override
-    public void update() {
+    protected void onEscPressed() {
+        leaveToMain();
+    }
+
+    @Override
+    protected void updateScreen(long menuElapsedMs, long appElapsedMs) {
         tickCount++;
         if (tickCount % ROOM_LIST_INTERVAL == 0) {
             app.sendRoomListRequest();
         }
-        sidebar.tick();
-        characterSidebar.tick();
     }
 
+    @Override
+    protected void renderBackground(DecorContext ctx) {
+        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
+    }
+
+    @Override
+    public void dispose() {
+        aurora.dispose();
+        super.dispose();
+    }
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
@@ -90,35 +143,25 @@ public class RoomBrowserMenu extends MenuScreen {
 
     private void handleRoomList(RoomListBroadcast p) {
         if (p.rooms == null || p.rooms.length == 0) {
-            roomListText.set("No rooms available.");
+            roomList.setItems(List.of());
+            setStatus("No rooms available.");
             return;
         }
-        StringBuilder sb = new StringBuilder();
-        for (me.ethanchen.network.dto.RoomInfo r : p.rooms) {
-            sb.append(r.roomId);
-            if (r.inProgress) {
-                sb.append(" | [IN PROGRESS]");
-            }
-            sb.append(" | host: ").append(r.hostName != null ? r.hostName : "?")
-              .append(" | players: ").append(r.playerCount);
-            if (r.spectatorCount > 0) {
-                sb.append(" | spectators: ").append(r.spectatorCount);
-            }
-            sb.append("\n");
+        List<RoomInfo> rooms = new ArrayList<>(Arrays.asList(p.rooms));
+        roomList.setItems(rooms);
+        if ("Fetching rooms...".equals(statusText.text) || "No rooms available.".equals(statusText.text)) {
+            setStatus("");
         }
-        roomListText.set(sb.toString().trim());
     }
 
     private void handleRoomJoinResponse(RoomJoinResponse res) {
         if (res.success) {
             if (res.gameInProgress) {
-                // Stay on this screen briefly; StartGameBroadcast (spectator) will pull us in.
-                // Also open the lobby so chat/list work if the game ends before the broadcast.
-                messageText.set(res.spectatorOnly ? "Joining as spectator..." : "Joining...");
+                setStatus(res.spectatorOnly ? "Joining as spectator..." : "Joining...");
             }
             app.switchMenu(new MultiplayerLobby(app, res.isHost, res.gameInProgress));
         } else {
-            messageText.set(res.reason != null && !res.reason.isEmpty() ? res.reason : "Could not join room.");
+            setStatus(res.reason != null && !res.reason.isEmpty() ? res.reason : "Could not join room.");
         }
     }
 }

@@ -9,6 +9,9 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.Gdx;
 
+import java.util.Collections;
+import java.util.List;
+
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIElement;
@@ -80,6 +83,16 @@ public abstract class DecoratedElement extends UIElement implements Decorated {
     @Override
     public boolean isFocusable() {
         return focusable && visible && alpha > 0.01f;
+    }
+
+    /** Child focusables hosted by a container (empty for leaf widgets). */
+    public List<Decorated> nestedFocusables() {
+        return Collections.emptyList();
+    }
+
+    /** All nested decorated elements for hit-testing and InfoText (empty for leaf widgets). */
+    public List<DecoratedElement> nestedElements() {
+        return Collections.emptyList();
     }
 
     @Override
@@ -189,11 +202,16 @@ public abstract class DecoratedElement extends UIElement implements Decorated {
     /** Translucent fill plus an axis-aligned frame that does not cover the interior. */
     protected void drawFramedPanel(DecorContext ctx, Color fillColor, Color outlineColor,
                                    float a, boolean hot) {
+        drawFramedPanel(ctx, fillColor, outlineColor, a, hot, OUTLINE_DESIGN_PX);
+    }
+
+    protected void drawFramedPanel(DecorContext ctx, Color fillColor, Color outlineColor,
+                                   float a, boolean hot, float outlineDesignPx) {
         float x = pxX();
         float y = pxY();
         float w = pxW();
         float h = pxH();
-        float t = Math.max(2f, MenuScreen.toScreenWidth((float) DesignUi.nw(OUTLINE_DESIGN_PX)));
+        float t = Math.max(1f, MenuScreen.toScreenWidth((float) DesignUi.nw(outlineDesignPx)));
         ctx.shapes.begin(ShapeRenderer.ShapeType.Filled);
         enableBlend();
         float fillA = Math.min(0.65f, fillColor.a * (hot ? 1.55f : 1f));

@@ -21,6 +21,7 @@ import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Decorated;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedElement;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollableList;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
 import me.ethanchen.lwjgl3.menuscreens.decorated.FocusNavigator;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
@@ -302,6 +303,20 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         });
     }
 
+    @Override
+    public boolean scrolled(float amountX, float amountY) {
+        if (hasModalWidget()) return false;
+        if (amountY == 0f) return false;
+        int dir = amountY > 0f ? 1 : -1;
+        for (Decorated d : decorated) {
+            if (d instanceof DecoratedScrollableList) {
+                ((DecoratedScrollableList) d).scrollBy(dir);
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Draws at most one InfoText popup after all chrome so it is never covered.
      * A mouse-hovered host wins over keyboard/controller focus.
@@ -334,9 +349,10 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
             out.addAll(widgets.peekLast().decoratedElements());
         } else {
             for (Decorated d : decorated) {
-                if (d instanceof DecoratedElement) {
-                    out.add((DecoratedElement) d);
-                }
+                if (!(d instanceof DecoratedElement)) continue;
+                DecoratedElement el = (DecoratedElement) d;
+                out.add(el);
+                out.addAll(el.nestedElements());
             }
         }
         return out;
@@ -360,6 +376,9 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         } else {
             for (Decorated d : decorated) {
                 if (d.isFocusable()) ring.add(d);
+                if (d instanceof DecoratedElement) {
+                    ring.addAll(((DecoratedElement) d).nestedFocusables());
+                }
             }
         }
         navigator.setRing(ring);
@@ -380,6 +399,13 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
             Decorated d = decorated.get(i);
             if (!(d instanceof DecoratedElement)) continue;
             DecoratedElement el = (DecoratedElement) d;
+            List<Decorated> nested = el.nestedFocusables();
+            for (int j = nested.size() - 1; j >= 0; j--) {
+                Decorated n = nested.get(j);
+                if (!(n instanceof DecoratedElement)) continue;
+                DecoratedElement child = (DecoratedElement) n;
+                if (child.isFocusable() && child.containsScreenPoint(screenX, screenY)) return child;
+            }
             if (el.isFocusable() && el.containsScreenPoint(screenX, screenY)) return el;
         }
         return null;

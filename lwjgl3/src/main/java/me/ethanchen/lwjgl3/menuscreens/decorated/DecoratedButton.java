@@ -21,6 +21,7 @@ public class DecoratedButton extends DecoratedElement {
     /** Panel tint; RGB is recolorable, default white at partial alpha. */
     public final Color fillColor = new Color(1f, 1f, 1f, 0.22f);
     public final Color outlineColor = new Color(1f, 1f, 1f, 1f);
+    public float outlineDesignPx = OUTLINE_DESIGN_PX;
 
     public DecoratedButton(float designX, float designY, float designW, float designH,
                            String text, Runnable action) {
@@ -86,7 +87,7 @@ public class DecoratedButton extends DecoratedElement {
 
         boolean hot = highlighted();
         float a = Anim.clamp01(alpha);
-        drawFramedPanel(ctx, fillColor, outlineColor, a, hot);
+        drawFramedPanel(ctx, fillColor, outlineColor, a, hot, outlineDesignPx);
 
         ctx.sprites.begin();
         if (icon != null) {

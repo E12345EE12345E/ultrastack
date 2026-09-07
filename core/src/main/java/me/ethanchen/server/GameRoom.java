@@ -959,6 +959,14 @@ public class GameRoom implements Runnable, GameRoomContext {
         return n;
     }
 
+    public synchronized GameMode getPendingGamemode() {
+        return pendingGamemode;
+    }
+
+    public synchronized String[] getPlayerNames() {
+        return buildActivePlayerNames();
+    }
+
     /** Package-visible for tests: current host connection id, or -1 if empty. */
     synchronized int getHostConnId() {
         return hostConnId;

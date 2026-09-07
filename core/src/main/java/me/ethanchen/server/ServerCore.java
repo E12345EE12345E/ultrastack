@@ -656,6 +656,8 @@ public class ServerCore implements PacketSender, Runnable {
             info.playerCount = r.getPlayerCount();
             info.spectatorCount = r.getSpectatorCount();
             info.inProgress = r.isInProgress();
+            info.gamemode = r.getPendingGamemode();
+            info.playerNames = r.getPlayerNames();
             b.rooms[i] = info;
         }
         return b;

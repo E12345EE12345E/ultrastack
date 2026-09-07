@@ -1,5 +1,7 @@
 package me.ethanchen.network.dto;
 
+import me.ethanchen.game.GameMode;
+
 /**
  * Snapshot of a single room's lobby state, transmitted inside {@link me.ethanchen.network.packets.s2c.RoomListBroadcast}.
  * Replaces the previous parallel-array layout ({@code roomIds[]}, {@code hostNames[]},
@@ -14,4 +16,6 @@ public class RoomInfo {
     /** Number of spectator seats. */
     public int spectatorCount;
     public boolean inProgress;
+    public GameMode gamemode;
+    public String[] playerNames;
 }

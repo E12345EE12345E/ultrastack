@@ -6,6 +6,8 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.utils.Clipboard;
 
+import java.util.Arrays;
+
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIFont;
 import me.ethanchen.util.TextSanitizer;
@@ -24,6 +26,7 @@ public class DecoratedTextBox extends DecoratedElement {
     public String text = "";
     public int sanitize = SANITIZE_NONE;
     public Runnable runOnEnter;
+    public boolean masked;
     public float fontSize = 1.55f;
     public final Color fillColor = new Color(1f, 1f, 1f, 0.22f);
     public final Color outlineColor = new Color(1f, 1f, 1f, 1f);
@@ -51,6 +54,11 @@ public class DecoratedTextBox extends DecoratedElement {
         return this;
     }
 
+    public DecoratedTextBox masked() {
+        this.masked = true;
+        return this;
+    }
+
     @Override
     public void activate() {
         // Focus only — Enter / click must not treat this like a button.
@@ -62,13 +70,15 @@ public class DecoratedTextBox extends DecoratedElement {
         Clipboard clipboard = Gdx.app.getClipboard();
         switch (keycode) {
             case Input.Keys.C:
-                if (!get().isEmpty()) {
+                if (!masked && !get().isEmpty()) {
                     clipboard.setContents(get());
                 }
                 return true;
             case Input.Keys.X:
                 if (!get().isEmpty()) {
-                    clipboard.setContents(get());
+                    if (!masked) {
+                        clipboard.setContents(get());
+                    }
                     text = "";
                     commitText();
                 }
@@ -122,7 +132,7 @@ public class DecoratedTextBox extends DecoratedElement {
 
         ctx.sprites.begin();
         float[] saved = UIFont.saveAndSetScale(ctx.font, fontSize);
-        String display = get();
+        String display = displayText();
         if (focused && (System.currentTimeMillis() / 500L) % 2L == 0L) {
             display += "|";
         }
@@ -139,6 +149,16 @@ public class DecoratedTextBox extends DecoratedElement {
         }
         ctx.sprites.setColor(Color.WHITE);
         ctx.sprites.end();
+    }
+
+    private String displayText() {
+        String value = get();
+        if (!masked) return value;
+        int n = value.length();
+        if (n <= 0) return "";
+        char[] stars = new char[n];
+        Arrays.fill(stars, '*');
+        return new String(stars);
     }
 
     private void commitText() {
