@@ -50,6 +50,11 @@ public class FocusNavigator {
         apply();
     }
 
+    public void clear() {
+        index = -1;
+        apply();
+    }
+
     public void activate() {
         Decorated d = getFocused();
         if (d != null) d.activate();

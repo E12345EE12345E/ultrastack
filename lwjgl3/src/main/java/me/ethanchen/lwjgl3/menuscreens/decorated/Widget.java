@@ -135,6 +135,15 @@ public class Widget {
         }
     }
 
+    public boolean handleKeyDown(int keycode) {
+        for (Child c : children) {
+            if (c.element instanceof DecoratedTextBox) {
+                if (((DecoratedTextBox) c.element).handleKeyDown(keycode)) return true;
+            }
+        }
+        return false;
+    }
+
     public List<DecoratedElement> decoratedElements() {
         List<DecoratedElement> out = new ArrayList<>();
         for (Child c : children) {

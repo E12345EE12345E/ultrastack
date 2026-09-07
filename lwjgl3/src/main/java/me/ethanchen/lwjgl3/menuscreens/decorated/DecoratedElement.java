@@ -2,6 +2,7 @@ package me.ethanchen.lwjgl3.menuscreens.decorated;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
@@ -11,6 +12,7 @@ import com.badlogic.gdx.Gdx;
 import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIElement;
+import me.ethanchen.lwjgl3.render.MenuAssets;
 
 /**
  * Base for every decorated widget. Reuses {@link UIElement} relative-coordinate math and
@@ -77,7 +79,7 @@ public abstract class DecoratedElement extends UIElement implements Decorated {
 
     @Override
     public boolean isFocusable() {
-        return focusable && visible && alpha > 0.35f;
+        return focusable && visible && alpha > 0.01f;
     }
 
     @Override
@@ -180,6 +182,61 @@ public abstract class DecoratedElement extends UIElement implements Decorated {
     protected static void enableBlend() {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+    }
+
+    protected static final float OUTLINE_DESIGN_PX = 6f;
+
+    /** Translucent fill plus an axis-aligned frame that does not cover the interior. */
+    protected void drawFramedPanel(DecorContext ctx, Color fillColor, Color outlineColor,
+                                   float a, boolean hot) {
+        float x = pxX();
+        float y = pxY();
+        float w = pxW();
+        float h = pxH();
+        float t = Math.max(2f, MenuScreen.toScreenWidth((float) DesignUi.nw(OUTLINE_DESIGN_PX)));
+        ctx.shapes.begin(ShapeRenderer.ShapeType.Filled);
+        enableBlend();
+        float fillA = Math.min(0.65f, fillColor.a * (hot ? 1.55f : 1f));
+        ctx.shapes.setColor(fillColor.r, fillColor.g, fillColor.b, fillA * a);
+        ctx.shapes.rect(x, y, w, h);
+        ctx.shapes.setColor(outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a * a);
+        drawAxisOutline(ctx.shapes, x, y, w, h, t);
+        ctx.shapes.end();
+    }
+
+    protected static void drawAxisOutline(ShapeRenderer shapes, float x, float y, float w, float h, float t) {
+        shapes.rect(x - t, y - t, w + 2f * t, t);
+        shapes.rect(x - t, y + h, w + 2f * t, t);
+        shapes.rect(x - t, y, t, h);
+        shapes.rect(x + w, y, t, h);
+    }
+
+    /**
+     * {@code hovered_corner.png} is the top-left mark. The other three corners are the same
+     * texture rotated in place. Size and inset follow {@code sin(menu time)} so they breathe.
+     */
+    protected void drawFocusCorners(DecorContext ctx, float x, float y, float w, float h, float a) {
+        Texture corner = MenuAssets.hoveredCorner();
+        float wave = (float) Math.sin(ctx.menuElapsedMs / 400.0);
+        float size = MenuScreen.toScreenWidth((float) DesignUi.nw(28f * (1f + 0.04f * wave)));
+        float outset = MenuScreen.toScreenWidth((float) DesignUi.nw(16f + 2.5f * wave));
+        ctx.sprites.setColor(1f, 1f, 1f, a);
+        drawCorner(ctx, corner, x - outset, y + h + outset, size, 0f);
+        drawCorner(ctx, corner, x + w + outset, y + h + outset, size, -90f);
+        drawCorner(ctx, corner, x + w + outset, y - outset, size, 180f);
+        drawCorner(ctx, corner, x - outset, y - outset, size, 90f);
+    }
+
+    private static void drawCorner(DecorContext ctx, Texture corner,
+                                   float originX, float originY, float size, float rotationDeg) {
+        ctx.sprites.draw(corner,
+                originX, originY - size,
+                0f, size,
+                size, size,
+                1f, 1f,
+                rotationDeg,
+                0, 0, corner.getWidth(), corner.getHeight(),
+                false, false);
     }
 
     protected static void fillRoundRect(ShapeRenderer shapes, float x, float y, float w, float h,

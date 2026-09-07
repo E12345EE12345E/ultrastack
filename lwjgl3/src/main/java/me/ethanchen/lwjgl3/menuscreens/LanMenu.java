@@ -1,22 +1,42 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
 import me.ethanchen.lwjgl3.ClientApp;
-import me.ethanchen.lwjgl3.menuscreens.ui.*;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
+import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
+import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
+import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.lwjgl3.util.AddressParser;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.PacketDispatcher;
+import me.ethanchen.network.packets.other.ConnectFailedPacket;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.s2c.JoinResponse;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
-public class LanMenu extends MenuScreen {
+/**
+ * Decorated LAN host/join screen. Username and optional join code are shared; Host IP is
+ * collected in a modal widget when joining.
+ */
+public class LanMenu extends DecoratedMenuScreen {
+    private static final float FORM_X = 1380f;
+
     private boolean isHosting;
     /** Set once Host or Join is pressed; guards against acting on someone else's connection. */
     private boolean connectRequested;
     private String pendingUsername;
     private long pendingJoinCode;
-    private TextInput messageText;
+
+    private final DecoratedTextBox usernameBox;
+    private final DecoratedTextBox joinCodeBox;
+    private final DecoratedTextBox hostIpBox;
+    private final DecoratedText statusText;
+    private final DecoratedText widgetStatusText;
+    private final Widget joinWidget;
+    private final AuroraBackgroundRenderer aurora;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(ConnectionEstablishedPacket.class, w -> {
@@ -24,6 +44,9 @@ public class LanMenu extends MenuScreen {
             })
             .on(JoinResponse.class, w -> {
                 if (connectRequested) handleJoinResponse((JoinResponse) w.packet);
+            })
+            .on(ConnectFailedPacket.class, w -> {
+                if (connectRequested) handleConnectFailed((ConnectFailedPacket) w.packet);
             })
             .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, isHosting)));
 
@@ -34,124 +57,154 @@ public class LanMenu extends MenuScreen {
         connectRequested = false;
         pendingUsername = "";
         pendingJoinCode = 0;
-        messageText = new TextInput();
 
-        TextBoxOutput hostJoinCodeOutput = new TextBoxOutput();
-        TextBoxOutput hostUsernameOutput = new TextBoxOutput();
+        DecoratedText title = new DecoratedText(120f, 620f, "LAN Host/Join", 3.4f);
+        title.align = UIText.TextAlign.CENTER_LEFT;
+        addDecorated(title);
 
-        TextBoxOutput joinUsernameOutput = new TextBoxOutput();
-        TextBoxOutput joinHostIpOutput = new TextBoxOutput();
-        TextBoxOutput joinJoinCodeOutput = new TextBoxOutput();
+        DecoratedText userLabel = new DecoratedText(FORM_X, 760f, "Username", 1.35f);
+        usernameBox = new DecoratedTextBox(FORM_X, 680f, 560f, 84f)
+                .sanitize(DecoratedTextBox.SANITIZE_NAME);
 
-        // ---- Host section ----
-        elements.add(new UIText(0.25, 0.85, "Host", 3));
+        DecoratedText codeLabel = new DecoratedText(FORM_X, 580f, "Join Code (optional)", 1.35f);
+        joinCodeBox = new DecoratedTextBox(FORM_X, 500f, 560f, 84f)
+                .sanitize(DecoratedTextBox.SANITIZE_JOIN_CODE);
 
-        elements.add(new UIText(0.25, 0.73, "Username", 1));
-        UITextBox hostUsernameBox = new UITextBox(0.25, 0.665, 0.35, 0.08, hostUsernameOutput);
-        hostUsernameBox.sanitize = 2;
-        elements.add(hostUsernameBox);
+        DecoratedButton hostBtn = new DecoratedButton(1180f, 360f, 300f, 88f, "Host & Play", this::hostAndPlay);
+        hostBtn.fill(0.22f, 0.88f, 0.52f);
+        hostBtn.fontSize = 1.45f;
+        hostBtn.info("Start a LAN room and join it.");
 
-        elements.add(new UIText(0.25, 0.59, "Join Code (optional, numbers only)", 1));
-        UITextBox hostJoinCodeBox = new UITextBox(0.25, 0.515, 0.35, 0.08, hostJoinCodeOutput);
-        hostJoinCodeBox.sanitize = 3;
-        elements.add(hostJoinCodeBox);
+        DecoratedButton joinLobbyBtn = new DecoratedButton(1540f, 360f, 380f, 88f, "Join LAN Lobby", this::openJoinWidget);
+        joinLobbyBtn.fill(0.35f, 0.78f, 1.00f);
+        joinLobbyBtn.fontSize = 1.35f;
+        joinLobbyBtn.info("Connect to a LAN host.");
 
-        elements.add(new UIButton(0.25, 0.4, 0.35, 0.1, "Host & Play", () -> {
-            String codeStr = hostJoinCodeOutput.get().trim();
-            String hostUser = hostUsernameOutput.get().trim();
-            if (hostUser.isEmpty()) {
-                messageText.set("Enter a username.");
-                return;
-            }
-            long code = 0;
-            if (!codeStr.isEmpty()) {
-                try {
-                    code = Long.parseLong(codeStr);
-                } catch (NumberFormatException e) {
-                    messageText.set("Join code must be a number.");
-                    return;
-                }
-            }
-            pendingUsername = hostUser;
-            pendingJoinCode = code;
-            isHosting = true;
-            connectRequested = true;
-            messageText.set("Starting server...");
-            app.startLanServer(NetConfig.PORT, code);
-            app.setLanMode(true);
-            app.setConnectDestination("127.0.0.1", NetConfig.PORT);
-            app.tryConnect();
-        }));
+        statusText = new DecoratedText(FORM_X, 240f, "", 1.2f);
 
-        // ---- Join section ----
-        elements.add(new UIText(0.75, 0.85, "Join", 3));
+        DecoratedButton backBtn = new DecoratedButton(200f, 120f, 200f, 68f, "Back", this::leaveToMain);
+        backBtn.fontSize = 1.4f;
 
-        elements.add(new UIText(0.75, 0.73, "Username", 1));
-        UITextBox joinUsernameBox = new UITextBox(0.75, 0.665, 0.35, 0.08, joinUsernameOutput);
-        joinUsernameBox.sanitize = 2;
-        elements.add(joinUsernameBox);
+        addDecorated(userLabel);
+        addDecorated(usernameBox);
+        addDecorated(codeLabel);
+        addDecorated(joinCodeBox);
+        addDecorated(hostBtn);
+        addDecorated(joinLobbyBtn);
+        addDecorated(statusText);
+        addDecorated(backBtn);
 
-        elements.add(new UIText(0.75, 0.59, "Host IP (or IP:port)", 1));
-        elements.add(new UITextBox(0.75, 0.515, 0.35, 0.08, joinHostIpOutput));
+        hostIpBox = new DecoratedTextBox(0f, 0f, 440f, 80f);
+        hostIpBox.set(NetConfig.HOST);
+        hostIpBox.onEnter(this::joinLan);
 
-        elements.add(new UIText(0.75, 0.44, "Join Code (optional, numbers only)", 1));
-        UITextBox joinJoinCodeBox = new UITextBox(0.75, 0.365, 0.35, 0.08, joinJoinCodeOutput);
-        joinJoinCodeBox.sanitize = 3;
-        elements.add(joinJoinCodeBox);
-
-        elements.add(new UIButton(0.75, 0.25, 0.35, 0.1, "Join", () -> {
-            String joinUser = joinUsernameOutput.get().trim();
-            String addr = joinHostIpOutput.get().trim();
-            String codeStr = joinJoinCodeOutput.get().trim();
-
-            if (joinUser.isEmpty()) {
-                messageText.set("Enter a username.");
-                return;
-            }
-            long code = 0;
-            if (!codeStr.isEmpty()) {
-                try {
-                    code = Long.parseLong(codeStr);
-                } catch (NumberFormatException e) {
-                    messageText.set("Join code must be a number.");
-                    return;
-                }
-            }
-
-            String ip = NetConfig.HOST;
-            int port = NetConfig.PORT;
-            if (!addr.isEmpty()) {
-                try {
-                    AddressParser.Result parsed = AddressParser.parse(addr, NetConfig.PORT);
-                    if (!app.validPort(parsed.port)) {
-                        messageText.set("Invalid port number.");
-                        return;
-                    }
-                    ip = parsed.host;
-                    port = parsed.port;
-                } catch (AddressParser.ParseException e) {
-                    messageText.set(e.getMessage());
-                    return;
-                }
-            }
-
-            pendingUsername = joinUser;
-            pendingJoinCode = code;
-            isHosting = false;
-            connectRequested = true;
-            app.setLanMode(true);
-            app.setConnectDestination(ip, port);
-            messageText.set("Connecting...");
-            app.tryConnect();
-        }));
-
-        elements.add(new UIText(0.5, 0.13, messageText, 1));
+        widgetStatusText = new DecoratedText(0f, 0f, "", 1.1f);
+        joinWidget = buildJoinWidget();
+        aurora = new AuroraBackgroundRenderer();
     }
 
-    @Override
-    protected void onEscPressed() {
-        // Cancel first: disconnect() also invalidates a connect attempt that is still in
-        // flight, so it can't come back and join a server we are about to shut down.
+    private Widget buildJoinWidget() {
+        Widget w = new Widget(960f, 520f, 560f, 420f);
+        w.add(new DecoratedText(0f, 0f, "Join LAN", 2.2f), 0f, 150f);
+        w.add(new DecoratedText(0f, 0f, "Host IP", 1.3f), 0f, 70f);
+        w.add(hostIpBox, 0f, -10f);
+        DecoratedButton join = new DecoratedButton(0f, 0f, 280f, 72f, "Join", this::joinLan);
+        join.fill(0.35f, 0.78f, 1.00f);
+        join.fontSize = 1.45f;
+        w.add(join, 0f, -130f);
+        w.add(widgetStatusText, 0f, -200f);
+        return w;
+    }
+
+    private void openJoinWidget() {
+        if (connectRequested) return;
+        if (hasOpenWidget()) return;
+        if (hostIpBox.get().trim().isEmpty()) {
+            hostIpBox.set(NetConfig.HOST);
+        }
+        widgetStatusText.text = "";
+        openWidget(joinWidget);
+        navigator.focus(hostIpBox);
+    }
+
+    private void hostAndPlay() {
+        if (connectRequested) return;
+        String hostUser = usernameBox.get().trim();
+        if (hostUser.isEmpty()) {
+            setStatus("Enter a username.");
+            return;
+        }
+        Long code = parseJoinCode();
+        if (code == null) return;
+        pendingUsername = hostUser;
+        pendingJoinCode = code;
+        isHosting = true;
+        connectRequested = true;
+        setStatus("Starting server...");
+        app.startLanServer(NetConfig.PORT, code);
+        app.setLanMode(true);
+        app.setConnectDestination("127.0.0.1", NetConfig.PORT);
+        app.tryConnect();
+    }
+
+    private void joinLan() {
+        if (connectRequested) return;
+        String joinUser = usernameBox.get().trim();
+        if (joinUser.isEmpty()) {
+            setStatus("Enter a username.");
+            return;
+        }
+        Long code = parseJoinCode();
+        if (code == null) return;
+
+        String addr = hostIpBox.get().trim();
+        String ip = NetConfig.HOST;
+        int port = NetConfig.PORT;
+        if (!addr.isEmpty()) {
+            try {
+                AddressParser.Result parsed = AddressParser.parse(addr, NetConfig.PORT);
+                if (!app.validPort(parsed.port)) {
+                    setStatus("Invalid port number.");
+                    return;
+                }
+                ip = parsed.host;
+                port = parsed.port;
+            } catch (AddressParser.ParseException e) {
+                setStatus(e.getMessage());
+                return;
+            }
+        }
+
+        pendingUsername = joinUser;
+        pendingJoinCode = code;
+        isHosting = false;
+        connectRequested = true;
+        app.setLanMode(true);
+        app.setConnectDestination(ip, port);
+        setStatus("Connecting...");
+        app.tryConnect();
+    }
+
+    private Long parseJoinCode() {
+        String codeStr = joinCodeBox.get().trim();
+        if (codeStr.isEmpty()) return 0L;
+        try {
+            return Long.parseLong(codeStr);
+        } catch (NumberFormatException e) {
+            setStatus("Join code must be a number.");
+            return null;
+        }
+    }
+
+    private void setStatus(String message) {
+        String text = message != null ? message : "";
+        statusText.text = text;
+        if (hasOpenWidget()) {
+            widgetStatusText.text = text;
+        }
+    }
+
+    private void leaveToMain() {
         connectRequested = false;
         app.disconnect();
         if (isHosting) {
@@ -163,9 +216,20 @@ public class LanMenu extends MenuScreen {
     }
 
     @Override
-    public void update() {
+    protected void onEscPressed() {
+        leaveToMain();
     }
 
+    @Override
+    protected void renderBackground(DecorContext ctx) {
+        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
+    }
+
+    @Override
+    public void dispose() {
+        aurora.dispose();
+        super.dispose();
+    }
 
     @Override
     public void passClientPacket(ClientPacketWrapper w) {
@@ -176,12 +240,23 @@ public class LanMenu extends MenuScreen {
         if (res.accepted) {
             app.switchMenu(new MultiplayerLobby(app, isHosting, res.gameInProgress));
         } else {
+            connectRequested = false;
             String reason = (res.reason != null && !res.reason.isEmpty()) ? res.reason : "Join denied.";
-            messageText.set(reason);
+            setStatus(reason);
             if (isHosting) {
                 app.stopLanServer();
                 isHosting = false;
             }
+        }
+    }
+
+    private void handleConnectFailed(ConnectFailedPacket pkt) {
+        connectRequested = false;
+        String reason = (pkt.reason != null && !pkt.reason.isEmpty()) ? pkt.reason : "Connection failed.";
+        setStatus(reason);
+        if (isHosting) {
+            app.stopLanServer();
+            isHosting = false;
         }
     }
 }

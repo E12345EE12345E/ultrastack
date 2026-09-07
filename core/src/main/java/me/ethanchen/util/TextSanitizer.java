@@ -73,4 +73,19 @@ public final class TextSanitizer {
         if (cp >= '0' && cp <= '9') return true;
         return cp == '_';
     }
+
+    /** Digits only; capped so the value still fits in a signed 64-bit join code. */
+    public static String sanitizeJoinCode(String input) {
+        if (input == null) return "";
+        StringBuilder out = new StringBuilder(input.length());
+        input.codePoints().forEach(cp -> {
+            if (cp >= '0' && cp <= '9') {
+                out.appendCodePoint(cp);
+            }
+        });
+        if (out.length() > 19) {
+            return out.substring(0, 19);
+        }
+        return out.toString();
+    }
 }

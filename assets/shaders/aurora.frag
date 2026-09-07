@@ -83,18 +83,18 @@ void main() {
         float d = length(f - c);
         // Per-cell clocks so neighbors never share a beat.
         float hRate = hash(cell + 9.13);
-        float hRate2 = hash(cell + 5.51);
         float hPhase = hash(cell + 17.77) * 6.28318;
         float hPhase2 = hash(cell + 41.3) * 6.28318;
         float brightHz = 0.7 + hRate * 2.6;
-        float dimHz = 2.8 + hRate * 11.0 + hRate2 * 9.0;
-        float hz = mix(brightHz, dimHz, darkSky);
+        // Hard 1x/2x — mixing hz with darkSky made sin(t*hz) chirp every frame
+        // as curtains drifted. Crossing the gate is at most one phase jump.
+        float hz = brightHz * mix(1.0, 2.0, step(0.5, darkSky));
         float hz2 = hz * (0.55 + hash(cell + 3.31) * 0.9);
         float twinkle = 0.30 + 0.40 * sin(t * hz + hPhase) + 0.30 * sin(t * hz2 + hPhase2);
         twinkle = clamp(twinkle, 0.0, 1.0);
         float rarity = clamp((h - 0.962) / 0.038, 0.0, 1.0);
         float extra = darkSky * (0.50 + 0.50 * hash(cell + 2.4));
-        star = smoothstep(0.038, 0.0, d) * twinkle * max(rarity, extra);
+        star = smoothstep(0.12, 0.0, d) * twinkle * max(rarity, extra);
     }
 
     vec3 col = aurora + vec3(star);

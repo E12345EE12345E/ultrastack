@@ -9,15 +9,15 @@ import org.lwjgl.glfw.GLFW;
  * Aligns the initial desktop window with the monitor's DPI / content scale.
  *
  * <p>libGDX's LWJGL3 backend does not set {@code GLFW_SCALE_TO_MONITOR}, so
- * {@code setWindowedMode(640, 640)} is 640 physical pixels on Windows regardless of
+ * {@code setWindowedMode(960, 540)} is 960×540 physical pixels on Windows regardless of
  * 125%/150%/200% display scaling. The first {@code create}/{@code resize} also runs
  * before {@code glfwPollEvents}, so GLFW's content scale can still be 1.0 until a later
  * frame — or until the user resizes, which is what made this look like a resize-only fix.
  */
 final class WindowDpi {
 
-    static final int DESIGN_WIDTH = 640;
-    static final int DESIGN_HEIGHT = 640;
+    static final int DESIGN_WIDTH = 960;
+    static final int DESIGN_HEIGHT = 540;
     static final int MIN_WIDTH = 400;
     static final int MIN_HEIGHT = 400;
 
@@ -104,7 +104,7 @@ final class WindowDpi {
     /**
      * Windows and X11 report window size in pixels (1:1 with the framebuffer). The
      * window must be multiplied by content scale to occupy the same physical size as
-     * a 640² window at 100% DPI. macOS and Wayland already use point-sized windows.
+     * a 960×540 window at 100% DPI. macOS and Wayland already use point-sized windows.
      */
     private static boolean shouldScaleWindowSizeToContentScale() {
         int platform = GLFW.glfwGetPlatform();
