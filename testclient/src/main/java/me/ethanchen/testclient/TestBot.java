@@ -3,8 +3,10 @@ package me.ethanchen.testclient;
 import java.io.IOException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.Gdx;
 import com.esotericsoftware.kryonet.Connection;
@@ -16,6 +18,7 @@ import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.NetEndpoints;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.CreateRoomRequest;
+import me.ethanchen.network.packets.c2s.JoinRoomRequest;
 import me.ethanchen.network.packets.c2s.LeaveRoomRequest;
 import me.ethanchen.network.packets.c2s.LoginRequest;
 import me.ethanchen.network.packets.c2s.RegisterRequest;
@@ -27,15 +30,22 @@ import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 
 final class TestBot implements Callable<TestBot.Result> {
     static final long STEP_TIMEOUT_MS = 10_000;
-    static final long IDLE_MS = 30_000;
     static final long IDLE_HEARTBEAT_MS = 5_000;
 
     private static final String USERNAME_TAKEN = "username already taken";
+
+    enum Role { HOST, GUEST }
 
     final String username;
     private final String passcode;
     private final String host;
     private final int port;
+    private final Role role;
+    private final AtomicReference<String> roomIdRef;
+    private final CountDownLatch roomReady;
+    private final CountDownLatch guestsJoined;
+    private final long idleMs;
+    private final boolean quiet;
 
     private final BlockingQueue<AuthResponse> authQueue = new LinkedBlockingQueue<>();
     private final BlockingQueue<RoomJoinResponse> joinQueue = new LinkedBlockingQueue<>();
@@ -44,10 +54,23 @@ final class TestBot implements Callable<TestBot.Result> {
     private com.esotericsoftware.kryonet.Client client;
 
     TestBot(String username, String passcode, String host, int port) {
+        this(username, passcode, host, port, Role.HOST, new AtomicReference<>(),
+                new CountDownLatch(0), new CountDownLatch(0), 30_000L, false);
+    }
+
+    TestBot(String username, String passcode, String host, int port, Role role,
+            AtomicReference<String> roomIdRef, CountDownLatch roomReady,
+            CountDownLatch guestsJoined, long idleMs, boolean quiet) {
         this.username = username;
         this.passcode = passcode;
         this.host = host;
         this.port = port;
+        this.role = role;
+        this.roomIdRef = roomIdRef;
+        this.roomReady = roomReady;
+        this.guestsJoined = guestsJoined;
+        this.idleMs = idleMs;
+        this.quiet = quiet;
     }
 
     static final class Result {
@@ -136,20 +159,47 @@ final class TestBot implements Callable<TestBot.Result> {
         }
         log("auth ok accountUuid=" + auth.accountUuid);
 
-        phase("creating room");
-        CreateRoomRequest create = new CreateRoomRequest();
-        create.localPlayers = 1;
-        sendTcp(create);
-        RoomJoinResponse join = waitFor("RoomJoinResponse", joinQueue);
-        if (!join.success) {
-            throw new IllegalStateException("create room failed: " + join.reason);
+        if (role == Role.HOST) {
+            phase("creating room");
+            CreateRoomRequest create = new CreateRoomRequest();
+            create.localPlayers = 1;
+            sendTcp(create);
+            RoomJoinResponse join = waitFor("RoomJoinResponse", joinQueue);
+            if (!join.success) {
+                throw new IllegalStateException("create room failed: " + join.reason);
+            }
+            log("room created roomId=" + join.roomId + " isHost=" + join.isHost);
+            roomIdRef.set(join.roomId);
+            roomReady.countDown();
+            if (guestsJoined.getCount() > 0) {
+                phase("waiting for guests");
+                if (!guestsJoined.await(STEP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                    throw new IllegalStateException("timed out waiting for guests to join");
+                }
+            }
+            phase("starting game");
+            StartGameRequest start = new StartGameRequest();
+            start.gamemode = GameMode.MULTIPLAYER_SCORE;
+            sendTcp(start);
+        } else {
+            phase("waiting for room id");
+            if (!roomReady.await(STEP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                throw new IllegalStateException("timed out waiting for host to create room");
+            }
+            String roomId = roomIdRef.get();
+            phase("joining room " + roomId);
+            JoinRoomRequest joinReq = new JoinRoomRequest();
+            joinReq.roomId = roomId;
+            joinReq.localPlayers = 1;
+            sendTcp(joinReq);
+            RoomJoinResponse join = waitFor("RoomJoinResponse", joinQueue);
+            if (!join.success) {
+                throw new IllegalStateException("join room failed: " + join.reason);
+            }
+            log("room joined roomId=" + join.roomId + " isHost=" + join.isHost);
+            guestsJoined.countDown();
         }
-        log("room created roomId=" + join.roomId + " isHost=" + join.isHost);
 
-        phase("starting game");
-        StartGameRequest start = new StartGameRequest();
-        start.gamemode = GameMode.MULTIPLAYER_SCORE;
-        sendTcp(start);
         StartGameBroadcast started = waitFor("StartGameBroadcast", startQueue);
         result.started = true;
         log("game started mode=" + started.mode + " msUntilStart=" + started.msUntilStart
@@ -166,11 +216,11 @@ final class TestBot implements Callable<TestBot.Result> {
         long nextHeartbeat = IDLE_HEARTBEAT_MS;
         while (true) {
             long elapsed = System.currentTimeMillis() - start;
-            if (elapsed >= IDLE_MS) break;
-            Thread.sleep(Math.min(250L, IDLE_MS - elapsed));
+            if (elapsed >= idleMs) break;
+            Thread.sleep(Math.min(250L, idleMs - elapsed));
             elapsed = System.currentTimeMillis() - start;
-            while (elapsed >= nextHeartbeat && nextHeartbeat <= IDLE_MS) {
-                log("idle " + (nextHeartbeat / 1000) + "/" + (IDLE_MS / 1000) + "s");
+            while (elapsed >= nextHeartbeat && nextHeartbeat <= idleMs) {
+                log("idle " + (nextHeartbeat / 1000) + "/" + (idleMs / 1000) + "s");
                 nextHeartbeat += IDLE_HEARTBEAT_MS;
             }
         }
@@ -216,6 +266,7 @@ final class TestBot implements Callable<TestBot.Result> {
     }
 
     private void log(String message) {
+        if (quiet) return;
         if (Gdx.app != null) {
             Gdx.app.log(username, message);
         } else {

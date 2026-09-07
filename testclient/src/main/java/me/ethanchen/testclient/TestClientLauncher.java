@@ -19,6 +19,9 @@ public class TestClientLauncher {
             port = Integer.parseInt(args[1].trim());
         }
 
+        // Load-harness knobs (optional): -Dultrastack.rooms=25 -Dultrastack.botsPerRoom=1
+        // -Dultrastack.idleMs=30000 -Dultrastack.quiet=true
+        // On the dedicated server: -Dultrastack.tickStats=true
         HeadlessApplicationConfiguration config = new HeadlessApplicationConfiguration();
         config.updatesPerSecond = -1;
         new HeadlessApplication(new TestClientApp(host, port), config);

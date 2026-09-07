@@ -38,7 +38,14 @@ public class Board {
     }
 
     protected final boolean[][] allowedTiles;
-    protected final Tile[][] board;
+    /** Row-major {@code y * width + x} tile types. */
+    protected final byte[] tileTypes;
+    /** Row-major {@code y * width + x} connection-texture bytes. */
+    protected final byte[] tileTex;
+    /** True when every cell is playable; enables bulk {@code arraycopy} row shifts. */
+    protected final boolean fullyAllowed;
+    /** Count of playable cells whose type is not {@link Tile#EMPTY}. */
+    protected int filledCount;
     protected final byte width;
     protected final byte height;
     protected final Vector2[] spawnPositions;
@@ -54,17 +61,56 @@ public class Board {
     private boolean[] playerHoldUsed; // indexed by player; true until that player hard drops
     /** Seat-major upcoming types from the last light snapshot / queue peek. */
     private byte[] upcomingPieceTypes;
+    private boolean upcomingDirty = true;
 
     public boolean[][] getAllowedTiles() { return allowedTiles; }
-    public Tile[][] getBoard() { return board; }
     public int bw() { return width; }
     public int bh() { return height; }
+
+    int cellIndex(int x, int y) {
+        return y * width + x;
+    }
+
+    /** Locked-tile type at {@code (x, y)}. */
+    public byte tileTypeAt(int x, int y) {
+        return tileTypes[cellIndex(x, y)];
+    }
+
+    /** Connection-texture byte at {@code (x, y)}. */
+    public byte tileTexAt(int x, int y) {
+        return tileTex[cellIndex(x, y)];
+    }
+
+    /**
+     * Writes a locked tile and keeps {@link #filledCount} in sync. The only mutation path
+     * for the grid besides bulk row-shift helpers that recount afterwards.
+     */
+    public void setTile(int x, int y, byte type, byte tex) {
+        int i = cellIndex(x, y);
+        byte old = tileTypes[i];
+        tileTypes[i] = type;
+        tileTex[i] = tex;
+        if (allowedTiles[y][x]) {
+            if (old == Tile.EMPTY && type != Tile.EMPTY) filledCount++;
+            else if (old != Tile.EMPTY && type == Tile.EMPTY) filledCount--;
+        }
+    }
+
+    /** Writes a cell without updating {@link #filledCount}. Caller must {@link #recountFilled()}. */
+    void writeTileUnchecked(int x, int y, byte type, byte tex) {
+        int i = cellIndex(x, y);
+        tileTypes[i] = type;
+        tileTex[i] = tex;
+    }
     public Vector2[] getSpawnPositions() { return spawnPositions; }
     public Vector2 getSpawnPos(int p) { return spawnPositions[p]; }
     public PieceQueue[] getPieceQueues() { return pieceQueues; }
     public PieceQueue getPieceQueue(int p) { return pieceQueues[p]; }
     /** Replaces a player's queue, e.g. for a character's bag override. Must be called before any piece is taken from it. */
-    public void setPieceQueue(int p, PieceQueue queue) { pieceQueues[p] = queue; }
+    public void setPieceQueue(int p, PieceQueue queue) {
+        pieceQueues[p] = queue;
+        upcomingDirty = true;
+    }
     public ArrayList<Piece> getActivePieces() { return activePieces; }
     public Piece getActivePiece(int p) { return activePieces.get(p); }
     public ArrayList<FallingColumn> getFallingColumns() { return fallingColumns; }
@@ -114,7 +160,7 @@ public class Board {
      * Advances falling-block simulation by {@code deltaMs}. Returns any line-clear results
      * produced by landings this tick.
      */
-    public ArrayList<LineClearResult> updateFallingBlocks(int deltaMs) {
+    public java.util.List<LineClearResult> updateFallingBlocks(int deltaMs) {
         return BoardFallingBlocks.update(this, deltaMs);
     }
 
@@ -129,7 +175,10 @@ public class Board {
         this.width = p.width;
         this.height = p.height;
         this.allowedTiles = p.allowedTiles;
-        this.board = emptyBoard();
+        this.tileTypes = new byte[width * height];
+        this.tileTex = new byte[width * height];
+        this.fullyAllowed = computeFullyAllowed(p.allowedTiles);
+        this.filledCount = 0;
         this.spawnPositions = p.spawnPositions;
         this.pieceQueues = p.pieceQueues;
         this.activePieces = new ArrayList<>();
@@ -144,7 +193,10 @@ public class Board {
                 allowedTiles[y][x] = nb.allowedtiles[y*width + x];
             }
         }
-        board = emptyBoard();
+        tileTypes = new byte[width * height];
+        tileTex = new byte[width * height];
+        fullyAllowed = computeFullyAllowed(allowedTiles);
+        filledCount = 0;
         spawnPositions = new Vector2[nb.spawnposx.length];
         for (int i=0; i<spawnPositions.length; i++) {
             spawnPositions[i] = new Vector2(nb.spawnposx[i], nb.spawnposy[i]);
@@ -165,19 +217,14 @@ public class Board {
      */
     public boolean isAllClear() {
         if (!fallingColumns.isEmpty()) return false;
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                if (allowedTiles[y][x] && board[y][x].get() != Tile.EMPTY) return false;
-            }
-        }
-        return true;
+        return filledCount == 0;
     }
 
     /** Returns true if any locked or falling tile is currently a garbage tile. */
     public boolean hasGarbage() {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                if (board[y][x].get() == Tile.GARBAGE) return true;
+                if (tileTypeAt(x, y) == Tile.GARBAGE) return true;
             }
         }
         for (FallingColumn col : fallingColumns) {
@@ -199,7 +246,7 @@ public class Board {
             int gapCol = r.nextInt(width);
             for (int x = 0; x < width; x++) {
                 if (!allowedTiles[y][x]) continue;
-                board[y][x].set(x == gapCol ? Tile.EMPTY : Tile.GARBAGE, Tile.SINGLE_TILE);
+                setTile(x, y, x == gapCol ? Tile.EMPTY : Tile.GARBAGE, Tile.SINGLE_TILE);
             }
         }
         // Push any falling columns that now intersect solid garbage up until clear.
@@ -219,7 +266,7 @@ public class Board {
             int x = cell[0], y = cell[1];
             if (x < 0 || x >= width || y < 0 || y >= height) continue;
             if (!allowedTiles[y][x]) continue;
-            board[y][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+            setTile(x, y, Tile.GARBAGE, Tile.SINGLE_TILE);
         }
     }
 
@@ -257,11 +304,10 @@ public class Board {
         }
         BoardPiecePush.pushPiecesAboveGarbage(this, rows);
 
-        // Insert one row at a time so the grid ends up exactly where the push resolution,
-        // which replays the same per-row rise, expects it to be.
+        // Equivalent to raise-then-write-row-0, repeated: rows[i] ends at y = amount - 1 - i.
+        raiseLockedTiles(amount);
         for (int i = 0; i < amount; i++) {
-            raiseLockedTilesOneRow();
-            writeGarbageRow(0, rows[i]);
+            writeGarbageRow(amount - 1 - i, rows[i]);
         }
 
         BoardFallingBlocks.resolveAfterGarbage(this);
@@ -280,18 +326,41 @@ public class Board {
     }
 
     /**
-     * Shifts every locked tile up one row, discarding the top row. Permanent
+     * Shifts every locked tile up {@code amount} rows, discarding the top rows. Permanent
      * ({@code allowedTiles=false}) cells are never overwritten and read as empty, matching how
      * {@link BoardLineClear} compacts downward.
      */
+    private void raiseLockedTiles(int amount) {
+        if (amount <= 0) return;
+        if (fullyAllowed) {
+            int cells = width * height;
+            int shift = amount * width;
+            System.arraycopy(tileTypes, 0, tileTypes, shift, cells - shift);
+            System.arraycopy(tileTex, 0, tileTex, shift, cells - shift);
+            Arrays.fill(tileTypes, 0, shift, Tile.EMPTY);
+            Arrays.fill(tileTex, 0, shift, Tile.SINGLE_TILE);
+            recountFilled();
+            return;
+        }
+        for (int i = 0; i < amount; i++) {
+            raiseLockedTilesOneRow();
+        }
+        recountFilled();
+    }
+
     private void raiseLockedTilesOneRow() {
         for (int y = height - 1; y >= 1; y--) {
             for (int x = 0; x < width; x++) {
                 if (!allowedTiles[y][x]) continue;
                 boolean fromAllowed = allowedTiles[y - 1][x];
-                board[y][x].set(fromAllowed ? board[y - 1][x].get() : Tile.EMPTY,
-                        fromAllowed ? board[y - 1][x].tex() : Tile.SINGLE_TILE);
+                writeTileUnchecked(x, y,
+                        fromAllowed ? tileTypeAt(x, y - 1) : Tile.EMPTY,
+                        fromAllowed ? tileTexAt(x, y - 1) : Tile.SINGLE_TILE);
             }
+        }
+        for (int x = 0; x < width; x++) {
+            if (!allowedTiles[0][x]) continue;
+            writeTileUnchecked(x, 0, Tile.EMPTY, Tile.SINGLE_TILE);
         }
     }
 
@@ -300,8 +369,27 @@ public class Board {
         if (y < 0 || y >= height) return;
         for (int x = 0; x < width; x++) {
             if (!allowedTiles[y][x]) continue;
-            board[y][x].set(types[x], Tile.SINGLE_TILE);
+            setTile(x, y, types[x], Tile.SINGLE_TILE);
         }
+    }
+
+    static boolean computeFullyAllowed(boolean[][] allowed) {
+        for (boolean[] row : allowed) {
+            for (boolean cell : row) {
+                if (!cell) return false;
+            }
+        }
+        return true;
+    }
+
+    void recountFilled() {
+        int n = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (allowedTiles[y][x] && tileTypes[cellIndex(x, y)] != Tile.EMPTY) n++;
+            }
+        }
+        filledCount = n;
     }
 
     /**
@@ -322,7 +410,7 @@ public class Board {
         for (int x = 0; x < width; x++) {
             for (int y = height - 1; y >= 0; y--) {
                 if (!allowedTiles[y][x]) continue;
-                if (board[y][x].get() != Tile.EMPTY) {
+                if (tileTypeAt(x, y) != Tile.EMPTY) {
                     highest[x] = y;
                     anySolid = true;
                     break;
@@ -346,10 +434,10 @@ public class Board {
             for (int x = 0; x < width; x++) {
                 if (highest[x] < 0 || y >= highest[x]) continue;
                 if (!allowedTiles[y][x]) continue;
-                if (board[y][x].get() != Tile.EMPTY) continue;
+                if (tileTypeAt(x, y) != Tile.EMPTY) continue;
                 if (occupiedByPiece[y][x]) continue;
                 if (isFallingOccupied(x, y)) continue;
-                board[y][x].set(Tile.GARBAGE, Tile.SINGLE_TILE);
+                setTile(x, y, Tile.GARBAGE, Tile.SINGLE_TILE);
                 filled.add(new int[]{x, y});
             }
         }
@@ -391,17 +479,8 @@ public class Board {
             piece.justSpawned = true;
             activePieces.add(piece);
         }
+        upcomingDirty = true;
         refreshUpcomingFromQueues();
-    }
-
-    private Tile[][] emptyBoard() {
-        Tile[][] retval = new Tile[height][width];
-        for (int y=0; y<retval.length; y++) {
-            for (int x=0; x<retval[y].length; x++) {
-                retval[y][x] = new Tile(0, 0);
-            }
-        }
-        return retval;
     }
 
     // Piece
@@ -676,7 +755,7 @@ public class Board {
             } else {
                 byte conn = (p.tileconnectionstates != null && i < p.tileconnectionstates.length)
                     ? p.tileconnectionstates[i] : Tile.SINGLE_TILE;
-                board[my][mx].set(p.type, conn);
+                setTile(mx, my, p.type, conn);
                 result.placedCells.add(new int[]{mx, my});
             }
         }
@@ -765,8 +844,8 @@ public class Board {
      *
      * @return list of {@link LineClearResult} for any pieces that were auto-locked this tick
      */
-    public ArrayList<LineClearResult> updateLockTimers(int deltaMs) {
-        ArrayList<LineClearResult> results = new ArrayList<>();
+    public java.util.List<LineClearResult> updateLockTimers(int deltaMs) {
+        java.util.List<LineClearResult> results = null;
         for (int i = 0; i < activePieces.size(); i++) {
             Piece p = activePieces.get(i);
             if (p.isBlockedFromSpawning) continue;
@@ -774,13 +853,16 @@ public class Board {
                 p.lockTime += deltaMs;
                 if (p.lockTime >= GameConstants.LOCK_DELAY_MS) {
                     LineClearResult r = lockDrop(i);
-                    if (r != null) results.add(r);
+                    if (r != null) {
+                        if (results == null) results = new ArrayList<>();
+                        results.add(r);
+                    }
                 }
             } else {
                 p.lockTime = 0f;
             }
         }
-        return results;
+        return results != null ? results : java.util.Collections.emptyList();
     }
 
     /**
@@ -794,6 +876,7 @@ public class Board {
         next.isBlockedFromSpawning = isSpawnBlocked(next);
         next.justSpawned = true;
         activePieces.set(id, next);
+        upcomingDirty = true;
     }
 
     /**
@@ -839,6 +922,14 @@ public class Board {
      * spawned inside a teammate's piece stops ignoring that teammate as soon as it moves clear.
      */
     public void updateJustSpawnedFlags() {
+        boolean any = false;
+        for (int i = 0; i < activePieces.size(); i++) {
+            if (activePieces.get(i).justSpawned) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) return;
         for (int i = 0; i < activePieces.size(); i++) {
             Piece p = activePieces.get(i);
             if (!p.justSpawned) continue;
@@ -860,7 +951,7 @@ public class Board {
             int y = (int) Math.floor(p.location.y + offset.y);
             if (x < 0 || x >= width || y < 0 || y >= height) return true;
             if (!allowedTiles[y][x]) return true;
-            if (board[y][x] != null && board[y][x].get() != Tile.EMPTY) return true;
+            if (tileTypeAt(x, y) != Tile.EMPTY) return true;
         }
         return false;
     }
@@ -900,28 +991,39 @@ public class Board {
 
     public NetBoardLight convertToNetBoardLight() {
         NetBoardLight retval = new NetBoardLight();
-        retval.tileid = new byte[width*height];
-        retval.tileconnections = new byte[width*height];
-        retval.pieces = new NetPiece[activePieces.size()];
-        for (int y=0; y<height; y++) {
-            for (int x=0; x<width; x++) {
-                retval.tileid[y*width + x] = board[y][x].get();
-                retval.tileconnections[y*width + x] = board[y][x].tex();
-            }
+        retval.tileid = Arrays.copyOf(tileTypes, tileTypes.length);
+        retval.tileconnections = Arrays.copyOf(tileTex, tileTex.length);
+        fillNetBoardLightPieces(retval);
+        byte[] next = peekUpcomingFromQueues();
+        retval.nextPieceTypes = Arrays.copyOf(next, next.length);
+        return retval;
+    }
+
+    /**
+     * Fills {@code dest} for a UDP broadcast. Grid arrays are the live board buffers
+     * (zero-copy); Kryo copies them during {@code sendUDP} on the calling thread.
+     */
+    public NetBoardLight fillNetBoardLight(NetBoardLight dest) {
+        dest.tileid = tileTypes;
+        dest.tileconnections = tileTex;
+        fillNetBoardLightPieces(dest);
+        dest.nextPieceTypes = peekUpcomingFromQueues();
+        return dest;
+    }
+
+    private void fillNetBoardLightPieces(NetBoardLight dest) {
+        dest.pieces = new NetPiece[activePieces.size()];
+        for (int i = 0; i < activePieces.size(); i++) {
+            dest.pieces[i] = activePieces.get(i).convertToNetPiece();
         }
-        for (int i=0; i<activePieces.size(); i++) {
-            retval.pieces[i] = activePieces.get(i).convertToNetPiece();
-        }
-        retval.heldPieceType = heldPieceType;
-        retval.playerHoldUsed = (playerHoldUsed != null)
+        dest.heldPieceType = heldPieceType;
+        dest.playerHoldUsed = (playerHoldUsed != null)
             ? Arrays.copyOf(playerHoldUsed, playerHoldUsed.length)
             : new boolean[spawnPositions.length];
-        retval.falling = new NetFallingColumn[fallingColumns.size()];
+        dest.falling = new NetFallingColumn[fallingColumns.size()];
         for (int i = 0; i < fallingColumns.size(); i++) {
-            retval.falling[i] = BoardFallingBlocks.toNet(fallingColumns.get(i));
+            dest.falling[i] = BoardFallingBlocks.toNet(fallingColumns.get(i));
         }
-        retval.nextPieceTypes = peekUpcomingFromQueues();
-        return retval;
     }
 
     public NetBoardFull convertToNetBoardFull() {
@@ -935,10 +1037,10 @@ public class Board {
         retval.spawnposy = new byte[spawnPositions.length];
         retval.queues = new NetQueue[pieceQueues.length];
         retval.pieces = new NetPiece[activePieces.size()];
+        System.arraycopy(tileTypes, 0, retval.tileid, 0, tileTypes.length);
+        System.arraycopy(tileTex, 0, retval.tileconnections, 0, tileTex.length);
         for (int y=0; y<height; y++) {
             for (int x=0; x<width; x++) {
-                retval.tileid[y*width + x] = board[y][x].get();
-                retval.tileconnections[y*width + x] = board[y][x].tex();
                 retval.allowedtiles[y*width + x] = allowedTiles[y][x];
             }
         }
@@ -960,11 +1062,14 @@ public class Board {
     }
 
     public void updateFromNetBoardLight(NetBoardLight in) {
-        for (int y=0; y<height; y++) {
-            for (int x=0; x<width; x++) {
-                board[y][x].set(in.tileid[y*width + x], in.tileconnections[y*width + x]);
-            }
+        int n = width * height;
+        if (in.tileid != null && in.tileid.length >= n) {
+            System.arraycopy(in.tileid, 0, tileTypes, 0, n);
         }
+        if (in.tileconnections != null && in.tileconnections.length >= n) {
+            System.arraycopy(in.tileconnections, 0, tileTex, 0, n);
+        }
+        recountFilled();
         for (int i=0; i<in.pieces.length; i++) {
             if (activePieces.size() == i) {
                 activePieces.add(Piece.createFromNetPiece(in.pieces[i]));
@@ -991,10 +1096,12 @@ public class Board {
     }
 
     private void refreshUpcomingFromQueues() {
-        upcomingPieceTypes = peekUpcomingFromQueues();
+        upcomingDirty = true;
+        peekUpcomingFromQueues();
     }
 
     private byte[] peekUpcomingFromQueues() {
+        if (!upcomingDirty && upcomingPieceTypes != null) return upcomingPieceTypes;
         int seats = pieceQueues != null ? pieceQueues.length : 0;
         byte[] out = new byte[seats * GameConstants.NEXT_PREVIEW_MAX];
         for (int s = 0; s < seats; s++) {
@@ -1002,6 +1109,8 @@ public class Board {
             byte[] peeked = pieceQueues[s].peekMany(GameConstants.NEXT_PREVIEW_MAX);
             System.arraycopy(peeked, 0, out, s * GameConstants.NEXT_PREVIEW_MAX, peeked.length);
         }
+        upcomingPieceTypes = out;
+        upcomingDirty = false;
         return out;
     }
 

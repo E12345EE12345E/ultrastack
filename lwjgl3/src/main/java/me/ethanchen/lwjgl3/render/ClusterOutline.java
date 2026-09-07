@@ -39,7 +39,7 @@ final class ClusterOutline {
         int h = board.bh();
         if (w <= 0 || h <= 0) return;
 
-        if (label(board.getBoard(), w, h) == 0) return;
+        if (label(board, w, h) == 0) return;
 
         shapes.setProjectionMatrix(projection);
         Gdx.gl.glEnable(GL20.GL_BLEND);
@@ -100,7 +100,7 @@ final class ClusterOutline {
     }
 
     /** Flood-fills 4-connected occupancy into {@link #groupId} / {@link #groupSize}. */
-    int label(Tile[][] tiles, int w, int h) {
+    int label(Board board, int w, int h) {
         ensureBuffers(w, h);
         for (int y = 0; y < h; y++) {
             Arrays.fill(groupId[y], 0, w, 0);
@@ -109,15 +109,15 @@ final class ClusterOutline {
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 if (groupId[y][x] != 0) continue;
-                if (!occupied(tiles, x, y)) continue;
-                groupSize[nextId] = flood(tiles, w, h, x, y, nextId);
+                if (!occupied(board, x, y)) continue;
+                groupSize[nextId] = flood(board, w, h, x, y, nextId);
                 nextId++;
             }
         }
         return nextId - 1;
     }
 
-    private int flood(Tile[][] tiles, int w, int h, int startX, int startY, int id) {
+    private int flood(Board board, int w, int h, int startX, int startY, int id) {
         int sp = 0;
         groupId[startY][startX] = id;
         stack[sp++] = pack(startX, startY);
@@ -127,18 +127,18 @@ final class ClusterOutline {
             int x = packed & 0xFFFF;
             int y = packed >>> 16;
             count++;
-            sp = tryPush(tiles, w, h, x + 1, y, id, sp);
-            sp = tryPush(tiles, w, h, x - 1, y, id, sp);
-            sp = tryPush(tiles, w, h, x, y + 1, id, sp);
-            sp = tryPush(tiles, w, h, x, y - 1, id, sp);
+            sp = tryPush(board, w, h, x + 1, y, id, sp);
+            sp = tryPush(board, w, h, x - 1, y, id, sp);
+            sp = tryPush(board, w, h, x, y + 1, id, sp);
+            sp = tryPush(board, w, h, x, y - 1, id, sp);
         }
         return count;
     }
 
-    private int tryPush(Tile[][] tiles, int w, int h, int x, int y, int id, int sp) {
+    private int tryPush(Board board, int w, int h, int x, int y, int id, int sp) {
         if (x < 0 || x >= w || y < 0 || y >= h) return sp;
         if (groupId[y][x] != 0) return sp;
-        if (!occupied(tiles, x, y)) return sp;
+        if (!occupied(board, x, y)) return sp;
         groupId[y][x] = id;
         stack[sp] = pack(x, y);
         return sp + 1;
@@ -153,9 +153,8 @@ final class ClusterOutline {
         return groupId[y][x] == id;
     }
 
-    private static boolean occupied(Tile[][] tiles, int x, int y) {
-        Tile tile = tiles[y][x];
-        return tile != null && tile.get() != Tile.EMPTY;
+    private static boolean occupied(Board board, int x, int y) {
+        return board.tileTypeAt(x, y) != Tile.EMPTY;
     }
 
     private void ensureBuffers(int w, int h) {

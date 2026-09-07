@@ -48,6 +48,8 @@ public class ServerCore implements PacketSender, Runnable {
     private Thread loopThread;
     private int tickCount;
     private final PacketDispatcher<ServerPacketWrapper> dispatcher;
+    private final RoomScheduler roomScheduler = new RoomScheduler();
+    private final PersistenceExecutor persistence = new PersistenceExecutor();
 
     /** Account-mode constructor. */
     public ServerCore(AuthProvider authProvider, ResultRecorder resultRecorder, XpAwarder xpAwarder,
@@ -134,6 +136,7 @@ public class ServerCore implements PacketSender, Runnable {
         kryoServer.bind(port, port);
         kryoServer.start();
         running = true;
+        roomScheduler.start();
         loopThread = new Thread(this, "server-core-loop");
         loopThread.setDaemon(true);
         loopThread.start();
@@ -143,6 +146,8 @@ public class ServerCore implements PacketSender, Runnable {
     public void stop() {
         running = false;
         for (GameRoom room : rooms.values()) room.stop();
+        roomScheduler.stop();
+        persistence.shutdown();
         kryoServer.stop();
     }
 
@@ -242,9 +247,12 @@ public class ServerCore implements PacketSender, Runnable {
         // added inside the GameRoom constructor; tryAddMember below is a no-op for them that
         // simply returns their existing slot.
         int localPlayers = req.localPlayers & 0xFF;
-        GameRoom lanRoom = rooms.computeIfAbsent("LAN", id ->
-                new GameRoom("LAN", this, w.connectionID, req.playerName, req.playerName,
-                        localPlayers, null, null, profileStore));
+        GameRoom lanRoom = rooms.computeIfAbsent("LAN", id -> {
+            GameRoom created = new GameRoom("LAN", this, w.connectionID, req.playerName, req.playerName,
+                    localPlayers, null, null, profileStore);
+            created.attachRuntime(roomScheduler, persistence);
+            return created;
+        });
 
         GameRoom.AddMemberResult add = lanRoom.tryAddMember(
                 w.connectionID, req.playerName, session.accountUuid, localPlayers, GameConstants.MAX_PLAYERS);
@@ -490,6 +498,7 @@ public class ServerCore implements PacketSender, Runnable {
         int localPlayers = createReq.localPlayers & 0xFF;
         GameRoom room = new GameRoom(roomId, this, w.connectionID, session.username, session.accountUuid,
                 localPlayers, resultRecorder, xpAwarder, profileStore);
+        room.attachRuntime(roomScheduler, persistence);
         rooms.put(roomId, room);
         session.currentRoomId = roomId;
         room.start();

@@ -52,13 +52,20 @@ public final class PveLevelRegistry {
             return name;
         }
 
+        private PveLevelData[] cached;
+
         /**
-         * Loads the level data for {@code difficulty} from disk, or {@code null} if out of range.
-         * Reloads every call so JSON edits apply on the next game start without restarting the process.
+         * Loads the level data for {@code difficulty}, or {@code null} if out of range.
+         * Results are cached after the first read so PvE game start does not hit the disk
+         * on every match.
          */
         public synchronized PveLevelData load(int difficulty) {
             if (difficulty < 0 || difficulty >= difficultyJsonPaths.length) return null;
-            return PveLevelLoader.load(difficultyJsonPaths[difficulty]);
+            if (cached == null) cached = new PveLevelData[difficultyJsonPaths.length];
+            if (cached[difficulty] == null) {
+                cached[difficulty] = PveLevelLoader.load(difficultyJsonPaths[difficulty]);
+            }
+            return cached[difficulty];
         }
     }
 

@@ -4,7 +4,7 @@ package me.ethanchen.network.packets.s2c;
  * Lightweight particle spawn event broadcast inside {@link LightGameStateBroadcast}.
  * Dropped packets are harmless — particles are purely cosmetic.
  *
- * Coordinates are in board-tile space (matching {@code Board.getBoard()[y][x]} indices).
+ * Coordinates are in board-tile space (matching {@code Board.tileTypeAt(x, y)} indices).
  */
 public class NetParticle {
     /** White square flash at placement (no gravity, fades quickly). */

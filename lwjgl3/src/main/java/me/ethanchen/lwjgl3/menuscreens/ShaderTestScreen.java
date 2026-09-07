@@ -21,7 +21,7 @@ public class ShaderTestScreen extends MenuScreen {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
         board = new Board(Board.Presets.STANDARD_SINGLE);
         // Set tile at (5,10) to a mino (T-mino) to mark the center
-        board.getBoard()[10][5] = Tile.T();
+        board.setTile(5, 10, Tile.T, Tile.SINGLE_TILE);
         rippleCircleRenderer = new RippleCircleRenderer();
         testColorData = new RippleShaderColor(
                 new Color[] { Color.CYAN, Color.MAGENTA },

@@ -126,6 +126,10 @@ public class GameRoom implements Runnable, GameRoomContext {
     private Thread thread;
     private int t;
     private final PacketDispatcher<ServerPacketWrapper> dispatcher = buildDispatcher();
+    private RoomScheduler scheduler;
+    private PersistenceExecutor persistence;
+    private NetBoardLight[] reusedBoardLights;
+    private final Map<Integer, LightGameStateBroadcast> reusedMemberPackets = new HashMap<>();
 
     /** Used for LAN rooms, which never persist results. */
     public GameRoom(String roomId, PacketSender sender, int hostConnId, String hostName) {
@@ -146,6 +150,12 @@ public class GameRoom implements Runnable, GameRoomContext {
         this.xpAwarder = xpAwarder;
         this.profileStore = profileStore;
         addMemberUnconditional(hostConnId, hostName, hostUuid, hostLocalPlayers);
+    }
+
+    /** Wires the shared room scheduler and persistence executor owned by {@link ServerCore}. */
+    void attachRuntime(RoomScheduler scheduler, PersistenceExecutor persistence) {
+        this.scheduler = scheduler;
+        this.persistence = persistence;
     }
 
     /** Convenience for account-mode create where localPlayers defaults to 1. */
@@ -288,6 +298,7 @@ public class GameRoom implements Runnable, GameRoomContext {
 
         RoomMember removed = connToMember.remove(connId);
         members.remove(removed);
+        reusedMemberPackets.remove(connId);
         boolean hadActive = removed != null && removed.hasActiveSeat();
         int firstSlot = removed != null ? removed.firstActiveSlot() : -1;
 
@@ -334,6 +345,10 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     public void start() {
         running = true;
+        if (scheduler != null) {
+            scheduler.register(this);
+            return;
+        }
         thread = new Thread(this, "room-" + roomId);
         thread.setDaemon(true);
         thread.start();
@@ -341,6 +356,9 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     public void stop() {
         running = false;
+        if (scheduler != null) {
+            scheduler.unregister(this);
+        }
         if (thread != null) thread.interrupt();
     }
 
@@ -354,27 +372,41 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     @Override
     public void run() {
+        long nextDeadline = System.nanoTime();
         while (running) {
-            long start = System.currentTimeMillis();
-            try {
-                drainInbound();
-                if (serverGame != null && serverGame.isInProgress()) {
-                    serverGame.update();
+            tickOnce();
+            nextDeadline += GameConstants.TICK_MS * 1_000_000L;
+            long now = System.nanoTime();
+            if (now < nextDeadline) {
+                long sleepNs = nextDeadline - now;
+                try {
+                    Thread.sleep(sleepNs / 1_000_000L, (int) (sleepNs % 1_000_000L));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
-                if (t % GameConstants.LOBBY_UDP_REFRESH_INTERVAL_TICKS == 0) {
-                    broadcastPlayerListUDP();
-                }
-            } catch (Exception e) {
-                System.err.println("[GameRoom " + roomId + "] Uncaught exception: " + e);
-                e.printStackTrace(System.err);
-            }
-            t++;
-            long elapsed = System.currentTimeMillis() - start;
-            long sleep = GameConstants.TICK_MS - elapsed;
-            if (sleep > 0) {
-                try { Thread.sleep(sleep); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            } else {
+                nextDeadline = now;
             }
         }
+    }
+
+    /** One room tick: drain inbound packets, simulate, lobby UDP. Pacing lives in the caller. */
+    public void tickOnce() {
+        long start = System.nanoTime();
+        try {
+            drainInbound();
+            if (serverGame != null && serverGame.isInProgress()) {
+                serverGame.update();
+            }
+            if (t % GameConstants.LOBBY_UDP_REFRESH_INTERVAL_TICKS == 0) {
+                broadcastPlayerListUDP();
+            }
+        } catch (Exception e) {
+            System.err.println("[GameRoom " + roomId + "] Uncaught exception: " + e);
+            e.printStackTrace(System.err);
+        }
+        t++;
+        TickInstrumentation.record(System.nanoTime() - start);
     }
 
     private void drainInbound() {
@@ -700,23 +732,41 @@ public class GameRoom implements Runnable, GameRoomContext {
             }
         }
 
-        NetBoardLight[] boardSnapshots =
-                new NetBoardLight[serverGame.getGame().getBoards().size()];
-        for (int a = 0; a < boardSnapshots.length; a++) {
-            boardSnapshots[a] = serverGame.getGame().getBoards().get(a).convertToNetBoardLight();
+        int boardCount = serverGame.getGame().getBoards().size();
+        if (reusedBoardLights == null || reusedBoardLights.length != boardCount) {
+            reusedBoardLights = new NetBoardLight[boardCount];
+            for (int a = 0; a < boardCount; a++) reusedBoardLights[a] = new NetBoardLight();
+        }
+        for (int a = 0; a < boardCount; a++) {
+            serverGame.getGame().getBoards().get(a).fillNetBoardLight(reusedBoardLights[a]);
         }
 
+        // Shared across members: Kryo serializes each sendUDP on this thread before return,
+        // so later field writes on the reused packet cannot affect an in-flight datagram.
+        int[] gravityTickCounters = serverGame.getGravityTickCounters();
+        int[] piecesPlaced = serverGame.getPiecesPlaced();
+        float explodeProgress = serverGame.getExplodeProgress();
+        int gravity = serverGame.getGame().getGravity();
+        boolean gameEnded = serverGame.isGameEnded();
+        LightGameStateBroadcast shared = new LightGameStateBroadcast();
+        serverGame.populateModeData(shared);
+
         for (RoomMember m : members) {
-            // Count active seats for this member
             int activeCount = 0;
             for (Seat s : m.seats) {
                 if (s.slot >= 0) activeCount++;
             }
-            LightGameStateBroadcast b = new LightGameStateBroadcast();
-            b.boards = boardSnapshots;
-            b.ackMoveIds = new int[activeCount];
-            b.holdAvailable = new boolean[activeCount];
-            b.ownPieceHoldGlow = new boolean[activeCount];
+            LightGameStateBroadcast b = reusedMemberPackets.get(m.connId);
+            if (b == null) {
+                b = new LightGameStateBroadcast();
+                reusedMemberPackets.put(m.connId, b);
+            }
+            b.boards = reusedBoardLights;
+            if (b.ackMoveIds == null || b.ackMoveIds.length != activeCount) {
+                b.ackMoveIds = new int[activeCount];
+                b.holdAvailable = new boolean[activeCount];
+                b.ownPieceHoldGlow = new boolean[activeCount];
+            }
             int ai = 0;
             for (Seat s : m.seats) {
                 if (s.slot < 0) continue;
@@ -725,15 +775,18 @@ public class GameRoom implements Runnable, GameRoomContext {
                 b.ownPieceHoldGlow[ai] = serverGame.computeOwnPieceHoldGlow(s.slot);
                 ai++;
             }
-            b.piecesPlaced = serverGame.getPiecesPlaced();
-            b.explodeProgress = serverGame.getExplodeProgress();
+            b.piecesPlaced = piecesPlaced;
+            b.explodeProgress = explodeProgress;
             // Base gravity for prediction; CHARACTER_SCORE also syncs per-player / global
             // speed factors via CharacterModeData so the client can reconstruct effective fall rates.
             // Every seat's gravity accumulator is sent so remote pieces predict with the correct phase.
-            b.gravity = serverGame.getGame().getGravity();
-            b.gravityTickCounters = serverGame.getGravityTickCounters();
-            b.gameEnded = serverGame.isGameEnded();
-            serverGame.populateModeData(b);
+            b.gravity = gravity;
+            b.gravityTickCounters = gravityTickCounters;
+            b.gameEnded = gameEnded;
+            b.scoreMode = shared.scoreMode;
+            b.puzzleMode = shared.puzzleMode;
+            b.characterMode = shared.characterMode;
+            b.pveMode = shared.pveMode;
             sender.sendUDP(m.connId, b);
             if (pb != null) {
                 sender.sendUDP(m.connId, pb);
@@ -772,92 +825,121 @@ public class GameRoom implements Runnable, GameRoomContext {
                 playerList.add(bySlot[i] != null ? bySlot[i] : new PlayerResultInfo("", ""));
             }
             PlayerResultInfo[] players = playerList.toArray(new PlayerResultInfo[0]);
-            if (resultRecorder != null) {
-                resultRecorder.recordGameResult(GameResultData.from(info, players));
-            }
-            // XP uses each player's own board score (their personal result), not the
-            // session-wide aggregate in info.score, so a player is rewarded for their own board.
-            long maxXp = 0;
-            for (int slot = 0; slot < players.length; slot++) {
-                PlayerResultInfo player = players[slot];
-                if (player.accountUuid == null || player.accountUuid.isEmpty()) continue;
-                long personalScore = (info.scorePerPlayer != null && slot < info.scorePerPlayer.length)
-                        ? info.scorePerPlayer[slot] : info.score;
-                long xp = XpCalculator.computeXp(info.mode, personalScore);
-                if (xp > 0 && xpAwarder != null) {
-                    xpAwarder.awardXp(player.accountUuid, xp);
-                }
-                maxXp = Math.max(maxXp, xp);
-            }
-
-            // Artifact acquisition: only on victories in modes that grant xp, and only for real
-            // (non-LAN) accounts -- LAN never persists xp (xpAwarder == null there) and must not
-            // grant artifacts either (implementation.md, Part 5).
-            if (info.win && maxXp > 0 && profileStore != null && xpAwarder != null) {
-                if (info.mode == GameMode.PVE) {
-                    PveSessionState session = serverGame != null ? serverGame.getPveSession() : null;
-                    if (session != null) {
-                        grantPveVictoryArtifacts(session, maxXp);
-                    }
-                } else {
-                    grantVictoryArtifacts(maxXp);
-                }
-            }
-
-            // PvE unlock progression: increment only when the cleared level was already the
-            // player's highest unlocked (prevents skipping by playing a higher level as guest).
-            if (info.win && info.mode == GameMode.PVE && profileStore != null) {
-                PveSessionState session = serverGame != null ? serverGame.getPveSession() : null;
-                if (session != null) {
-                    unlockPveLevelOnVictory(session.levelId);
-                }
+            List<PersistSeat> persistSeats = snapshotPersistSeats();
+            PveSessionState pveSession = serverGame != null ? serverGame.getPveSession() : null;
+            Runnable persist = () -> persistEndGame(info, players, persistSeats, pveSession);
+            if (persistence != null) {
+                persistence.submit(persist);
+            } else {
+                persist.run();
             }
         }
 
         // Game ended — allow reseating for next round (triggered via onGameStopped after stopGame)
     }
 
-    private final Random artifactRng = new Random();
+    private static final class PersistSeat {
+        final int connId;
+        final String accountUuid;
+
+        PersistSeat(int connId, String accountUuid) {
+            this.connId = connId;
+            this.accountUuid = accountUuid;
+        }
+    }
+
+    private List<PersistSeat> snapshotPersistSeats() {
+        List<PersistSeat> seats = new ArrayList<>();
+        for (RoomMember m : members) {
+            for (Seat s : m.seats) {
+                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
+                seats.add(new PersistSeat(m.connId, s.accountUuid));
+            }
+        }
+        return seats;
+    }
+
+    /**
+     * SQLite / profile writes for a finished game. Runs on {@link PersistenceExecutor} so the
+     * room worker is not blocked.
+     */
+    private void persistEndGame(GameEndInfo info, PlayerResultInfo[] players,
+                                List<PersistSeat> seats, PveSessionState pveSession) {
+        if (resultRecorder != null) {
+            resultRecorder.recordGameResult(GameResultData.from(info, players));
+        }
+        // XP uses each player's own board score (their personal result), not the
+        // session-wide aggregate in info.score, so a player is rewarded for their own board.
+        long maxXp = 0;
+        for (int slot = 0; slot < players.length; slot++) {
+            PlayerResultInfo player = players[slot];
+            if (player.accountUuid == null || player.accountUuid.isEmpty()) continue;
+            long personalScore = (info.scorePerPlayer != null && slot < info.scorePerPlayer.length)
+                    ? info.scorePerPlayer[slot] : info.score;
+            long xp = XpCalculator.computeXp(info.mode, personalScore);
+            if (xp > 0 && xpAwarder != null) {
+                xpAwarder.awardXp(player.accountUuid, xp);
+            }
+            maxXp = Math.max(maxXp, xp);
+        }
+
+        // Artifact acquisition: only on victories in modes that grant xp, and only for real
+        // (non-LAN) accounts -- LAN never persists xp (xpAwarder == null there) and must not
+        // grant artifacts either (implementation.md, Part 5).
+        if (info.win && maxXp > 0 && profileStore != null && xpAwarder != null) {
+            if (info.mode == GameMode.PVE) {
+                if (pveSession != null) {
+                    grantPveVictoryArtifacts(pveSession, maxXp, seats);
+                }
+            } else {
+                grantVictoryArtifacts(maxXp, seats);
+            }
+        }
+
+        // PvE unlock progression: increment only when the cleared level was already the
+        // player's highest unlocked (prevents skipping by playing a higher level as guest).
+        if (info.win && info.mode == GameMode.PVE && profileStore != null) {
+            if (pveSession != null) {
+                unlockPveLevelOnVictory(pveSession.levelId, seats);
+            }
+        }
+    }
 
     /**
      * Rolls and grants one artifact to each real (non-extra) seated player on a victory,
      * per implementation.md, Part 2. Extra local players (empty accountUuid) never earn xp and
      * so never receive artifacts either.
      */
-    private void grantVictoryArtifacts(long xp) {
-        for (RoomMember m : members) {
-            for (Seat s : m.seats) {
-                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
-                PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
-                Artifact artifact = ArtifactAcquisition.rollFromVictory(xp, artifactRng);
-                profile.inventory.add(artifact);
-                profile.sortInventory();
-                profileStore.saveProfile(s.accountUuid, profile);
+    private void grantVictoryArtifacts(long xp, List<PersistSeat> seats) {
+        Random rng = new Random();
+        for (PersistSeat s : seats) {
+            PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
+            Artifact artifact = ArtifactAcquisition.rollFromVictory(xp, rng);
+            profile.inventory.add(artifact);
+            profile.sortInventory();
+            profileStore.saveProfile(s.accountUuid, profile);
 
-                ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
-                grant.artifact = artifact;
-                sender.sendTCP(m.connId, grant);
-            }
+            ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
+            grant.artifact = artifact;
+            sender.sendTCP(s.connId, grant);
         }
     }
 
     /** Grants one artifact from the level's {@link me.ethanchen.game.pve.PveLootTable} per seated account. */
-    private void grantPveVictoryArtifacts(PveSessionState session, long xp) {
+    private void grantPveVictoryArtifacts(PveSessionState session, long xp, List<PersistSeat> seats) {
         if (session.loot == null) return;
-        for (RoomMember m : members) {
-            for (Seat s : m.seats) {
-                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
-                PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
-                Artifact artifact = session.loot.roll(artifactRng, xp, session.difficulty);
-                if (artifact == null) continue;
-                profile.inventory.add(artifact);
-                profile.sortInventory();
-                profileStore.saveProfile(s.accountUuid, profile);
+        Random rng = new Random();
+        for (PersistSeat s : seats) {
+            PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
+            Artifact artifact = session.loot.roll(rng, xp, session.difficulty);
+            if (artifact == null) continue;
+            profile.inventory.add(artifact);
+            profile.sortInventory();
+            profileStore.saveProfile(s.accountUuid, profile);
 
-                ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
-                grant.artifact = artifact;
-                sender.sendTCP(m.connId, grant);
-            }
+            ArtifactGrantBroadcast grant = new ArtifactGrantBroadcast();
+            grant.artifact = artifact;
+            sender.sendTCP(s.connId, grant);
         }
     }
 
@@ -865,20 +947,17 @@ public class GameRoom implements Runnable, GameRoomContext {
      * For each seated account, if {@code pveUnlockedLevels == levelId + 1} (they already had this
      * level unlocked as their highest), increment and sync the profile.
      */
-    private void unlockPveLevelOnVictory(int levelId) {
-        for (RoomMember m : members) {
-            for (Seat s : m.seats) {
-                if (s.accountUuid == null || s.accountUuid.isEmpty()) continue;
-                PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
-                if (profile == null) continue;
-                if (profile.pveUnlockedLevels != levelId + 1) continue;
-                profile.pveUnlockedLevels++;
-                profileStore.saveProfile(s.accountUuid, profile);
-                ProfileSyncBroadcast sync = new ProfileSyncBroadcast();
-                sync.profile = profile;
-                sync.readOnly = false;
-                sender.sendTCP(m.connId, sync);
-            }
+    private void unlockPveLevelOnVictory(int levelId, List<PersistSeat> seats) {
+        for (PersistSeat s : seats) {
+            PlayerProfile profile = profileStore.loadProfile(s.accountUuid);
+            if (profile == null) continue;
+            if (profile.pveUnlockedLevels != levelId + 1) continue;
+            profile.pveUnlockedLevels++;
+            profileStore.saveProfile(s.accountUuid, profile);
+            ProfileSyncBroadcast sync = new ProfileSyncBroadcast();
+            sync.profile = profile;
+            sync.readOnly = false;
+            sender.sendTCP(s.connId, sync);
         }
     }
 

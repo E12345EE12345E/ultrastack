@@ -21,25 +21,23 @@ final class BoardCollision {
     static boolean canMovePiece(Board b, int id, int xdiff, int ydiff) {
         if (id < 0 || id >= b.activePieces.size()) return false;
         Piece p = b.activePieces.get(id);
+        float destMinX = Float.POSITIVE_INFINITY, destMaxX = Float.NEGATIVE_INFINITY;
+        float destMinY = Float.POSITIVE_INFINITY, destMaxY = Float.NEGATIVE_INFINITY;
         for (int i = 0; i < p.tiles.length; i++) {
             float lx = p.location.x + p.tiles[i].x + xdiff;
             float ly = p.location.y + p.tiles[i].y + ydiff;
             if (lx < 0 || ly < 0 || lx >= b.width || ly >= b.height) return false;
             int ix = (int) lx, iy = (int) ly;
-            if (b.board[iy][ix] == null || b.board[iy][ix].get() != 0) return false;
+            if (b.tileTypeAt(ix, iy) != 0) return false;
             if (!b.allowedTiles[iy][ix]) return false;
             if (b.isFallingOccupied(ix, iy)) return false;
-            for (int j = 0; j < b.activePieces.size(); j++) {
-                if (j == id) continue;
-                Piece other = b.activePieces.get(j);
-                if (p.justSpawned || other.justSpawned) continue;
-                for (Vector2 t : other.tiles) {
-                    if (lx == t.x + other.location.x
-                            && ly == t.y + other.location.y) return false;
-                }
-            }
+            if (lx < destMinX) destMinX = lx;
+            if (lx > destMaxX) destMaxX = lx;
+            if (ly < destMinY) destMinY = ly;
+            if (ly > destMaxY) destMaxY = ly;
         }
-        return true;
+        if (p.justSpawned || b.activePieces.size() <= 1) return true;
+        return !overlapsOtherPieces(b, id, p, xdiff, ydiff, destMinX, destMinY, destMaxX, destMaxY);
     }
 
     /**
@@ -48,25 +46,62 @@ final class BoardCollision {
      */
     static boolean canPieceBeAt(Board b, int id, float baseX, float baseY) {
         Piece p = b.activePieces.get(id);
+        float destMinX = Float.POSITIVE_INFINITY, destMaxX = Float.NEGATIVE_INFINITY;
+        float destMinY = Float.POSITIVE_INFINITY, destMaxY = Float.NEGATIVE_INFINITY;
         for (int i = 0; i < p.tiles.length; i++) {
             float lx = baseX + p.tiles[i].x;
             float ly = baseY + p.tiles[i].y;
             if (lx < 0 || ly < 0 || lx >= b.width || ly >= b.height) return false;
             int ix = (int) lx, iy = (int) ly;
-            if (b.board[iy][ix] == null || b.board[iy][ix].get() != 0) return false;
+            if (b.tileTypeAt(ix, iy) != 0) return false;
             if (!b.allowedTiles[iy][ix]) return false;
             if (b.isFallingOccupied(ix, iy)) return false;
-            for (int j = 0; j < b.activePieces.size(); j++) {
-                if (j == id) continue;
-                Piece other = b.activePieces.get(j);
-                if (p.justSpawned || other.justSpawned) continue;
+            if (lx < destMinX) destMinX = lx;
+            if (lx > destMaxX) destMaxX = lx;
+            if (ly < destMinY) destMinY = ly;
+            if (ly > destMaxY) destMaxY = ly;
+        }
+        if (p.justSpawned || b.activePieces.size() <= 1) return true;
+        float xdiff = baseX - p.location.x;
+        float ydiff = baseY - p.location.y;
+        return !overlapsOtherPieces(b, id, p, xdiff, ydiff, destMinX, destMinY, destMaxX, destMaxY);
+    }
+
+    private static boolean overlapsOtherPieces(Board b, int id, Piece p,
+                                              float xdiff, float ydiff,
+                                              float destMinX, float destMinY,
+                                              float destMaxX, float destMaxY) {
+        for (int j = 0; j < b.activePieces.size(); j++) {
+            if (j == id) continue;
+            Piece other = b.activePieces.get(j);
+            if (other.justSpawned) continue;
+            if (!aabbOverlaps(other, destMinX, destMinY, destMaxX, destMaxY)) continue;
+            for (int i = 0; i < p.tiles.length; i++) {
+                float lx = p.location.x + p.tiles[i].x + xdiff;
+                float ly = p.location.y + p.tiles[i].y + ydiff;
                 for (Vector2 t : other.tiles) {
                     if (lx == t.x + other.location.x
-                            && ly == t.y + other.location.y) return false;
+                            && ly == t.y + other.location.y) return true;
                 }
             }
         }
-        return true;
+        return false;
+    }
+
+    private static boolean aabbOverlaps(Piece other,
+                                        float destMinX, float destMinY,
+                                        float destMaxX, float destMaxY) {
+        float ominX = Float.POSITIVE_INFINITY, omaxX = Float.NEGATIVE_INFINITY;
+        float ominY = Float.POSITIVE_INFINITY, omaxY = Float.NEGATIVE_INFINITY;
+        for (Vector2 t : other.tiles) {
+            float ox = t.x + other.location.x;
+            float oy = t.y + other.location.y;
+            if (ox < ominX) ominX = ox;
+            if (ox > omaxX) omaxX = ox;
+            if (oy < ominY) ominY = oy;
+            if (oy > omaxY) omaxY = oy;
+        }
+        return destMinX <= omaxX && ominX <= destMaxX && destMinY <= omaxY && ominY <= destMaxY;
     }
 
     // -------------------------------------------------------------------------
@@ -86,7 +121,7 @@ final class BoardCollision {
             if (below < 0) return true;
             if (mx >= 0 && mx < b.width && below < b.height) {
                 if (!b.allowedTiles[below][mx]) return true;
-                if (b.board[below][mx].get() != Tile.EMPTY) return true;
+                if (b.tileTypeAt(mx, below) != Tile.EMPTY) return true;
             }
         }
         return false;
@@ -105,7 +140,7 @@ final class BoardCollision {
     static boolean isSolid(Board b, int x, int y) {
         if (x < 0 || x >= b.width || y < 0 || y >= b.height) return true;
         if (!b.allowedTiles[y][x]) return true;
-        return b.board[y][x].get() != Tile.EMPTY;
+        return b.tileTypeAt(x, y) != Tile.EMPTY;
     }
 
     // -------------------------------------------------------------------------
@@ -154,7 +189,7 @@ final class BoardCollision {
             if (lx < 0 || lx >= b.width || ly < 0 || ly >= b.height) return -1;
             int ix = (int) lx, iy = (int) ly;
             if (!b.allowedTiles[iy][ix]) return -1;
-            if (b.board[iy][ix] != null && b.board[iy][ix].get() != 0) return -1;
+            if (b.tileTypeAt(ix, iy) != 0) return -1;
             if (b.isFallingOccupied(ix, iy)) return -1;
             for (int j = 0; j < b.activePieces.size(); j++) {
                 if (j == id) continue;

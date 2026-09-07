@@ -7,23 +7,29 @@ import java.util.Random;
 import me.ethanchen.network.dto.NetQueue;
 
 public class PieceQueue {
-    protected final ArrayList<Integer> pieceIDs;
     protected final int seed;
     private int generationNumber;
     private final Random random;
     protected final BagTypes bag;
+    private byte[] buf;
+    private int head;
+    private int size;
 
     public PieceQueue(int seed, BagTypes bag) {
         this.seed = seed;
         this.bag = bag;
         this.generationNumber = 0;
         this.random = new Random(seed);
-        this.pieceIDs = new ArrayList<Integer>();
+        this.buf = new byte[16];
     }
 
     public PieceQueue(int seed, BagTypes bag, ArrayList<Integer> piecesAlreadyInBag, int alreadyGeneratedNumber) {
         this(seed, bag);
-        this.pieceIDs.addAll(piecesAlreadyInBag);
+        if (piecesAlreadyInBag != null) {
+            for (Integer id : piecesAlreadyInBag) {
+                enqueue((byte) (int) id);
+            }
+        }
         while (this.generationNumber < alreadyGeneratedNumber) {
             this.random.nextInt();
             this.generationNumber++;
@@ -31,21 +37,24 @@ public class PieceQueue {
     }
 
     public void refill() {
-        while (this.pieceIDs.size() < bag.get().length) {
-            this.pieceIDs.addAll(generateNextBag());
+        while (this.size < bag.get().length) {
+            addGeneratedBag();
         }
     }
 
     public byte takeNext() {
         refill();
-        return (byte)(int)this.pieceIDs.remove(0);
+        byte v = buf[head];
+        head = (head + 1) % buf.length;
+        size--;
+        return v;
     }
 
     /** Returns the upcoming piece at {@code index} (0 = next to spawn) without consuming it. */
     public byte peek(int index) {
         if (index < 0) return 0;
         ensureAvailable(index + 1);
-        return (byte) (int) pieceIDs.get(index);
+        return buf[(head + index) % buf.length];
     }
 
     /** Returns the next {@code count} upcoming piece types without consuming them. */
@@ -55,15 +64,15 @@ public class PieceQueue {
         if (n == 0) return out;
         ensureAvailable(n);
         for (int i = 0; i < n; i++) {
-            out[i] = (byte) (int) pieceIDs.get(i);
+            out[i] = buf[(head + i) % buf.length];
         }
         return out;
     }
 
     private void ensureAvailable(int count) {
         refill();
-        while (pieceIDs.size() < count) {
-            pieceIDs.addAll(generateNextBag());
+        while (size < count) {
+            addGeneratedBag();
         }
     }
 
@@ -71,9 +80,13 @@ public class PieceQueue {
         Piece.J, Piece.L, Piece.S, Piece.Z, Piece.O
     };
 
-    private ArrayList<Integer> generateNextBag() {
+    /**
+     * Same shuffle as the previous ArrayList implementation: {@code new Random(this.random.nextInt())}
+     * plus {@link Collections#shuffle} on a temporary list, then copied into the ring buffer.
+     */
+    private void addGeneratedBag() {
         ArrayList<Integer> shuffleBag = new ArrayList<Integer>();
-        for (byte b : bag.get()) shuffleBag.add((int)b);
+        for (byte b : bag.get()) shuffleBag.add((int) b);
 
         // One nextInt() per bag keeps NetQueue reconstruction in sync (see ctor that burns RNG).
         Random bagRng = new Random(this.random.nextInt());
@@ -83,15 +96,37 @@ public class PieceQueue {
         Collections.shuffle(shuffleBag, bagRng);
 
         this.generationNumber++;
-        return shuffleBag;
+        for (Integer id : shuffleBag) {
+            enqueue((byte) (int) id);
+        }
+    }
+
+    private void enqueue(byte value) {
+        ensureCap(size + 1);
+        buf[(head + size) % buf.length] = value;
+        size++;
+    }
+
+    private void ensureCap(int min) {
+        if (buf.length >= min) return;
+        int cap = buf.length;
+        while (cap < min) cap *= 2;
+        byte[] next = new byte[cap];
+        for (int i = 0; i < size; i++) {
+            next[i] = buf[(head + i) % buf.length];
+        }
+        buf = next;
+        head = 0;
     }
 
     public NetQueue convertToNetQueue() {
         NetQueue nq = new NetQueue();
         nq.seed = seed;
         nq.bag = bag;
-        nq.piecesAlreadyInBag = new byte[pieceIDs.size()];
-        for (int i=0; i<pieceIDs.size(); i++) nq.piecesAlreadyInBag[i] = (byte)(int)pieceIDs.get(i);
+        nq.piecesAlreadyInBag = new byte[size];
+        for (int i = 0; i < size; i++) {
+            nq.piecesAlreadyInBag[i] = buf[(head + i) % buf.length];
+        }
         nq.alreadyGeneratedNumber = generationNumber;
         return nq;
     }
@@ -101,7 +136,7 @@ public class PieceQueue {
             return new PieceQueue(nq.seed, nq.bag);
         }
         ArrayList<Integer> list = new ArrayList<Integer>();
-        for (byte b : nq.piecesAlreadyInBag) list.add((int)b);
+        for (byte b : nq.piecesAlreadyInBag) list.add((int) b);
         return new PieceQueue(nq.seed, nq.bag, list, nq.alreadyGeneratedNumber);
     }
 

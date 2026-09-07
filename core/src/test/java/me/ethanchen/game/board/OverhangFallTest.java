@@ -17,11 +17,11 @@ class OverhangFallTest {
     private static final int OTHER_COL = 6;
 
     private static void setSolid(Board b, int x, int y, byte type) {
-        b.getBoard()[y][x].set(type, Tile.SINGLE_TILE);
+        b.setTile(x, y, type, Tile.SINGLE_TILE);
     }
 
     private static byte cell(Board b, int x, int y) {
-        return b.getBoard()[y][x].get();
+        return b.tileTypeAt(x, y);
     }
 
     private static FallingColumn columnAt(Board b, int x, float bottomY) {

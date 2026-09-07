@@ -29,13 +29,13 @@ class GarbageStyleSpawnTest {
     private static int emptyCount(Board b, int y) {
         int n = 0;
         for (int x = 0; x < b.bw(); x++) {
-            if (b.getBoard()[y][x].get() == Tile.EMPTY) n++;
+            if (b.tileTypeAt(x, y) == Tile.EMPTY) n++;
         }
         return n;
     }
 
     private static boolean isEmpty(Board b, int x, int y) {
-        return b.getBoard()[y][x].get() == Tile.EMPTY;
+        return b.tileTypeAt(x, y) == Tile.EMPTY;
     }
 
     @Test

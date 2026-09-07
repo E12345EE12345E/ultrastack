@@ -15,6 +15,10 @@ import me.ethanchen.game.GameConstants;
  */
 final class BoardFallingBlocks {
 
+    private static final Comparator<FallingColumn> BY_BOTTOM_Y =
+            Comparator.comparingDouble(c -> c.bottomY);
+    private static final ArrayList<LineClearResult> NO_RESULTS = new ArrayList<>(0);
+
     private BoardFallingBlocks() {}
 
     // -------------------------------------------------------------------------
@@ -59,7 +63,7 @@ final class BoardFallingBlocks {
         if (below < 0) return true;
         if (x < 0 || x >= b.width || below >= b.height) return true;
         if (!b.allowedTiles[below][x]) return true;
-        return b.board[below][x].get() != Tile.EMPTY;
+        return b.tileTypeAt(x, below) != Tile.EMPTY;
     }
 
     /**
@@ -74,7 +78,7 @@ final class BoardFallingBlocks {
                 // Abort: disallowed solid — leave tiles untouched
                 return;
             }
-            if (b.board[y][x].get() == Tile.EMPTY) {
+            if (b.tileTypeAt(x, y) == Tile.EMPTY) {
                 // Empty (including cells occupied only by another falling column) stops the scan
                 emptyY = y;
                 break;
@@ -130,7 +134,7 @@ final class BoardFallingBlocks {
                     supported = true;
                     continue;
                 }
-                if (b.board[y][x].get() == Tile.EMPTY) {
+                if (b.tileTypeAt(x, y) == Tile.EMPTY) {
                     if (runStart >= 0) {
                         detachRun(b, playerId, x, runStart, y - 1, false);
                         runStart = -1;
@@ -158,8 +162,8 @@ final class BoardFallingBlocks {
         byte[] types = new byte[len];
         for (int i = 0; i < len; i++) {
             int y = bottom + i;
-            types[i] = b.board[y][x].get();
-            b.board[y][x].set(Tile.EMPTY, Tile.SINGLE_TILE);
+            types[i] = b.tileTypeAt(x, y);
+            b.setTile(x, y, Tile.EMPTY, Tile.SINGLE_TILE);
         }
         FallingColumn col = new FallingColumn();
         col.id = b.nextFallingId++;
@@ -182,13 +186,15 @@ final class BoardFallingBlocks {
      * by landings this tick (may be empty).
      */
     static ArrayList<LineClearResult> update(Board b, int deltaMs) {
-        ArrayList<LineClearResult> results = new ArrayList<>();
-        if (b.fallingColumns.isEmpty() || deltaMs <= 0) return results;
+        if (b.fallingColumns.isEmpty() || deltaMs <= 0) return NO_RESULTS;
 
+        ArrayList<LineClearResult> results = null;
         float dt = deltaMs / 1000f;
 
         // Bottom-most first so chains resolve in one pass
-        b.fallingColumns.sort(Comparator.comparingDouble(c -> c.bottomY));
+        if (b.fallingColumns.size() >= 2) {
+            b.fallingColumns.sort(BY_BOTTOM_Y);
+        }
 
         // Iterate by index; landings/merges mutate the list
         int i = 0;
@@ -203,7 +209,10 @@ final class BoardFallingBlocks {
                     switch (action) {
                         case LAND:
                             LineClearResult r = land(b, col);
-                            if (r != null) results.add(r);
+                            if (r != null) {
+                                if (results == null) results = new ArrayList<>();
+                                results.add(r);
+                            }
                             removed = true;
                             remaining = 0f;
                             break;
@@ -263,7 +272,7 @@ final class BoardFallingBlocks {
             }
         }
 
-        return results;
+        return results != null ? results : NO_RESULTS;
     }
 
     private enum BelowAction { LAND, MERGE, HOVER, FALL }
@@ -273,7 +282,7 @@ final class BoardFallingBlocks {
         if (below < 0) return BelowAction.LAND;
         if (below >= b.height || col.x < 0 || col.x >= b.width) return BelowAction.LAND;
         if (!b.allowedTiles[below][col.x]) return BelowAction.LAND;
-        if (b.board[below][col.x].get() != Tile.EMPTY) return BelowAction.LAND;
+        if (b.tileTypeAt(col.x, below) != Tile.EMPTY) return BelowAction.LAND;
 
         FallingColumn other = findFallingAt(b, col.x, below, col);
         if (other != null) return BelowAction.MERGE;
@@ -339,7 +348,7 @@ final class BoardFallingBlocks {
             int y = bottom + i;
             if (y < 0 || y >= b.height || col.x < 0 || col.x >= b.width) continue;
             if (!b.allowedTiles[y][col.x]) continue;
-            b.board[y][col.x].set(col.types[i], Tile.SINGLE_TILE);
+            b.setTile(col.x, y, col.types[i], Tile.SINGLE_TILE);
             landedCells.add(new int[]{col.x, y});
         }
 
@@ -408,7 +417,7 @@ final class BoardFallingBlocks {
             int y = bottom + i;
             if (y < 0 || y >= b.height || col.x < 0 || col.x >= b.width) continue;
             if (!b.allowedTiles[y][col.x]) return true;
-            if (b.board[y][col.x].get() != Tile.EMPTY) return true;
+            if (b.tileTypeAt(col.x, y) != Tile.EMPTY) return true;
         }
         return false;
     }

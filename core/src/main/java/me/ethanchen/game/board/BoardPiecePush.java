@@ -212,7 +212,7 @@ final class BoardPiecePush {
         boolean[][] solid = new boolean[b.height][b.width];
         for (int y = 0; y < b.height; y++) {
             for (int x = 0; x < b.width; x++) {
-                solid[y][x] = !b.allowedTiles[y][x] || b.board[y][x].get() != Tile.EMPTY;
+                solid[y][x] = !b.allowedTiles[y][x] || b.tileTypeAt(x, y) != Tile.EMPTY;
             }
         }
         return solid;

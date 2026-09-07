@@ -555,15 +555,14 @@ public class BoardRenderer {
 
     private void drawLockedTiles(Board board, float originX, float originY, float tileSize,
                                  SpriteBatch sprites) {
-        Tile[][] tiles = board.getBoard();
         for (int y = 0; y < board.bh(); y++) {
             for (int x = 0; x < board.bw(); x++) {
-                Tile tile = tiles[y][x];
-                if (tile == null || tile.get() == Tile.EMPTY) continue;
+                byte type = board.tileTypeAt(x, y);
+                if (type == Tile.EMPTY) continue;
                 float sx = originX + x * tileSize;
                 float sy = originY + y * tileSize;
-                drawTileBackground(sprites, sx, sy, tileSize, tile.get());
-                drawTile(sprites, sx, sy, tileSize, tile.get(), tile.tex());
+                drawTileBackground(sprites, sx, sy, tileSize, type);
+                drawTile(sprites, sx, sy, tileSize, type, board.tileTexAt(x, y));
             }
         }
     }

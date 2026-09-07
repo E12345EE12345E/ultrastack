@@ -20,16 +20,15 @@ public class TestMenu extends MenuScreen {
     }
 
     private void populateTestTiles(Board board) {
-        Tile[][] tiles = board.getBoard();
         byte[] types = {
             Tile.I, Tile.J, Tile.L, Tile.O, Tile.S, Tile.T, Tile.Z,
             Tile.I3, Tile.L3, Tile.GARBAGE
         };
         for (int i = 0; i < types.length; i++) {
-            tiles[2][i] = new Tile(types[i], Tile.SINGLE_TILE);
+            board.setTile(i, 2, types[i], Tile.SINGLE_TILE);
         }
         for (int i = 0; i < 16; i++) {
-            tiles[4 + i / board.bw()][i % board.bw()] = new Tile(Tile.T, (byte) i);
+            board.setTile(i % board.bw(), 4 + i / board.bw(), Tile.T, (byte) i);
         }
     }
 

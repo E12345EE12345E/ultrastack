@@ -2,17 +2,30 @@ package me.ethanchen.testclient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 
+/**
+ * Headless load driver. Defaults match the original 40-host-each-own-room harness.
+ *
+ * <p>System properties:
+ * <ul>
+ *   <li>{@code ultrastack.rooms} — number of rooms (default 40)
+ *   <li>{@code ultrastack.botsPerRoom} — bots per room, including the host (default 1)
+ *   <li>{@code ultrastack.idleMs} — how long each bot stays in a running game
+ *   <li>{@code ultrastack.quiet} — suppress per-bot logs
+ * </ul>
+ */
 final class TestClientApp extends ApplicationAdapter {
-    static final int BOT_COUNT = 40;
+    static final int DEFAULT_ROOMS = 40;
     static final String PASSWORD = "test";
 
     private final String host;
@@ -28,26 +41,44 @@ final class TestClientApp extends ApplicationAdapter {
         Gdx.app.setApplicationLogger(new TimestampedLogger());
         Gdx.app.setLogLevel(Application.LOG_DEBUG);
 
-        Gdx.app.log("harness", "starting " + BOT_COUNT + " bots host=" + host + " port=" + port
-                + " usernames=test1..test" + BOT_COUNT + " password=" + PASSWORD);
+        int rooms = Integer.getInteger("ultrastack.rooms", DEFAULT_ROOMS);
+        int botsPerRoom = Math.max(1, Integer.getInteger("ultrastack.botsPerRoom", 1));
+        long idleMs = Long.getLong("ultrastack.idleMs", 30_000L);
+        boolean quiet = Boolean.getBoolean("ultrastack.quiet");
+        int botCount = rooms * botsPerRoom;
 
-        ExecutorService pool = Executors.newFixedThreadPool(BOT_COUNT);
+        Gdx.app.log("harness", "starting " + botCount + " bots rooms=" + rooms
+                + " botsPerRoom=" + botsPerRoom + " host=" + host + " port=" + port
+                + " idleMs=" + idleMs + " quiet=" + quiet);
+
+        ExecutorService pool = Executors.newFixedThreadPool(botCount);
         List<Future<TestBot.Result>> futures = new ArrayList<>();
-        for (int i = 1; i <= BOT_COUNT; i++) {
-            String username = "test_bot" + i;
-            futures.add(pool.submit(new TestBot(username, PASSWORD, host, port)));
+        List<String> usernames = new ArrayList<>();
+        int botIndex = 1;
+        for (int r = 0; r < rooms; r++) {
+            AtomicReference<String> roomId = new AtomicReference<>();
+            CountDownLatch roomReady = new CountDownLatch(1);
+            CountDownLatch guestsJoined = new CountDownLatch(botsPerRoom - 1);
+            for (int s = 0; s < botsPerRoom; s++) {
+                String username = "test_bot" + botIndex++;
+                usernames.add(username);
+                TestBot.Role role = s == 0 ? TestBot.Role.HOST : TestBot.Role.GUEST;
+                futures.add(pool.submit(new TestBot(username, PASSWORD, host, port, role,
+                        roomId, roomReady, guestsJoined, idleMs, quiet)));
+            }
         }
         pool.shutdown();
 
         List<TestBot.Result> results = new ArrayList<>();
+        long waitMinutes = Math.max(3L, (idleMs / 60_000L) + 2L);
         try {
-            if (!pool.awaitTermination(3, TimeUnit.MINUTES)) {
-                Gdx.app.error("harness", "bots did not finish within 3 minutes; cancelling");
+            if (!pool.awaitTermination(waitMinutes, TimeUnit.MINUTES)) {
+                Gdx.app.error("harness", "bots did not finish within " + waitMinutes + " minutes; cancelling");
                 pool.shutdownNow();
             }
             for (int i = 0; i < futures.size(); i++) {
                 Future<TestBot.Result> future = futures.get(i);
-                String username = "test" + (i + 1);
+                String username = usernames.get(i);
                 try {
                     results.add(future.get(1, TimeUnit.SECONDS));
                 } catch (Exception e) {
@@ -66,7 +97,7 @@ final class TestClientApp extends ApplicationAdapter {
         int disconnected = 0;
         for (int i = 0; i < results.size(); i++) {
             TestBot.Result r = results.get(i);
-            String username = "test" + (i + 1);
+            String username = usernames.get(i);
             Gdx.app.log("harness", "bot " + username + " started=" + r.started
                     + " idled=" + r.idled + " disconnected=" + r.disconnected);
             if (r.started) started++;
@@ -74,11 +105,11 @@ final class TestClientApp extends ApplicationAdapter {
             if (r.disconnected) disconnected++;
         }
 
-        Gdx.app.log("harness", started + "/" + BOT_COUNT + " started, "
-                + idled + "/" + BOT_COUNT + " idled, "
-                + disconnected + "/" + BOT_COUNT + " disconnected");
+        Gdx.app.log("harness", started + "/" + botCount + " started, "
+                + idled + "/" + botCount + " idled, "
+                + disconnected + "/" + botCount + " disconnected");
 
-        int code = idled == BOT_COUNT ? 0 : 1;
+        int code = idled == botCount ? 0 : 1;
         Gdx.app.log("harness", "exit code=" + code);
         Gdx.app.exit();
         System.exit(code);

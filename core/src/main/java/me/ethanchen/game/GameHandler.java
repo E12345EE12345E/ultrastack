@@ -2,6 +2,8 @@ package me.ethanchen.game;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import me.ethanchen.game.board.Board;
 import me.ethanchen.game.board.LineClearResult;
@@ -278,8 +280,8 @@ public class GameHandler {
     /**
      * Returns all auto-lock results accumulated since the last call and clears the list.
      */
-    public ArrayList<LineClearResult> getAndClearPendingLockResults() {
-        if (pendingLockResults.isEmpty()) return new ArrayList<>();
+    public List<LineClearResult> getAndClearPendingLockResults() {
+        if (pendingLockResults.isEmpty()) return Collections.emptyList();
         ArrayList<LineClearResult> copy = new ArrayList<>(pendingLockResults);
         pendingLockResults.clear();
         return copy;

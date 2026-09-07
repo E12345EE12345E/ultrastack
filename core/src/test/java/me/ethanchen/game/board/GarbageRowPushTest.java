@@ -71,7 +71,7 @@ class GarbageRowPushTest {
         for (int y = 0; y < 4; y++) {
             for (int x = 0; x < b.bw(); x++) {
                 byte expected = x == GAP_COLUMN ? Tile.EMPTY : Tile.GARBAGE;
-                assertEquals(expected, b.getBoard()[y][x].get(), "row " + y + " col " + x);
+                assertEquals(expected, b.tileTypeAt(x, y), "row " + y + " col " + x);
             }
         }
     }
