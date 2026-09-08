@@ -24,12 +24,15 @@ public class DecoratedButton extends DecoratedElement {
     public final Color fillColor = new Color(1f, 1f, 1f, 0.22f);
     public final Color outlineColor = new Color(1f, 1f, 1f, 1f);
     public float outlineDesignPx = OUTLINE_DESIGN_PX;
+    /** Stays highlighted while true; used for mutually-exclusive option groups. */
+    public boolean selected;
 
     public DecoratedButton(float designX, float designY, float designW, float designH,
                            String text, Runnable action) {
         super(DesignUi.nx(designX), DesignUi.ny(designY), DesignUi.nw(designW), DesignUi.nh(designH));
         this.text = text;
         this.action = action;
+        this.pressOnClick = true;
     }
 
     public static DecoratedButton icon(float designX, float designY, float designSize,
@@ -87,7 +90,7 @@ public class DecoratedButton extends DecoratedElement {
             AudioManager.getInstance().playMenuSelectSound();
         }
 
-        boolean hot = highlighted();
+        boolean hot = highlighted() || selected;
         float a = Anim.clamp01(alpha);
         drawFramedPanel(ctx, fillColor, outlineColor, a, hot, outlineDesignPx);
 

@@ -3,8 +3,11 @@ package me.ethanchen.headless;
 import com.badlogic.gdx.utils.Json;
 import com.badlogic.gdx.utils.JsonWriter;
 
+import me.ethanchen.game.progression.BestGameRecord;
 import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.server.ProfileStore;
+import me.ethanchen.server.PublicAccountView;
+import me.ethanchen.server.ResultRecorder;
 import me.ethanchen.server.XpAwarder;
 
 import java.io.File;
@@ -45,6 +48,8 @@ public class AccountStore implements XpAwarder, ProfileStore {
      * (and loadout) see a stale copy while the DB/client already have newly granted artifacts.
      */
     private final ConcurrentHashMap<String, PlayerProfile> profileCache = new ConcurrentHashMap<>();
+    /** Live extra_json objects so profile saves cannot drop stored best-game records. */
+    private final ConcurrentHashMap<String, AccountExtra> extraCache = new ConcurrentHashMap<>();
     private final Connection connection;
     private final SqliteWalSync walSync;
 
@@ -90,6 +95,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
         PlayerProfile starter = PlayerProfile.newAccountProfile(new Random());
         AccountExtra extra = new AccountExtra();
         extra.profile = starter;
+        extra.bestsMigrated = true;
         Json json = new Json();
         json.setOutputType(JsonWriter.OutputType.json);
         String extraJson = json.toJson(extra);
@@ -119,6 +125,7 @@ public class AccountStore implements XpAwarder, ProfileStore {
         byUsername.put(key, acct);
         byUuid.put(acct.uuid, acct);
         profileCache.put(acct.uuid, starter);
+        extraCache.put(acct.uuid, extra);
         return null;
     }
 
@@ -157,32 +164,95 @@ public class AccountStore implements XpAwarder, ProfileStore {
      */
     @Override
     public synchronized PlayerProfile loadProfile(String accountUuid) {
-        if (accountUuid == null) return PlayerProfile.defaultProfile();
-        Account acct = byUuid.get(accountUuid);
-        if (acct == null) return PlayerProfile.defaultProfile();
-
-        PlayerProfile cached = profileCache.get(accountUuid);
-        if (cached != null) return cached;
-
-        PlayerProfile profile = readProfileFromExtraJson(acct);
-        profile.sortInventory();
-        profileCache.put(accountUuid, profile);
-        return profile;
+        AccountExtra extra = extraFor(accountUuid);
+        return extra != null ? extra.profile : PlayerProfile.defaultProfile();
     }
 
-    private static PlayerProfile readProfileFromExtraJson(Account acct) {
+    @Override
+    public synchronized PublicAccountView loadPublicView(String accountUuid) {
+        Account acct = accountUuid == null ? null : byUuid.get(accountUuid);
+        if (acct == null) return null;
+        AccountExtra extra = extraFor(accountUuid);
+        if (extra == null) return null;
+        PublicAccountView view = new PublicAccountView();
+        view.accountUuid = acct.uuid;
+        view.username = acct.username;
+        view.xp = acct.xp;
+        view.selectedCharacterId = extra.profile.selectedCharacterId;
+        String[] equipped = extra.profile.equippedArtifactIds;
+        view.equippedA = equipped != null && equipped.length > 0 ? extra.profile.findArtifact(equipped[0]) : null;
+        view.equippedB = equipped != null && equipped.length > 1 ? extra.profile.findArtifact(equipped[1]) : null;
+        view.bestScore = extra.bestScore;
+        view.bestPuzzle = extra.bestPuzzle;
+        view.bestCharacterScore = extra.bestCharacterScore;
+        return view;
+    }
+
+    @Override
+    public synchronized void considerBestGame(String accountUuid, BestGameRecord candidate) {
+        if (accountUuid == null || candidate == null || candidate.gamemode == null) return;
+        Account acct = byUuid.get(accountUuid);
+        AccountExtra extra = extraFor(accountUuid);
+        if (acct == null || extra == null) return;
+        BestGameRecord current = extra.recordFor(candidate.gamemode);
+        if (!candidate.isStrictlyBetterThan(current)) return;
+        extra.setRecord(candidate);
+        writeExtra(acct, extra);
+    }
+
+    @Override
+    public synchronized void ensureBestsBackfilled(String accountUuid, ResultRecorder results) {
+        Account acct = accountUuid == null ? null : byUuid.get(accountUuid);
+        AccountExtra extra = extraFor(accountUuid);
+        if (acct == null || extra == null || extra.bestsMigrated) return;
+        if (results != null) {
+            if (extra.bestScore == null) extra.bestScore = results.bestGame(accountUuid, "MULTIPLAYER_SCORE");
+            if (extra.bestPuzzle == null) extra.bestPuzzle = results.bestGame(accountUuid, "MULTIPLAYER_PUZZLE");
+            if (extra.bestCharacterScore == null) {
+                extra.bestCharacterScore = results.bestGame(accountUuid, "CHARACTER_SCORE");
+            }
+        }
+        extra.bestsMigrated = true;
+        writeExtra(acct, extra);
+    }
+
+    private AccountExtra extraFor(String accountUuid) {
+        if (accountUuid == null) return null;
+        AccountExtra cached = extraCache.get(accountUuid);
+        if (cached != null) return cached;
+        Account acct = byUuid.get(accountUuid);
+        if (acct == null) return null;
+        AccountExtra extra = readExtra(acct);
+        extra.profile.sortInventory();
+        PlayerProfile live = profileCache.get(accountUuid);
+        if (live != null) extra.profile = live;
+        else profileCache.put(accountUuid, extra.profile);
+        extraCache.put(accountUuid, extra);
+        return extra;
+    }
+
+    private static AccountExtra readExtra(Account acct) {
         if (acct.extraJson == null || acct.extraJson.isEmpty()) {
-            return PlayerProfile.defaultProfile();
+            AccountExtra extra = new AccountExtra();
+            extra.profile = PlayerProfile.defaultProfile();
+            return extra;
         }
         try {
             Json json = new Json();
             AccountExtra extra = json.fromJson(AccountExtra.class, acct.extraJson);
-            if (extra == null || extra.profile == null) return PlayerProfile.defaultProfile();
-            return extra.profile;
+            if (extra == null) extra = new AccountExtra();
+            if (extra.profile == null) extra.profile = PlayerProfile.defaultProfile();
+            return extra;
         } catch (Exception e) {
             System.err.println("[AccountStore] Failed to parse extra_json for " + acct.uuid + ": " + e.getMessage());
-            return PlayerProfile.defaultProfile();
+            AccountExtra extra = new AccountExtra();
+            extra.profile = PlayerProfile.defaultProfile();
+            return extra;
         }
+    }
+
+    private static PlayerProfile readProfileFromExtraJson(Account acct) {
+        return readExtra(acct).profile;
     }
 
     /** True when {@code extra_json} has no usable {@link PlayerProfile} (blank, null profile, or unparseable). */
@@ -203,12 +273,16 @@ public class AccountStore implements XpAwarder, ProfileStore {
         Account acct = byUuid.get(accountUuid);
         if (acct == null) return;
         profileCache.put(accountUuid, profile);
-        writeProfileExtraJson(acct, profile);
+        AccountExtra extra = extraFor(accountUuid);
+        if (extra == null) {
+            extra = new AccountExtra();
+            extraCache.put(accountUuid, extra);
+        }
+        extra.profile = profile;
+        writeExtra(acct, extra);
     }
 
-    private void writeProfileExtraJson(Account acct, PlayerProfile profile) {
-        AccountExtra extra = new AccountExtra();
-        extra.profile = profile;
+    private void writeExtra(Account acct, AccountExtra extra) {
         Json json = new Json();
         json.setOutputType(JsonWriter.OutputType.json);
         String extraJson = json.toJson(extra);
@@ -250,7 +324,9 @@ public class AccountStore implements XpAwarder, ProfileStore {
 
             if (!changed) continue;
             profileCache.put(acct.uuid, profile);
-            writeProfileExtraJson(acct, profile);
+            AccountExtra extra = extraFor(acct.uuid);
+            extra.profile = profile;
+            writeExtra(acct, extra);
             updated++;
         }
         if (updated > 0) {

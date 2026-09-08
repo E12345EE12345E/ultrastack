@@ -53,9 +53,11 @@ import me.ethanchen.network.packets.c2s.RoomListRequest;
 import me.ethanchen.network.packets.c2s.LoadoutRequest;
 import me.ethanchen.network.packets.c2s.FusionRequest;
 import me.ethanchen.network.packets.c2s.AbilityRequest;
+import me.ethanchen.network.packets.c2s.ProfileViewRequest;
 import me.ethanchen.network.packets.other.ConnectFailedPacket;
 import me.ethanchen.network.packets.other.ConnectionEstablishedPacket;
 import me.ethanchen.network.packets.other.DisconnectPacket;
+import me.ethanchen.network.packets.s2c.AuthResponse;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
 import me.ethanchen.network.packets.s2c.LobbySettingsBroadcast;
 import me.ethanchen.network.packets.s2c.ProfileSyncBroadcast;
@@ -129,6 +131,8 @@ public class ClientApp extends ApplicationAdapter {
     // Character and leveling system (session cache, populated by ProfileSyncBroadcast)
     private volatile PlayerProfile profile;
     private volatile boolean profileReadOnly;
+    /** Session-only account id from {@link AuthResponse}; cleared on disconnect. */
+    private volatile String accountUuid;
     /** Most recent victory-granted artifact, consumed by {@link me.ethanchen.lwjgl3.menuscreens.EndGameScreen}. */
     private volatile Artifact pendingVictoryArtifact;
 
@@ -183,6 +187,14 @@ public class ClientApp extends ApplicationAdapter {
                     switchMenu(new MainMenu(this));
                 }
                 roomHost = false;
+                clearSessionAccount();
+            }
+
+            if (wrapper.packet instanceof AuthResponse) {
+                AuthResponse auth = (AuthResponse) wrapper.packet;
+                if (auth.success && auth.accountUuid != null && !auth.accountUuid.isEmpty()) {
+                    accountUuid = auth.accountUuid;
+                }
             }
 
             if (wrapper.packet instanceof HostChangedBroadcast) {
@@ -367,6 +379,7 @@ public class ClientApp extends ApplicationAdapter {
      * running that would later report success to an unrelated screen.
      */
     public void disconnect() {
+        clearSessionAccount();
         connectEpoch.incrementAndGet();
         queuedConnect.set(null);
         if (shuttingDown) return;
@@ -736,8 +749,18 @@ public class ClientApp extends ApplicationAdapter {
         return profile;
     }
 
+    public String getAccountUuid() {
+        return accountUuid;
+    }
+
     public boolean isProfileReadOnly() {
         return profileReadOnly;
+    }
+
+    private void clearSessionAccount() {
+        accountUuid = null;
+        profile = null;
+        profileReadOnly = false;
     }
 
     /**
@@ -748,6 +771,13 @@ public class ClientApp extends ApplicationAdapter {
         Artifact a = pendingVictoryArtifact;
         pendingVictoryArtifact = null;
         return a;
+    }
+
+    public boolean sendProfileViewRequest(String accountUuid) {
+        if (accountUuid == null || accountUuid.isEmpty()) return false;
+        ProfileViewRequest req = new ProfileViewRequest();
+        req.accountUuid = accountUuid;
+        return sendTCP(req);
     }
 
     /** Requests a character/artifact loadout change; the server echoes back a {@code ProfileSyncBroadcast}. */

@@ -110,6 +110,7 @@ public class ServerCore implements PacketSender, Runnable {
         // ---- Character/artifact profile packets (both modes) ----
         d.on(LoadoutRequest.class, w -> handleLoadoutRequest(w, sessionFor(w)));
         d.on(FusionRequest.class, w -> handleFusionRequest(w, sessionFor(w)));
+        d.on(ProfileViewRequest.class, w -> handleProfileViewRequest(w, sessionFor(w)));
 
         // ---- In-room packets (both modes) ----
         Consumer<ServerPacketWrapper> forward = w -> forwardToRoom(w, sessionFor(w));
@@ -302,6 +303,35 @@ public class ServerCore implements PacketSender, Runnable {
         b.profile = session.profile;
         b.readOnly = session.profileReadOnly;
         sendTCP(connectionId, b);
+    }
+
+    private void handleProfileViewRequest(ServerPacketWrapper w, Session session) {
+        if (session == null || !session.authenticated) return;
+        ProfileViewRequest req = (ProfileViewRequest) w.packet;
+        ProfileViewResponse res = new ProfileViewResponse();
+        res.accountUuid = req.accountUuid;
+        if (req.accountUuid == null || req.accountUuid.isEmpty() || profileStore == null) {
+            res.found = false;
+            sendTCP(w.connectionID, res);
+            return;
+        }
+        profileStore.ensureBestsBackfilled(req.accountUuid, resultRecorder);
+        PublicAccountView view = profileStore.loadPublicView(req.accountUuid);
+        if (view == null) {
+            res.found = false;
+            sendTCP(w.connectionID, res);
+            return;
+        }
+        res.found = true;
+        res.username = view.username;
+        res.xp = view.xp;
+        res.selectedCharacterId = view.selectedCharacterId;
+        res.equippedA = view.equippedA;
+        res.equippedB = view.equippedB;
+        res.bestScore = view.bestScore;
+        res.bestPuzzle = view.bestPuzzle;
+        res.bestCharacterScore = view.bestCharacterScore;
+        sendTCP(w.connectionID, res);
     }
 
     private void handleLoadoutRequest(ServerPacketWrapper w, Session session) {

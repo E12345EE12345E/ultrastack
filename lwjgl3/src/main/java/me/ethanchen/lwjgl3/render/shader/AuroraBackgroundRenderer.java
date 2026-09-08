@@ -18,7 +18,7 @@ import com.badlogic.gdx.math.Matrix4;
  */
 public class AuroraBackgroundRenderer implements ShaderRenderer {
     private ShaderProgram shader;
-    private final SpriteBatch batch;
+    private SpriteBatch batch;
     private final Matrix4 proj = new Matrix4();
     private Texture blankTexture;
     private FrameBuffer fbo;
@@ -57,7 +57,7 @@ public class AuroraBackgroundRenderer implements ShaderRenderer {
      * animation clock; {@code alpha} scales overall intensity.
      */
     public void draw(float timeS, float alpha) {
-        if (shader == null || !shader.isCompiled()) return;
+        if (batch == null || shader == null || !shader.isCompiled()) return;
         int sw = Gdx.graphics.getWidth();
         int sh = Gdx.graphics.getHeight();
         if (sw <= 0 || sh <= 0) return;
@@ -108,12 +108,14 @@ public class AuroraBackgroundRenderer implements ShaderRenderer {
         batch.end();
     }
 
+    /** Idempotent: a second call is a no-op rather than a double-free on the batch buffers. */
     public void dispose() {
         if (shader != null) shader.dispose();
         if (batch != null) batch.dispose();
         if (blankTexture != null) blankTexture.dispose();
         if (fbo != null) fbo.dispose();
         shader = null;
+        batch = null;
         blankTexture = null;
         fbo = null;
         fboRegion = null;

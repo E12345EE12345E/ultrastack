@@ -4,6 +4,7 @@ import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.game.progression.ArtifactAcquisition;
+import me.ethanchen.game.progression.BestGameRecord;
 import me.ethanchen.game.progression.CharacterDef;
 import me.ethanchen.game.progression.CharacterRegistry;
 import me.ethanchen.game.progression.PlayerProfile;
@@ -859,14 +860,43 @@ public class GameRoom implements Runnable, GameRoomContext {
         return seats;
     }
 
+    private static String[] playerNames(PlayerResultInfo[] players) {
+        if (players == null || players.length == 0) return new String[0];
+        int n = 0;
+        for (PlayerResultInfo p : players) {
+            if (p != null && p.username != null && !p.username.isEmpty()) n++;
+        }
+        String[] names = new String[n];
+        int i = 0;
+        for (PlayerResultInfo p : players) {
+            if (p != null && p.username != null && !p.username.isEmpty()) {
+                names[i++] = p.username;
+            }
+        }
+        return names;
+    }
+
     /**
      * SQLite / profile writes for a finished game. Runs on {@link PersistenceExecutor} so the
      * room worker is not blocked.
      */
     private void persistEndGame(GameEndInfo info, PlayerResultInfo[] players,
                                 List<PersistSeat> seats, PveSessionState pveSession) {
+        String resultId = null;
+        GameResultData resultData = GameResultData.from(info, players);
         if (resultRecorder != null) {
-            resultRecorder.recordGameResult(GameResultData.from(info, players));
+            resultId = resultRecorder.recordGameResult(resultData);
+        }
+        if (resultId != null && !info.disconnected && profileStore != null
+                && BestGameRecord.tracksBests(info.mode)) {
+            BestGameRecord candidate = new BestGameRecord(
+                    resultId, resultData.gamemode, resultData.score, resultData.displayScore);
+            candidate.timestampMs = resultData.timestampMs;
+            candidate.playerNames = playerNames(players);
+            for (PlayerResultInfo player : players) {
+                if (player.accountUuid == null || player.accountUuid.isEmpty()) continue;
+                profileStore.considerBestGame(player.accountUuid, candidate);
+            }
         }
         // XP uses each player's own board score (their personal result), not the
         // session-wide aggregate in info.score, so a player is rewarded for their own board.

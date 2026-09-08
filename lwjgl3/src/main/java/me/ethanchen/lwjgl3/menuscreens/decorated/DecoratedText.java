@@ -23,6 +23,13 @@ public class DecoratedText extends DecoratedElement {
         this.focusable = false;
     }
 
+    /** Gives the label a hit box so it can receive clicks / press independently. */
+    public DecoratedText bounds(float designW, float designH) {
+        this.width = DesignUi.nw(designW);
+        this.height = DesignUi.nh(designH);
+        return this;
+    }
+
     @Override
     public boolean isFocusable() {
         return false;

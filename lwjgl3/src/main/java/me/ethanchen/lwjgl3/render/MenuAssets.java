@@ -31,6 +31,10 @@ public final class MenuAssets {
         return load("ultrastack_s.png");
     }
 
+    public static Texture ultrastackIcon() {
+        return loadNearest("ultrastack_icon.png");
+    }
+
     public static Texture settingsIcon() {
         return loadNearest("settings_icon.png");
     }

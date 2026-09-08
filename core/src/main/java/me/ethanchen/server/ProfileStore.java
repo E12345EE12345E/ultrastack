@@ -1,5 +1,6 @@
 package me.ethanchen.server;
 
+import me.ethanchen.game.progression.BestGameRecord;
 import me.ethanchen.game.progression.PlayerProfile;
 
 /**
@@ -22,4 +23,18 @@ public interface ProfileStore {
 
     /** Persists {@code profile} for the given account and installs it as the live cached instance. No-op if the account is unknown. */
     void saveProfile(String accountUuid, PlayerProfile profile);
+
+    /** Public card data for {@code accountUuid}, or {@code null} if the account is unknown. */
+    default PublicAccountView loadPublicView(String accountUuid) {
+        return null;
+    }
+
+    /** Replaces the stored best for {@code candidate.gamemode} when the new raw score is strictly higher. */
+    default void considerBestGame(String accountUuid, BestGameRecord candidate) {}
+
+    /**
+     * One-shot fill of missing account bests from {@code results}. No-op after the account has
+     * been migrated, or when {@code results} is null.
+     */
+    default void ensureBestsBackfilled(String accountUuid, ResultRecorder results) {}
 }

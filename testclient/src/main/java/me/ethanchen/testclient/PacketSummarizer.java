@@ -12,6 +12,7 @@ import me.ethanchen.network.packets.c2s.LeaveRoomRequest;
 import me.ethanchen.network.packets.c2s.LoadoutRequest;
 import me.ethanchen.network.packets.c2s.LocalPlayerCountRequest;
 import me.ethanchen.network.packets.c2s.LoginRequest;
+import me.ethanchen.network.packets.c2s.ProfileViewRequest;
 import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.s2c.AbilityActivateBroadcast;
@@ -30,6 +31,7 @@ import me.ethanchen.network.packets.s2c.LobbySettingsBroadcast;
 import me.ethanchen.network.packets.s2c.ParticleBroadcast;
 import me.ethanchen.network.packets.s2c.PieceSwapBroadcast;
 import me.ethanchen.network.packets.s2c.ProfileSyncBroadcast;
+import me.ethanchen.network.packets.s2c.ProfileViewResponse;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.RoomJoinResponse;
 import me.ethanchen.network.packets.s2c.RoomListBroadcast;
@@ -102,6 +104,15 @@ final class PacketSummarizer {
         if (packet instanceof ProfileSyncBroadcast) {
             ProfileSyncBroadcast p = (ProfileSyncBroadcast) packet;
             return name + " readOnly=" + p.readOnly + " " + profileSummary(p.profile);
+        }
+        if (packet instanceof ProfileViewRequest) {
+            return name + " accountUuid=" + ((ProfileViewRequest) packet).accountUuid;
+        }
+        if (packet instanceof ProfileViewResponse) {
+            ProfileViewResponse p = (ProfileViewResponse) packet;
+            String score = p.bestScore == null ? "null" : p.bestScore.displayScore;
+            return name + " found=" + p.found + " accountUuid=" + p.accountUuid
+                    + " username=" + p.username + " xp=" + p.xp + " bestScore=" + score;
         }
         if (packet instanceof RoomJoinResponse) {
             RoomJoinResponse p = (RoomJoinResponse) packet;

@@ -9,6 +9,7 @@ import com.badlogic.gdx.Gdx;
 import me.ethanchen.lwjgl3.AppLinks;
 import me.ethanchen.lwjgl3.ClientApp;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedAccountButton;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollableList;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollbar;
@@ -20,6 +21,7 @@ import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.dto.RoomInfo;
+import me.ethanchen.network.packets.s2c.ProfileViewResponse;
 import me.ethanchen.network.packets.s2c.RoomJoinResponse;
 import me.ethanchen.network.packets.s2c.RoomListBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
@@ -47,11 +49,14 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
     private final DecoratedTextBox joinIdBox;
     private final DecoratedText statusText;
     private final Widget settingsWidget;
+    private final ControllerConfigHub controllerHub;
+    private PlayerProfileHub profileHub;
     private final AuroraBackgroundRenderer aurora;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(RoomListBroadcast.class, w -> handleRoomList((RoomListBroadcast) w.packet))
             .on(RoomJoinResponse.class, w -> handleRoomJoinResponse((RoomJoinResponse) w.packet))
+            .on(ProfileViewResponse.class, w -> handleProfileView((ProfileViewResponse) w.packet))
             .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, false)));
 
     public RoomBrowserMenu(ClientApp app) {
@@ -60,11 +65,9 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
         tickCount = ROOM_LIST_INTERVAL - 1;
 
         DecoratedText title = new DecoratedText(960f, 1000f, "Multiplayer", 3.4f);
-        addDecorated(title);
 
         roomList = new DecoratedScrollableList(LIST_CX, LIST_TOP_SLOT_Y, SLOT_W, SLOT_H, SLOT_COUNT, SLOT_GAP)
                 .onSelect(this::joinRoom);
-        addDecorated(roomList);
 
         float listH = SLOT_COUNT * SLOT_H + (SLOT_COUNT - 1) * SLOT_GAP;
         float listTop = LIST_TOP_SLOT_Y + SLOT_H * 0.5f;
@@ -95,6 +98,16 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
 
         statusText = new DecoratedText(960f, 90f, "Fetching rooms...", 1.2f);
 
+        DecoratedButton controllerBtn = new DecoratedButton(220f, 740f, 320f, 80f, "Controller",
+                this::openControllerWidget);
+        controllerBtn.fontSize = 1.4f;
+        controllerBtn.info("Keyboard and controller input.");
+
+        DecoratedButton loadoutBtn = new DecoratedButton(220f, 640f, 320f, 80f, "Character Loadout",
+                this::openCharacterLoadout);
+        loadoutBtn.fontSize = 1.25f;
+        loadoutBtn.info("Choose a character and artifacts.");
+
         DecoratedButton backBtn = new DecoratedButton(200f, 80f, 200f, 68f, "Back", this::leaveToMain);
         backBtn.fontSize = 1.4f;
 
@@ -107,11 +120,25 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
         settingsBtn.info("Settings");
         helpBtn.info("Wiki");
 
-        addDecorated(joinLabel);
-        addDecorated(joinIdBox);
+        String username = app.getSettings().lastUsername;
+        if (username == null || username.isEmpty()) username = "Player";
+        DecoratedAccountButton accountBtn = new DecoratedAccountButton(1720f, 1000f, 360f, 72f,
+                username, this::openProfileWidget);
+        accountBtn.info("Profile");
+
+        // Add order is the focus ring order (nested list slots follow their list), so keep this
+        // reading top-to-bottom: room list and its scroll controls, account, left column,
+        // join / create, bottom bar.
+        addDecorated(title);
+        addDecorated(roomList);
         addDecorated(upBtn);
         addDecorated(scrollbar);
         addDecorated(downBtn);
+        addDecorated(accountBtn);
+        addDecorated(controllerBtn);
+        addDecorated(loadoutBtn);
+        addDecorated(joinLabel);
+        addDecorated(joinIdBox);
         addDecorated(createBtn);
         addDecorated(statusText);
         addDecorated(backBtn);
@@ -119,12 +146,36 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
         addDecorated(helpBtn);
 
         settingsWidget = SettingsHub.createWidget(app, this, () -> new RoomBrowserMenu(app));
+        controllerHub = ControllerConfigHub.create(app, this, null);
         aurora = new AuroraBackgroundRenderer();
     }
 
     private void openSettingsWidget() {
         if (hasOpenWidget()) return;
         openWidget(settingsWidget);
+    }
+
+    private void openControllerWidget() {
+        if (hasOpenWidget()) return;
+        openWidget(controllerHub.widget);
+    }
+
+    private void openCharacterLoadout() {
+        // Switching away disposes this screen (and its aurora), so hand the loadout screen a
+        // fresh browser to return to rather than this soon-to-be-dead instance.
+        app.switchMenu(new CharacterScreen(app, new RoomBrowserMenu(app), () -> true));
+    }
+
+    private void openProfileWidget() {
+        if (hasOpenWidget()) return;
+        String uuid = app.getAccountUuid();
+        if (uuid == null || uuid.isEmpty()) return;
+        profileHub = PlayerProfileHub.create(app, this, uuid);
+        openWidget(profileHub.widget);
+    }
+
+    private void handleProfileView(ProfileViewResponse res) {
+        if (profileHub != null) profileHub.apply(res);
     }
 
     private void joinByTypedId() {
@@ -171,6 +222,9 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
         tickCount++;
         if (tickCount % ROOM_LIST_INTERVAL == 0) {
             app.sendRoomListRequest();
+        }
+        if (hasOpenWidget()) {
+            controllerHub.tick();
         }
     }
 

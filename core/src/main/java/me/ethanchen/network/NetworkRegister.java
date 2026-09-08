@@ -8,6 +8,7 @@ import me.ethanchen.game.board.PieceQueue;
 import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.game.progression.ArtifactEffect;
 import me.ethanchen.game.progression.ArtifactEffectType;
+import me.ethanchen.game.progression.BestGameRecord;
 import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.network.dto.HardDropEffect;
 import me.ethanchen.network.dto.NetBoardFull;
@@ -33,7 +34,7 @@ import java.util.ArrayList;
 
 public class NetworkRegister {
     // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
-    public static final byte PROTOCOL_VERSION = 32;
+    public static final byte PROTOCOL_VERSION = 33;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -124,6 +125,9 @@ public class NetworkRegister {
         kryo.register(Artifact[].class);
         kryo.register(PlayerProfile.class);
         kryo.register(ProfileSyncBroadcast.class);
+        kryo.register(BestGameRecord.class);
+        kryo.register(ProfileViewRequest.class);
+        kryo.register(ProfileViewResponse.class);
         kryo.register(LoadoutRequest.class);
         kryo.register(ArtifactGrantBroadcast.class);
         kryo.register(FusionRequest.class);

@@ -2,13 +2,16 @@ package me.ethanchen.headless;
 
 import com.badlogic.gdx.utils.Json;
 import com.badlogic.gdx.utils.JsonWriter;
+import me.ethanchen.game.progression.BestGameRecord;
 import me.ethanchen.server.GameResultData;
+import me.ethanchen.server.PlayerResultInfo;
 import me.ethanchen.server.ResultRecorder;
 
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
@@ -68,12 +71,13 @@ public class GameResultStore implements ResultRecorder {
     }
 
     @Override
-    public synchronized void recordGameResult(GameResultData data) {
+    public synchronized String recordGameResult(GameResultData data) {
+        String id = UUID.randomUUID().toString();
         String sql = "INSERT INTO game_results " +
                 "(id, timestamp_ms, gamemode, score, display_score, players, win, disconnected, schema_version, extra_json) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
-            ps.setString(1, UUID.randomUUID().toString());
+            ps.setString(1, id);
             ps.setLong(2, data.timestampMs);
             ps.setString(3, data.gamemode);
             ps.setLong(4, data.score);
@@ -84,8 +88,68 @@ public class GameResultStore implements ResultRecorder {
             ps.setInt(9, SCHEMA_VERSION);
             ps.setString(10, data.extraJson);
             ps.executeUpdate();
+            return id;
         } catch (SQLException e) {
             System.err.println("[GameResultStore] Failed to record game result: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Best non-disconnected row for this account in {@code gamemode}. Used only to seed
+     * account-stored {@link BestGameRecord}s for profiles that predate that field.
+     */
+    @Override
+    public synchronized BestGameRecord bestGame(String accountUuid, String gamemode) {
+        if (accountUuid == null || accountUuid.isEmpty() || gamemode == null || gamemode.isEmpty()) {
+            return null;
+        }
+        String sql = "SELECT id, gamemode, score, display_score, timestamp_ms, players FROM game_results "
+                + "WHERE disconnected = 0 AND gamemode = ? AND EXISTS ("
+                + "  SELECT 1 FROM json_each("
+                + "    CASE WHEN json_valid(game_results.players) THEN game_results.players ELSE '[]' END"
+                + "  ) AS player"
+                + "  WHERE json_extract(player.value, '$.accountUuid') = ?"
+                + ") ORDER BY score DESC, timestamp_ms ASC, id ASC LIMIT 1";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, gamemode);
+            ps.setString(2, accountUuid);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+                BestGameRecord rec = new BestGameRecord();
+                rec.gameResultId = rs.getString("id");
+                rec.gamemode = rs.getString("gamemode");
+                rec.score = rs.getLong("score");
+                rec.displayScore = rs.getString("display_score");
+                rec.timestampMs = rs.getLong("timestamp_ms");
+                rec.playerNames = playerNamesFromJson(rs.getString("players"));
+                return rec;
+            }
+        } catch (SQLException e) {
+            System.err.println("[GameResultStore] bestGame failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private String[] playerNamesFromJson(String playersJson) {
+        if (playersJson == null || playersJson.isEmpty()) return new String[0];
+        try {
+            PlayerResultInfo[] players = json.fromJson(PlayerResultInfo[].class, playersJson);
+            if (players == null) return new String[0];
+            int n = 0;
+            for (PlayerResultInfo p : players) {
+                if (p != null && p.username != null && !p.username.isEmpty()) n++;
+            }
+            String[] names = new String[n];
+            int i = 0;
+            for (PlayerResultInfo p : players) {
+                if (p != null && p.username != null && !p.username.isEmpty()) {
+                    names[i++] = p.username;
+                }
+            }
+            return names;
+        } catch (Exception e) {
+            return new String[0];
         }
     }
 

@@ -36,6 +36,11 @@ public abstract class DecoratedElement extends UIElement implements Decorated {
     public InfoText infoText;
     /** 1 → 0 press-bounce envelope, decayed in {@link #updateDecorated(float)}. */
     public float press;
+    /**
+     * When false (default), clicks do not play the press-contract animation. Buttons turn this
+     * on; other chrome stays still unless a screen opts in.
+     */
+    public boolean pressOnClick;
 
     public DecoratedElement(double x, double y, double w, double h) {
         super(x, y, w, h);
@@ -107,7 +112,7 @@ public abstract class DecoratedElement extends UIElement implements Decorated {
 
     @Override
     public void activate() {
-        press = 1f;
+        if (pressOnClick) press = 1f;
         onClick();
     }
 

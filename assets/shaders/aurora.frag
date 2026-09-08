@@ -94,7 +94,7 @@ void main() {
         twinkle = clamp(twinkle, 0.0, 1.0);
         float rarity = clamp((h - 0.962) / 0.038, 0.0, 1.0);
         float extra = darkSky * (0.50 + 0.50 * hash(cell + 2.4));
-        star = smoothstep(0.12, 0.0, d) * twinkle * max(rarity, extra);
+        star = smoothstep(0.168, 0.0, d) * twinkle * max(rarity, extra);
     }
 
     vec3 col = aurora + vec3(star);
