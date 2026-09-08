@@ -403,9 +403,8 @@ public class GameRoom implements Runnable, GameRoomContext {
             if (t % GameConstants.LOBBY_UDP_REFRESH_INTERVAL_TICKS == 0) {
                 broadcastPlayerListUDP();
             }
-        } catch (Exception e) {
-            System.err.println("[GameRoom " + roomId + "] Uncaught exception: " + e);
-            e.printStackTrace(System.err);
+        } catch (Throwable t) {
+            Uncaught.log("[GameRoom " + roomId + "] Uncaught exception: ", t);
         }
         t++;
         TickInstrumentation.record(System.nanoTime() - start);

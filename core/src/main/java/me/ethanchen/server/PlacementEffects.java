@@ -60,7 +60,7 @@ class PlacementEffects {
                 hde.spinType = HardDropEffect.SPIN_ALL_SPIN;
                 break;
             default:
-                hde.spinType = (lines == 4) ? HardDropEffect.SPIN_TETRIS : HardDropEffect.SPIN_NONE;
+                hde.spinType = (lines == 4) ? HardDropEffect.SPIN_QUAD : HardDropEffect.SPIN_NONE;
                 break;
         }
 

@@ -144,9 +144,6 @@ public class DecoratedTextBox extends DecoratedElement {
         ctx.font.draw(ctx.sprites, display, textX, textY);
         ctx.font.setColor(Color.WHITE);
         UIFont.restoreScale(ctx.font, saved);
-        if (focused) {
-            drawFocusCorners(ctx, x, y, w, h, a);
-        }
         ctx.sprites.setColor(Color.WHITE);
         ctx.sprites.end();
     }

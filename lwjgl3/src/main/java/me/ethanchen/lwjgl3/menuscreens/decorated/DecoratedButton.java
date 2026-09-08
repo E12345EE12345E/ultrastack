@@ -129,9 +129,6 @@ public class DecoratedButton extends DecoratedElement {
             ctx.font.setColor(Color.WHITE);
             UIFont.restoreScale(ctx.font, saved);
         }
-        if (focused) {
-            drawFocusCorners(ctx, x, y, w, h, a);
-        }
         ctx.sprites.setColor(Color.WHITE);
         ctx.sprites.end();
     }

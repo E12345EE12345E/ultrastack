@@ -25,7 +25,7 @@ class GameHandlerBoardIsolationTest {
         return game;
     }
 
-    private LineClearResult tetrisResult(int boardIndex, int playerId) {
+    private LineClearResult quadResult(int boardIndex, int playerId) {
         LineClearResult r = new LineClearResult();
         r.placed = true;
         r.playerId = playerId;
@@ -39,7 +39,7 @@ class GameHandlerBoardIsolationTest {
         GameHandler game = newTwoBoardHandler();
 
         // Board 0 gets a clear (combo/B2B should advance); board 1 stays untouched.
-        game.applyClearToCounters(tetrisResult(0, 0));
+        game.applyClearToCounters(quadResult(0, 0));
 
         assertEquals(1, game.getCombo(0));
         assertEquals(1, game.getB2b(0));
@@ -51,9 +51,9 @@ class GameHandlerBoardIsolationTest {
     void comboResetOnOneBoardDoesNotAffectOther() {
         GameHandler game = newTwoBoardHandler();
 
-        game.applyClearToCounters(tetrisResult(0, 0));
-        game.applyClearToCounters(tetrisResult(1, 1));
-        game.applyClearToCounters(tetrisResult(1, 1));
+        game.applyClearToCounters(quadResult(0, 0));
+        game.applyClearToCounters(quadResult(1, 1));
+        game.applyClearToCounters(quadResult(1, 1));
 
         assertEquals(1, game.getCombo(0));
         assertEquals(2, game.getCombo(1));

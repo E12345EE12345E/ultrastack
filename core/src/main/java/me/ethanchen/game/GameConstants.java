@@ -91,9 +91,9 @@ public final class GameConstants {
     public static final long SCORE_SINGLE = 100;
     public static final long SCORE_DOUBLE = 200;
     public static final long SCORE_TRIPLE = 300;
-    public static final long SCORE_TETRIS = 800;
+    public static final long SCORE_QUAD = 800;
 
-    /** Base score for a 3-line clear with an I3 (vertical 3-mino), analogous to a Tetris. */
+    /** Base score for a 3-line clear with an I3 (vertical 3-mino), analogous to a quad. */
     public static final long SCORE_I3_TRIPLE = 600;
 
     public static final long SCORE_TSPIN_SINGLE = 400;
@@ -106,7 +106,7 @@ public final class GameConstants {
     public static final long SCORE_ALL_SPIN_SINGLE = 150;
     public static final long SCORE_ALL_SPIN_DOUBLE = 300;
     public static final long SCORE_ALL_SPIN_TRIPLE = 450;
-    public static final long SCORE_ALL_SPIN_TETRIS = 800;
+    public static final long SCORE_ALL_SPIN_QUAD = 800;
 
     public static final long SCORE_SMALL_SPIN_SINGLE = 200;
     public static final long SCORE_SMALL_SPIN_DOUBLE = 400;

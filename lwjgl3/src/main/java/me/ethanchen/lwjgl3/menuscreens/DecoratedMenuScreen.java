@@ -23,6 +23,7 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.Decorated;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedElement;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollableList;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
+import me.ethanchen.lwjgl3.menuscreens.decorated.FocusGroup;
 import me.ethanchen.lwjgl3.menuscreens.decorated.FocusNavigator;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
 import me.ethanchen.lwjgl3.menuscreens.ui.AspectLockedViewport;
@@ -56,9 +57,11 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
     private final long menuStartMs;
     private final ControllerAdapter controllerListener;
 
-    private int stickHeldDir;
+    private int stickHeldDx;
+    private int stickHeldDy;
     private int stickTimerMs;
     private boolean stickRepeating;
+    private boolean controllerBound = true;
 
     public DecoratedMenuScreen(ClientApp app, ShapeRenderer shapes, SpriteBatch sprites, BitmapFont font) {
         super(app, shapes, sprites, font);
@@ -116,6 +119,25 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
     /** Overlay after widgets. */
     protected void renderForeground(DecorContext ctx) {}
 
+    /** Called first inside {@link #render()} so a screen can start an FBO capture. */
+    protected void beginFrame(DecorContext ctx) {}
+
+    /** Called last inside {@link #render()}, after InfoText, to end an FBO capture. */
+    protected void endFrame(DecorContext ctx) {}
+
+    /**
+     * When true, keyboard, mouse, and controller input is swallowed this frame.
+     * Used by FusionScreen to skip its animation on any interrupt.
+     */
+    protected boolean interceptInput() {
+        return false;
+    }
+
+    /** When true, left-stick focus walking is paused (e.g. a playing animation). */
+    protected boolean pauseStickFocus() {
+        return false;
+    }
+
     @Override
     public final void update() {
         long menuMs = menuElapsedMs();
@@ -130,7 +152,7 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         }
         tickWidgets(dtS);
         withViewport(() -> {
-            pollStick(dtMs);
+            if (!pauseStickFocus()) pollStick(dtMs);
             refreshFocusRing();
             return true;
         });
@@ -146,6 +168,7 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
                 menuElapsedMs(), appElapsedMs(), Gdx.graphics.getDeltaTime());
         DecorContext.push(ctx);
         try {
+            beginFrame(ctx);
             renderBackground(ctx);
             drawLetterboxBars();
             drawDecorations(ctx);
@@ -156,7 +179,9 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
                 w.render(ctx);
             }
             renderForeground(ctx);
+            renderFocusCorners(ctx);
             renderInfoText(ctx);
+            endFrame(ctx);
         } finally {
             DecorContext.pop();
             AspectLockedViewport.pop();
@@ -165,12 +190,27 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
 
     @Override
     public void dispose() {
-        Controllers.removeListener(controllerListener);
+        if (controllerBound) {
+            Controllers.removeListener(controllerListener);
+            controllerBound = false;
+        }
         super.dispose();
+    }
+
+    /**
+     * Re-bind controller input when this screen is shown again after {@link #dispose()}
+     * (e.g. Fusion / Loadout returning to a retained {@code CharacterScreen}).
+     */
+    @Override
+    public void resumeInput() {
+        if (controllerBound) return;
+        Controllers.addListener(controllerListener);
+        controllerBound = true;
     }
 
     @Override
     public boolean keyDown(int keycode) {
+        if (interceptInput()) return true;
         if (hasModalWidget() && widgets.peekLast().handleKeyDown(keycode)) {
             return true;
         }
@@ -182,23 +222,23 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         if (keycode == Input.Keys.TAB) {
             boolean shift = Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT)
                     || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT);
-            moveFocus(shift ? -1 : 1);
+            moveFocus(shift ? -1 : 1, 0, true);
             return true;
         }
         if (keycode == Input.Keys.DOWN) {
-            moveFocus(1);
+            moveFocus(0, -1, false);
             return true;
         }
         if (keycode == Input.Keys.UP) {
-            moveFocus(-1);
+            moveFocus(0, 1, false);
             return true;
         }
         if (textBox == null && keycode == Input.Keys.RIGHT) {
-            moveFocus(1);
+            moveFocus(1, 0, false);
             return true;
         }
         if (textBox == null && keycode == Input.Keys.LEFT) {
-            moveFocus(-1);
+            moveFocus(-1, 0, false);
             return true;
         }
         if (keycode == Input.Keys.ENTER) {
@@ -206,19 +246,22 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
                 if (textBox.runOnEnter != null) {
                     textBox.runOnEnter.run();
                 } else {
-                    moveFocus(1);
+                    moveFocus(1, 0, true);
                 }
                 return true;
             }
+            if (tryEnterFocusedGroup()) return true;
             navigator.activate();
             return true;
         }
         if (keycode == Input.Keys.SPACE) {
             if (textBox != null) return true;
+            if (tryEnterFocusedGroup()) return true;
             navigator.activate();
             return true;
         }
         if (keycode == Input.Keys.ESCAPE) {
+            if (exitEnteredGroup()) return true;
             if (closeTopWidget()) return true;
             onEscPressed();
             return true;
@@ -244,6 +287,7 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
 
     @Override
     public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+        if (interceptInput()) return true;
         return withViewport(() -> {
             if (hasModalWidget()) {
                 Widget top = widgets.peekLast();
@@ -308,6 +352,24 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         if (hasModalWidget()) return false;
         if (amountY == 0f) return false;
         int dir = amountY > 0f ? 1 : -1;
+        Decorated focused = navigator.getFocused();
+        if (focused instanceof FocusGroup) {
+            FocusGroup group = (FocusGroup) focused;
+            if (group.hasPaging()) {
+                group.changePage(dir);
+                return true;
+            }
+        }
+        int mx = Gdx.input.getX();
+        int my = Gdx.input.getY();
+        for (Decorated d : decorated) {
+            if (!(d instanceof FocusGroup) || !(d instanceof DecoratedElement)) continue;
+            FocusGroup group = (FocusGroup) d;
+            if (group.hasPaging() && ((DecoratedElement) d).containsScreenPoint(mx, my)) {
+                group.changePage(dir);
+                return true;
+            }
+        }
         for (Decorated d : decorated) {
             if (d instanceof DecoratedScrollableList) {
                 ((DecoratedScrollableList) d).scrollBy(dir);
@@ -315,6 +377,16 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
             }
         }
         return false;
+    }
+
+    /**
+     * Focus corner marks are drawn after every element and widget so packed grids cannot
+     * cover the brackets of a neighbor.
+     */
+    private void renderFocusCorners(DecorContext ctx) {
+        for (DecoratedElement el : decoratedTree()) {
+            el.renderFocusOverlay(ctx);
+        }
     }
 
     /**
@@ -326,7 +398,7 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         int my = Gdx.input.getY();
         DecoratedElement mouseHost = null;
         DecoratedElement focusHost = null;
-        for (DecoratedElement el : infoTextCandidates()) {
+        for (DecoratedElement el : decoratedTree()) {
             if (el.infoText == null || !el.infoText.hasText()) continue;
             if (!el.visible || el.alpha <= 0.35f) continue;
             if (el.containsScreenPoint(mx, my)) {
@@ -343,10 +415,13 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         }
     }
 
-    private List<DecoratedElement> infoTextCandidates() {
+    private List<DecoratedElement> decoratedTree() {
         List<DecoratedElement> out = new ArrayList<>();
         if (hasModalWidget()) {
-            out.addAll(widgets.peekLast().decoratedElements());
+            for (DecoratedElement el : widgets.peekLast().decoratedElements()) {
+                out.add(el);
+                out.addAll(el.nestedElements());
+            }
         } else {
             for (Decorated d : decorated) {
                 if (!(d instanceof DecoratedElement)) continue;
@@ -399,6 +474,10 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
             Decorated d = decorated.get(i);
             if (!(d instanceof DecoratedElement)) continue;
             DecoratedElement el = (DecoratedElement) d;
+            if (el instanceof FocusGroup) {
+                FocusGroup group = (FocusGroup) el;
+                if (group.enterAt(screenX, screenY)) return el;
+            }
             List<Decorated> nested = el.nestedFocusables();
             for (int j = nested.size() - 1; j >= 0; j--) {
                 Decorated n = nested.get(j);
@@ -411,15 +490,59 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         return null;
     }
 
-    private void moveFocus(int dir) {
+    /**
+     * Walks an entered {@link FocusGroup} in 2D, otherwise steps the outer ring.
+     * Ring direction preserves existing menus: left/up = prev, right/down = next.
+     */
+    private void moveFocus(int dx, int dy, boolean wrapRows) {
+        Decorated focused = navigator.getFocused();
+        if (focused instanceof FocusGroup) {
+            FocusGroup group = (FocusGroup) focused;
+            if (group.isEntered()) {
+                FocusGroup.Nav nav = group.navigate(dx, dy, wrapRows);
+                if (nav == FocusGroup.Nav.HANDLED) {
+                    AudioManager.getInstance().playMenuSelectSound();
+                    return;
+                }
+                group.exitGroup();
+                if (navigator.isEmpty()) refreshFocusRing();
+                if (navigator.isEmpty()) return;
+                if (nav == FocusGroup.Nav.EXIT_PREV) navigator.prev();
+                else navigator.next();
+                AudioManager.getInstance().playMenuSelectSound();
+                return;
+            }
+        }
         if (navigator.isEmpty()) refreshFocusRing();
         if (navigator.isEmpty()) return;
+        int dir = dx != 0 ? dx : -dy;
+        if (dir == 0) return;
         if (dir > 0) navigator.next();
         else navigator.prev();
         AudioManager.getInstance().playMenuSelectSound();
     }
 
+    private boolean tryEnterFocusedGroup() {
+        Decorated focused = navigator.getFocused();
+        if (!(focused instanceof FocusGroup)) return false;
+        FocusGroup group = (FocusGroup) focused;
+        if (group.isEntered()) return false;
+        group.enterGroup();
+        AudioManager.getInstance().playMenuPressSound();
+        return true;
+    }
+
+    private boolean exitEnteredGroup() {
+        Decorated focused = navigator.getFocused();
+        if (!(focused instanceof FocusGroup)) return false;
+        FocusGroup group = (FocusGroup) focused;
+        if (!group.isEntered()) return false;
+        group.exitGroup();
+        return true;
+    }
+
     private boolean handleControllerButton(Controller controller, int buttonIndex) {
+        if (interceptInput()) return true;
         ControllerMapping map = controller != null ? controller.getMapping() : null;
         int up = map != null ? map.buttonDpadUp : SDL_DPAD_UP;
         int down = map != null ? map.buttonDpadDown : SDL_DPAD_DOWN;
@@ -429,12 +552,20 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         int b = map != null ? map.buttonB : SDL_B;
 
         boolean textFocused = focusedTextBox() != null;
-        if (buttonIndex == up || (!textFocused && buttonIndex == left)) {
-            moveFocus(-1);
+        if (buttonIndex == up) {
+            moveFocus(0, 1, false);
             return true;
         }
-        if (buttonIndex == down || (!textFocused && buttonIndex == right)) {
-            moveFocus(1);
+        if (buttonIndex == down) {
+            moveFocus(0, -1, false);
+            return true;
+        }
+        if (!textFocused && buttonIndex == left) {
+            moveFocus(-1, 0, false);
+            return true;
+        }
+        if (!textFocused && buttonIndex == right) {
+            moveFocus(1, 0, false);
             return true;
         }
         if (buttonIndex == a) {
@@ -443,14 +574,16 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
                 if (box.runOnEnter != null) {
                     box.runOnEnter.run();
                 } else {
-                    moveFocus(1);
+                    moveFocus(1, 0, true);
                 }
                 return true;
             }
+            if (tryEnterFocusedGroup()) return true;
             navigator.activate();
             return true;
         }
         if (buttonIndex == b) {
+            if (exitEnteredGroup()) return true;
             if (closeTopWidget()) return true;
             onEscPressed();
             return true;
@@ -459,7 +592,8 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
     }
 
     private void pollStick(int dtMs) {
-        int dir = 0;
+        int dx = 0;
+        int dy = 0;
         for (Controller c : Controllers.getControllers()) {
             if (c == null) continue;
             ControllerMapping map = c.getMapping();
@@ -472,24 +606,26 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
             if (ax < STICK_DEADZONE && ay < STICK_DEADZONE) continue;
             if (ax >= ay) {
                 if (focusedTextBox() != null) continue;
-                dir = x < 0f ? -1 : 1;
+                dx = x < 0f ? -1 : 1;
             } else {
-                dir = y < 0f ? -1 : 1; // up is typically negative
+                dy = y < 0f ? 1 : -1; // up is typically negative
             }
             break;
         }
 
-        if (dir == 0) {
-            stickHeldDir = 0;
+        if (dx == 0 && dy == 0) {
+            stickHeldDx = 0;
+            stickHeldDy = 0;
             stickTimerMs = 0;
             stickRepeating = false;
             return;
         }
-        if (dir != stickHeldDir) {
-            stickHeldDir = dir;
+        if (dx != stickHeldDx || dy != stickHeldDy) {
+            stickHeldDx = dx;
+            stickHeldDy = dy;
             stickTimerMs = 0;
             stickRepeating = false;
-            moveFocus(dir);
+            moveFocus(dx, dy, false);
             return;
         }
         stickTimerMs += dtMs;
@@ -497,7 +633,7 @@ public abstract class DecoratedMenuScreen extends AspectLockedMenuScreen {
         if (stickTimerMs >= threshold) {
             stickTimerMs -= threshold;
             stickRepeating = true;
-            moveFocus(dir);
+            moveFocus(dx, dy, false);
         }
     }
 

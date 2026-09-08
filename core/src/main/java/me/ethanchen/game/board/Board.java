@@ -1117,7 +1117,7 @@ public class Board {
     // Static
 
     public enum Presets {
-        STANDARD_SINGLE, // normal board in most tetris games, 10 wide
+        STANDARD_SINGLE, // normal 10-wide board
         STANDARD_DUO,
         STANDARD_TRIO,
         STANDARD_4P,

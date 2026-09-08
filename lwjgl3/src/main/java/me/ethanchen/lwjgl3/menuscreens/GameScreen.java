@@ -1350,7 +1350,7 @@ public class GameScreen extends MenuScreen {
                     AudioManager.getInstance().playPlaceSound(isLocalSlot(e.playerId));
                     if (e.combo >= 0) {
                         AudioManager.getInstance().playClearSound(e.combo);
-                        if (e.lines == 4) AudioManager.getInstance().playClearTetrisSound();
+                        if (e.lines == 4) AudioManager.getInstance().playClearQuadSound();
                         if (e.spinType == HardDropEffect.SPIN_TSPIN
                                 || e.spinType == HardDropEffect.SPIN_ALL_SPIN) {
                             AudioManager.getInstance().playSpinClearSound();

@@ -19,7 +19,7 @@ public class AudioManager {
     private static final float SPIN_TURN_BASE   = 0.5f;
     private static final float PLACE_SELF_BASE  = 1.0f;
     private static final float PLACE_OTHER_BASE = 0.5f;
-    private static final float CLEAR_TETRIS_BASE = 1.0f;
+    private static final float CLEAR_QUAD_BASE = 1.0f;
     private static final float SPIN_CLEAR_BASE  = 1.0f;
     private static final float ALL_CLEAR_BASE   = 1.0f;
     private static final float ABILITY_ACTIVATE_BASE = 1.0f;
@@ -40,7 +40,7 @@ public class AudioManager {
     private Sound spinTurnSound;
     private Sound placeSound;
     private Sound[] clearSound;
-    private Sound clearTetrisSound;
+    private Sound clearQuadSound;
     private Sound spinClearSound;
     private Sound allClearSound;
     private Sound abilityActivateSound;
@@ -80,7 +80,7 @@ public class AudioManager {
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_combo10.wav")),
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_comboplus.wav")),
         };
-        clearTetrisSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_cleartetris.wav"));
+        clearQuadSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_cleartetris.wav"));
         spinClearSound   = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_spinclear.wav"));
         allClearSound    = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_allclear.wav"));
         abilityActivateSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_abilityactivate.wav"));
@@ -172,8 +172,8 @@ public class AudioManager {
         clearSound[combo].play(sfxVol(base));
     }
 
-    public void playClearTetrisSound() {
-        clearTetrisSound.play(sfxVol(CLEAR_TETRIS_BASE));
+    public void playClearQuadSound() {
+        clearQuadSound.play(sfxVol(CLEAR_QUAD_BASE));
     }
 
     public void playSpinClearSound() {
@@ -259,7 +259,7 @@ public class AudioManager {
         spinTurnSound.dispose();
         placeSound.dispose();
         for (Sound s : clearSound) s.dispose();
-        clearTetrisSound.dispose();
+        clearQuadSound.dispose();
         spinClearSound.dispose();
         allClearSound.dispose();
         abilityActivateSound.dispose();

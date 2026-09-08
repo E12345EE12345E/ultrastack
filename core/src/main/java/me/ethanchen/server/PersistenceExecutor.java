@@ -25,9 +25,8 @@ public final class PersistenceExecutor {
         exec.execute(() -> {
             try {
                 task.run();
-            } catch (Exception e) {
-                System.err.println("[PersistenceExecutor] Uncaught exception: " + e);
-                e.printStackTrace(System.err);
+            } catch (Throwable t) {
+                Uncaught.log("[PersistenceExecutor] Uncaught exception: ", t);
             }
         });
     }

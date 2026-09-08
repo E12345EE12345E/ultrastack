@@ -180,9 +180,8 @@ public class ServerCore implements PacketSender, Runnable {
                 if (tickCount % GameConstants.ROOM_LIST_BROADCAST_INTERVAL_TICKS == 0) {
                     broadcastRoomList();
                 }
-            } catch (Exception e) {
-                System.err.println("[ServerCore] Uncaught exception in loop: " + e);
-                e.printStackTrace(System.err);
+            } catch (Throwable t) {
+                Uncaught.log("[ServerCore] Uncaught exception in loop: ", t);
             }
             tickCount++;
             long elapsed = System.currentTimeMillis() - start;
@@ -198,11 +197,10 @@ public class ServerCore implements PacketSender, Runnable {
         while ((w = inbound.poll()) != null) {
             try {
                 dispatch(w);
-            } catch (Exception e) {
+            } catch (Throwable t) {
                 String type = w.packet != null ? w.packet.getClass().getSimpleName() : "null";
-                System.err.println("[ServerCore] Uncaught exception dispatching " + type
-                        + " from connId=" + w.connectionID + ": " + e);
-                e.printStackTrace(System.err);
+                Uncaught.log("[ServerCore] Uncaught exception dispatching " + type
+                        + " from connId=" + w.connectionID + ": ", t);
                 replyAuthFailure(w.connectionID, w.packet, "server error");
             }
         }
@@ -325,54 +323,84 @@ public class ServerCore implements PacketSender, Runnable {
     private void handleProfileViewRequest(ServerPacketWrapper w, Session session) {
         if (session == null || !session.authenticated) return;
         ProfileViewRequest req = (ProfileViewRequest) w.packet;
+        String accountUuid = req.accountUuid;
+        int connectionId = w.connectionID;
+        if (accountUuid == null || accountUuid.isEmpty() || profileStore == null) {
+            ProfileViewResponse res = new ProfileViewResponse();
+            res.accountUuid = accountUuid;
+            res.found = false;
+            sendTCP(connectionId, res);
+            return;
+        }
+        persistence.submit(() -> completeProfileView(connectionId, session, accountUuid));
+    }
+
+    private void completeProfileView(int connectionId, Session session, String accountUuid) {
+        if (!sessionStillCurrent(connectionId, session)) return;
         ProfileViewResponse res = new ProfileViewResponse();
-        res.accountUuid = req.accountUuid;
-        if (req.accountUuid == null || req.accountUuid.isEmpty() || profileStore == null) {
+        res.accountUuid = accountUuid;
+        try {
+            profileStore.ensureBestsBackfilled(accountUuid, resultRecorder);
+            PublicAccountView view = profileStore.loadPublicView(accountUuid);
+            if (view == null) {
+                res.found = false;
+                sendTCP(connectionId, res);
+                return;
+            }
+            res.found = true;
+            res.username = view.username;
+            res.xp = view.xp;
+            res.selectedCharacterId = view.selectedCharacterId;
+            res.equippedA = view.equippedA;
+            res.equippedB = view.equippedB;
+            res.bestScore = view.bestScore;
+            res.bestPuzzle = view.bestPuzzle;
+            res.bestCharacterScore = view.bestCharacterScore;
+        } catch (Throwable t) {
+            Uncaught.log("[ServerCore] Profile view failed for connId=" + connectionId + ": ", t);
             res.found = false;
-            sendTCP(w.connectionID, res);
-            return;
         }
-        profileStore.ensureBestsBackfilled(req.accountUuid, resultRecorder);
-        PublicAccountView view = profileStore.loadPublicView(req.accountUuid);
-        if (view == null) {
-            res.found = false;
-            sendTCP(w.connectionID, res);
-            return;
-        }
-        res.found = true;
-        res.username = view.username;
-        res.xp = view.xp;
-        res.selectedCharacterId = view.selectedCharacterId;
-        res.equippedA = view.equippedA;
-        res.equippedB = view.equippedB;
-        res.bestScore = view.bestScore;
-        res.bestPuzzle = view.bestPuzzle;
-        res.bestCharacterScore = view.bestCharacterScore;
-        sendTCP(w.connectionID, res);
+        if (!sessionStillCurrent(connectionId, session)) return;
+        sendTCP(connectionId, res);
     }
 
     private void handleLoadoutRequest(ServerPacketWrapper w, Session session) {
         if (session == null || session.profile == null) return;
         LoadoutRequest req = (LoadoutRequest) w.packet;
+        int connectionId = w.connectionID;
+        int characterId = req.characterId;
+        String artifactIdA = req.artifactIdA;
+        String artifactIdB = req.artifactIdB;
+        persistence.submit(() -> completeLoadout(connectionId, session, characterId, artifactIdA, artifactIdB));
+    }
+
+    private void completeLoadout(int connectionId, Session session, int characterId,
+                                 String artifactIdA, String artifactIdB) {
+        if (!sessionStillCurrent(connectionId, session) || session.profile == null) return;
         PlayerProfile profile = session.profile;
 
-        if (CharacterRegistry.byId(req.characterId) == null || !profile.isCharacterUnlocked(req.characterId)) {
+        if (CharacterRegistry.byId(characterId) == null || !profile.isCharacterUnlocked(characterId)) {
             return; // silently ignore invalid/locked selection; client should not offer it
         }
-        if (req.artifactIdA != null && profile.findArtifact(req.artifactIdA) == null) return;
-        if (req.artifactIdB != null && profile.findArtifact(req.artifactIdB) == null) return;
+        if (artifactIdA != null && profile.findArtifact(artifactIdA) == null) return;
+        if (artifactIdB != null && profile.findArtifact(artifactIdB) == null) return;
 
-        profile.selectedCharacterId = req.characterId;
-        profile.equippedArtifactIds[0] = (req.artifactIdA != null && !req.artifactIdA.isEmpty()) ? req.artifactIdA : null;
-        profile.equippedArtifactIds[1] = (req.artifactIdB != null && !req.artifactIdB.isEmpty()) ? req.artifactIdB : null;
+        profile.selectedCharacterId = characterId;
+        profile.equippedArtifactIds[0] = (artifactIdA != null && !artifactIdA.isEmpty()) ? artifactIdA : null;
+        profile.equippedArtifactIds[1] = (artifactIdB != null && !artifactIdB.isEmpty()) ? artifactIdB : null;
 
         // Loadout selection is always allowed and saved (even in LAN, where saving just updates
         // the in-memory LanProfileStore so GameRoom sees it at game start); only acquisition and
         // fusion are blocked for read-only (LAN) profiles.
-        if (profileStore != null) {
-            profileStore.saveProfile(session.accountUuid, profile);
+        try {
+            if (profileStore != null) {
+                profileStore.saveProfile(session.accountUuid, profile);
+            }
+        } catch (Throwable t) {
+            Uncaught.log("[ServerCore] Loadout save failed for connId=" + connectionId + ": ", t);
         }
-        sendProfileSync(w.connectionID, session);
+        if (!sessionStillCurrent(connectionId, session)) return;
+        sendProfileSync(connectionId, session);
         if (session.currentRoomId != null) {
             GameRoom room = rooms.get(session.currentRoomId);
             if (room != null) room.refreshPlayerList();
@@ -381,37 +409,43 @@ public class ServerCore implements PacketSender, Runnable {
 
     private void handleFusionRequest(ServerPacketWrapper w, Session session) {
         if (session == null || session.profile == null) return;
+        FusionRequest req = (FusionRequest) w.packet;
+        String[] artifactIds = req.artifactIds == null ? null : req.artifactIds.clone();
+        persistence.submit(() -> completeFusion(w.connectionID, session, artifactIds));
+    }
+
+    private void completeFusion(int connectionId, Session session, String[] artifactIds) {
+        if (!sessionStillCurrent(connectionId, session) || session.profile == null) return;
         FusionResultBroadcast res = new FusionResultBroadcast();
 
         if (session.profileReadOnly) {
             res.success = false;
             res.reason = "fusion is not available in LAN mode";
-            sendTCP(w.connectionID, res);
+            sendTCP(connectionId, res);
             return;
         }
 
-        FusionRequest req = (FusionRequest) w.packet;
         PlayerProfile profile = session.profile;
-        if (req.artifactIds == null || req.artifactIds.length != 5) {
+        if (artifactIds == null || artifactIds.length != 5) {
             res.success = false;
             res.reason = "fusion requires exactly 5 artifacts";
-            sendTCP(w.connectionID, res);
+            sendTCP(connectionId, res);
             return;
         }
 
         java.util.List<Artifact> inputs = new java.util.ArrayList<>();
-        for (String id : req.artifactIds) {
+        for (String id : artifactIds) {
             Artifact a = profile.findArtifact(id);
             if (a == null) {
                 res.success = false;
                 res.reason = "artifact not owned: " + id;
-                sendTCP(w.connectionID, res);
+                sendTCP(connectionId, res);
                 return;
             }
             if (id.equals(profile.equippedArtifactIds[0]) || id.equals(profile.equippedArtifactIds[1])) {
                 res.success = false;
                 res.reason = "cannot fuse an equipped artifact";
-                sendTCP(w.connectionID, res);
+                sendTCP(connectionId, res);
                 return;
             }
             inputs.add(a);
@@ -419,9 +453,9 @@ public class ServerCore implements PacketSender, Runnable {
 
         try {
             me.ethanchen.game.progression.ArtifactFusion.Result fused =
-                    me.ethanchen.game.progression.ArtifactFusion.fuse(inputs, rng);
+                    me.ethanchen.game.progression.ArtifactFusion.fuse(inputs, new Random());
             profile.inventory.removeIf(a -> {
-                for (String id : req.artifactIds) if (id.equals(a.id)) return true;
+                for (String id : artifactIds) if (id.equals(a.id)) return true;
                 return false;
             });
             profile.inventory.add(fused.artifact);
@@ -432,12 +466,18 @@ public class ServerCore implements PacketSender, Runnable {
             res.success = true;
             res.reason = "";
             res.result = fused.artifact;
-            sendTCP(w.connectionID, res);
-            sendProfileSync(w.connectionID, session);
+            if (!sessionStillCurrent(connectionId, session)) return;
+            sendTCP(connectionId, res);
+            sendProfileSync(connectionId, session);
         } catch (IllegalArgumentException e) {
             res.success = false;
             res.reason = e.getMessage();
-            sendTCP(w.connectionID, res);
+            if (sessionStillCurrent(connectionId, session)) sendTCP(connectionId, res);
+        } catch (Throwable t) {
+            Uncaught.log("[ServerCore] Fusion failed for connId=" + connectionId + ": ", t);
+            res.success = false;
+            res.reason = "fusion failed";
+            if (sessionStillCurrent(connectionId, session)) sendTCP(connectionId, res);
         }
     }
 
@@ -524,9 +564,8 @@ public class ServerCore implements PacketSender, Runnable {
                 res.success = false;
                 res.reason = error;
             }
-        } catch (Exception e) {
-            System.err.println("[ServerCore] Login failed for connId=" + connectionId + ": " + e);
-            e.printStackTrace(System.err);
+        } catch (Throwable t) {
+            Uncaught.log("[ServerCore] Login failed for connId=" + connectionId + ": ", t);
             res.success = false;
             res.reason = "authentication failed";
         }
@@ -554,9 +593,8 @@ public class ServerCore implements PacketSender, Runnable {
                 res.success = false;
                 res.reason = error;
             }
-        } catch (Exception e) {
-            System.err.println("[ServerCore] Register failed for connId=" + connectionId + ": " + e);
-            e.printStackTrace(System.err);
+        } catch (Throwable t) {
+            Uncaught.log("[ServerCore] Register failed for connId=" + connectionId + ": ", t);
             res.success = false;
             res.reason = "registration failed";
         }

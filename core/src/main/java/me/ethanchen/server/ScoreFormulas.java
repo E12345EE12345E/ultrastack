@@ -43,7 +43,7 @@ final class ScoreFormulas {
                     case 1: return GameConstants.SCORE_ALL_SPIN_SINGLE;
                     case 2: return GameConstants.SCORE_ALL_SPIN_DOUBLE;
                     case 3: return GameConstants.SCORE_ALL_SPIN_TRIPLE;
-                    case 4: return GameConstants.SCORE_ALL_SPIN_TETRIS;
+                    case 4: return GameConstants.SCORE_ALL_SPIN_QUAD;
                 }
                 break;
             case SMALL_SPIN:
@@ -61,7 +61,7 @@ final class ScoreFormulas {
             case 1: return GameConstants.SCORE_SINGLE;
             case 2: return GameConstants.SCORE_DOUBLE;
             case 3: return GameConstants.SCORE_TRIPLE;
-            case 4: return GameConstants.SCORE_TETRIS;
+            case 4: return GameConstants.SCORE_QUAD;
         }
         return 0;
     }

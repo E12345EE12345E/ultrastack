@@ -384,6 +384,7 @@ public class ClientApp extends ApplicationAdapter {
         // navigating back to a retained lobby chat instance from LobbySettingsScreen) still
         // correctly regains input focus.
         Gdx.input.setInputProcessor(newMenu);
+        newMenu.resumeInput();
     }
 
     // -------------------------------------------------------------------------

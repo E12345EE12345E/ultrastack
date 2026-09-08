@@ -19,8 +19,8 @@ public class HardDropEffect {
 
     /** Normal placement or no-clear. */
     public static final byte SPIN_NONE = 0;
-    /** 4-line clear (Tetris). */
-    public static final byte SPIN_TETRIS = 1;
+    /** 4-line clear (quad). */
+    public static final byte SPIN_QUAD = 1;
     /** T-spin (including mini). */
     public static final byte SPIN_TSPIN = 2;
     /** All-spin (non-T piece spin) or small-spin (I3/L3). */

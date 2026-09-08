@@ -54,8 +54,9 @@ public final class InfoText {
         if (ctx == null || host == null || !hasText()) return;
 
         float[] saved = UIFont.saveAndSetScale(ctx.font, fontSize);
+        boolean useMarkup = text.indexOf("[#") >= 0;
         boolean prevMarkup = ctx.font.getData().markupEnabled;
-        ctx.font.getData().markupEnabled = false;
+        ctx.font.getData().markupEnabled = useMarkup;
 
         float maxW = MenuScreen.toScreenWidth((float) DesignUi.nw(MAX_WRAP_DESIGN));
         GlyphLayout layout = new GlyphLayout();

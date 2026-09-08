@@ -235,6 +235,23 @@ public abstract class DecoratedElement extends UIElement implements Decorated {
     }
 
     /**
+     * Screen-level overlay pass: focus corners are drawn after every widget so neighboring
+     * frames cannot cover the marks.
+     */
+    public void renderFocusOverlay(DecorContext ctx) {
+        if (!visible || alpha <= 0.01f || !shouldDrawFocusCorners()) return;
+        float a = Anim.clamp01(alpha);
+        ctx.sprites.begin();
+        drawFocusCorners(ctx, pxX(), pxY(), pxW(), pxH(), a);
+        ctx.sprites.setColor(Color.WHITE);
+        ctx.sprites.end();
+    }
+
+    protected boolean shouldDrawFocusCorners() {
+        return focused;
+    }
+
+    /**
      * {@code hovered_corner.png} is the top-left mark. The other three corners are the same
      * texture rotated in place. Size and inset follow {@code sin(menu time)} so they breathe.
      */

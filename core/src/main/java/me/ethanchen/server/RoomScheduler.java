@@ -90,9 +90,8 @@ public final class RoomScheduler {
                 for (GameRoom room : rooms) {
                     try {
                         if (room.isRunning()) room.tickOnce();
-                    } catch (Exception e) {
-                        System.err.println("[RoomScheduler shard " + index + "] Uncaught exception: " + e);
-                        e.printStackTrace(System.err);
+                    } catch (Throwable t) {
+                        Uncaught.log("[RoomScheduler shard " + index + "] Uncaught exception: ", t);
                     }
                 }
                 nextDeadline += TICK_NS;

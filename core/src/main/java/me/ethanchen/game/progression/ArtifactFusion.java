@@ -6,14 +6,14 @@ import java.util.UUID;
 
 /**
  * Implements artifact fusion: five same-level artifacts are consumed to produce one new artifact
- * of the same level (or one higher on a quality overflow), per implementation.md, Part 2.
+ * of the same level (or one higher on a quality overflow).
  */
 public final class ArtifactFusion {
 
     private static final int FUSION_INPUT_COUNT = 5;
     private static final float OVERFLOW_THRESHOLD = 100f;
-    private static final float OVERFLOW_REROLL_MIN = 30f;
-    private static final float OVERFLOW_REROLL_MAX = 50f;
+    private static final float BONUS_QUALITY_MAX = 20f;
+    private static final float OVERFLOW_BASE = 20f;
     private static final float TYPE_MATCH_CHANCE = 0.2f;
 
     private ArtifactFusion() {}
@@ -24,32 +24,52 @@ public final class ArtifactFusion {
     }
 
     /**
+     * {@code null} when the five inputs can fuse, else a human-readable reason the client can
+     * show in place of the Fusion button.
+     */
+    public static String validate(List<Artifact> inputs) {
+        if (inputs == null || inputs.size() != FUSION_INPUT_COUNT) {
+            return "Select exactly 5 artifacts to fuse.";
+        }
+        for (Artifact a : inputs) {
+            if (a == null) return "Select exactly 5 artifacts to fuse.";
+        }
+        int level = inputs.get(0).level;
+        for (Artifact a : inputs) {
+            if (a.level != level) return "Incompatible artifact levels";
+        }
+        return null;
+    }
+
+    /**
      * Fuses exactly five same-level artifacts. Throws {@link IllegalArgumentException} if the
      * precondition (count == 5, all same level) is violated -- callers should validate ownership
      * and non-equipped status separately before calling this.
      */
     public static Result fuse(List<Artifact> inputs, Random rng) {
-        if (inputs == null || inputs.size() != FUSION_INPUT_COUNT) {
-            throw new IllegalArgumentException("Fusion requires exactly " + FUSION_INPUT_COUNT + " artifacts");
+        String reason = validate(inputs);
+        if (reason != null) {
+            throw new IllegalArgumentException(reason);
         }
         int level = inputs.get(0).level;
-        for (Artifact a : inputs) {
-            if (a.level != level) {
-                throw new IllegalArgumentException("All fused artifacts must be the same level");
-            }
-        }
 
-        float sum = 0f;
-        for (Artifact a : inputs) {
-            float mult = (rng.nextBoolean()) ? 2.0f : 0.8f;
-            sum += a.baseQuality * mult;
+        int bestIndex = 0;
+        for (int i = 1; i < FUSION_INPUT_COUNT; i++) {
+            if (inputs.get(i).baseQuality > inputs.get(bestIndex).baseQuality) bestIndex = i;
         }
-        float baseValue = sum / FUSION_INPUT_COUNT + 20f + rng.nextFloat() * 10f;
+        float best = inputs.get(bestIndex).baseQuality;
+        float otherSum = 0f;
+        for (int i = 0; i < FUSION_INPUT_COUNT; i++) {
+            if (i == bestIndex) continue;
+            otherSum += inputs.get(i).baseQuality;
+        }
+        float quality = best + otherSum / 4f + rng.nextFloat() * BONUS_QUALITY_MAX;
 
         int outputLevel = level;
-        if (baseValue > OVERFLOW_THRESHOLD) {
-            baseValue = OVERFLOW_REROLL_MIN + rng.nextFloat() * (OVERFLOW_REROLL_MAX - OVERFLOW_REROLL_MIN);
+        float baseValue = quality;
+        if (quality > OVERFLOW_THRESHOLD) {
             outputLevel = level + 1;
+            baseValue = Math.min(quality - OVERFLOW_THRESHOLD, BONUS_QUALITY_MAX) + OVERFLOW_BASE;
         }
 
         byte outputType = rollOutputType(inputs, rng);

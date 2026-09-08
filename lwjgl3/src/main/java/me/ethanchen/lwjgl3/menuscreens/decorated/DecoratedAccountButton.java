@@ -97,9 +97,6 @@ public class DecoratedAccountButton extends DecoratedElement {
                 y + (h + layout.height) * 0.5f);
         ctx.font.setColor(Color.WHITE);
         UIFont.restoreScale(ctx.font, saved);
-        if (focused) {
-            drawFocusCorners(ctx, x, y, w, h, a);
-        }
         ctx.sprites.setColor(Color.WHITE);
         ctx.sprites.end();
     }

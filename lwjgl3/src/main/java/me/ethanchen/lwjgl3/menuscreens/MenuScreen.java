@@ -47,6 +47,9 @@ public abstract class MenuScreen extends InputAdapter {
     /** Called when this screen is about to be replaced. Override to release resources such as controller listeners. */
     public void dispose() {}
 
+    /** Called when this screen is shown, including when a retained instance is switched back to. */
+    public void resumeInput() {}
+
     protected void onEscPressed() {
         // no-op by default; override in subclasses to handle escape
     }

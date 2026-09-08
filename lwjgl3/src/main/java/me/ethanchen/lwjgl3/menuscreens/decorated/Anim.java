@@ -24,6 +24,11 @@ public final class Anim {
         return a + (b - a) * t;
     }
 
+    public static float easeInCubic(float t) {
+        t = clamp01(t);
+        return t * t * t;
+    }
+
     public static float easeOutCubic(float t) {
         t = clamp01(t);
         float u = 1f - t;

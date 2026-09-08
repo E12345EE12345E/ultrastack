@@ -2,7 +2,9 @@ package me.ethanchen.lwjgl3.menuscreens.decorated;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
+import com.badlogic.gdx.utils.Align;
 
+import me.ethanchen.lwjgl3.menuscreens.MenuScreen;
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIFont;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
@@ -15,6 +17,11 @@ public class DecoratedText extends DecoratedElement {
     public float fontSize;
     public UIText.TextAlign align = UIText.TextAlign.CENTER;
     public Color color = Color.WHITE;
+    /**
+     * When {@code > 0}, wrap text to this design-pixel width. Zero means single-line /
+     * explicit-{@code \n} layout only.
+     */
+    public float wrapDesignWidth;
 
     public DecoratedText(float designX, float designY, String text, float fontSize) {
         super(DesignUi.nx(designX), DesignUi.ny(designY), 0, 0);
@@ -30,6 +37,16 @@ public class DecoratedText extends DecoratedElement {
         return this;
     }
 
+    public DecoratedText align(UIText.TextAlign align) {
+        this.align = align;
+        return this;
+    }
+
+    public DecoratedText wrap(float designWidth) {
+        this.wrapDesignWidth = designWidth;
+        return this;
+    }
+
     @Override
     public boolean isFocusable() {
         return false;
@@ -40,7 +57,16 @@ public class DecoratedText extends DecoratedElement {
         if (!visible || alpha <= 0.01f) return;
         String draw = text != null ? text : "";
         float[] saved = UIFont.saveAndSetScale(ctx.font, fontSize);
-        GlyphLayout layout = new GlyphLayout(ctx.font, draw);
+        boolean useMarkup = draw.indexOf("[#") >= 0;
+        boolean prevMarkup = ctx.font.getData().markupEnabled;
+        ctx.font.getData().markupEnabled = useMarkup;
+        GlyphLayout layout = new GlyphLayout();
+        if (wrapDesignWidth > 0f) {
+            float targetW = MenuScreen.toScreenWidth((float) DesignUi.nw(wrapDesignWidth));
+            layout.setText(ctx.font, draw, Color.WHITE, targetW, Align.left, true);
+        } else {
+            layout.setText(ctx.font, draw);
+        }
         float pxX = pxCenterX();
         float pxY = pxCenterY();
         float x;
@@ -87,9 +113,10 @@ public class DecoratedText extends DecoratedElement {
         float a = Anim.clamp01(alpha) * color.a;
         ctx.sprites.begin();
         ctx.font.setColor(color.r, color.g, color.b, a);
-        ctx.font.draw(ctx.sprites, draw, x, y);
+        ctx.font.draw(ctx.sprites, layout, x, y);
         ctx.sprites.end();
         ctx.font.setColor(Color.WHITE);
+        ctx.font.getData().markupEnabled = prevMarkup;
         UIFont.restoreScale(ctx.font, saved);
     }
 
