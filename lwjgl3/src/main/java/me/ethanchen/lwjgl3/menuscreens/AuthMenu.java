@@ -9,6 +9,7 @@ import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
 import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
 import me.ethanchen.network.ClientPacketWrapper;
+import me.ethanchen.network.NetConfig;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.packets.s2c.AuthResponse;
 import me.ethanchen.util.TextSanitizer;
@@ -23,6 +24,9 @@ public class AuthMenu extends DecoratedMenuScreen {
     private final DecoratedTextBox passwordBox;
     private final DecoratedText statusText;
     private final AuroraBackgroundRenderer aurora;
+
+    private boolean authInFlight;
+    private long authDeadlineMs;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(AuthResponse.class, w -> handleAuthResponse((AuthResponse) w.packet));
@@ -81,10 +85,12 @@ public class AuthMenu extends DecoratedMenuScreen {
             setStatus("Username cannot be empty.");
             return;
         }
+        if (authInFlight) return;
         app.getSettings().lastUsername = user;
         SettingsManager.save(app.getSettings());
+        authInFlight = true;
         setStatus("Logging in...");
-        app.sendLoginRequest(user, pass);
+        beginAuth(app.sendLoginRequest(user, pass));
     }
 
     private void register() {
@@ -99,10 +105,22 @@ public class AuthMenu extends DecoratedMenuScreen {
                     + TextSanitizer.MIN_REGISTER_USERNAME_LENGTH + " characters.");
             return;
         }
+        if (authInFlight) return;
         app.getSettings().lastUsername = user;
         SettingsManager.save(app.getSettings());
+        authInFlight = true;
         setStatus("Registering...");
-        app.sendRegisterRequest(user, pass);
+        beginAuth(app.sendRegisterRequest(user, pass));
+    }
+
+    private void beginAuth(boolean sent) {
+        if (!sent) {
+            authInFlight = false;
+            authDeadlineMs = 0;
+            setStatus("Not connected. Go back and reconnect.");
+            return;
+        }
+        authDeadlineMs = System.currentTimeMillis() + NetConfig.AUTH_TIMEOUT_MS;
     }
 
     private void setStatus(String message) {
@@ -117,6 +135,15 @@ public class AuthMenu extends DecoratedMenuScreen {
     @Override
     protected void onEscPressed() {
         leaveToConnect();
+    }
+
+    @Override
+    protected void updateScreen(long menuElapsedMs, long appElapsedMs) {
+        if (authInFlight && authDeadlineMs > 0 && System.currentTimeMillis() > authDeadlineMs) {
+            authInFlight = false;
+            authDeadlineMs = 0;
+            setStatus("No response from server. Try again or reconnect.");
+        }
     }
 
     @Override
@@ -136,6 +163,8 @@ public class AuthMenu extends DecoratedMenuScreen {
     }
 
     private void handleAuthResponse(AuthResponse res) {
+        authInFlight = false;
+        authDeadlineMs = 0;
         if (res.success) {
             app.switchMenu(new RoomBrowserMenu(app));
         } else {

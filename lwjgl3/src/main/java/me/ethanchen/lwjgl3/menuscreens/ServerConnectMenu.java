@@ -73,8 +73,11 @@ public class ServerConnectMenu extends DecoratedMenuScreen {
 
     private void connect() {
         String addr = addressBox.get().trim();
+        String host;
+        int port;
         if (addr.isEmpty()) {
-            app.setConnectDestination(NetConfig.HOST, NetConfig.PORT);
+            host = NetConfig.DEFAULT_SERVER_HOST;
+            port = NetConfig.PORT;
         } else {
             try {
                 AddressParser.Result parsed = AddressParser.parse(addr, NetConfig.PORT);
@@ -82,16 +85,29 @@ public class ServerConnectMenu extends DecoratedMenuScreen {
                     setStatus("Invalid port number.");
                     return;
                 }
-                app.setConnectDestination(parsed.host, parsed.port);
+                host = parsed.host;
+                port = parsed.port;
             } catch (AddressParser.ParseException e) {
                 setStatus(e.getMessage());
                 return;
             }
         }
+        if (app.isLanServerRunning() && isLoopbackHost(host) && port == NetConfig.PORT) {
+            setStatus("A LAN game is still hosted on this port. Stop hosting first, or enter a remote address.");
+            return;
+        }
+        app.setConnectDestination(host, port);
         app.setLanMode(false);
         connectingToDefault = false;
-        setStatus("Connecting...");
+        setStatus("Connecting to " + host + ":" + port + "...");
         app.tryConnect();
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        if (host == null) return false;
+        String h = host.trim();
+        return h.equals("127.0.0.1") || h.equalsIgnoreCase("localhost")
+                || h.equals("::1") || h.equals("[::1]");
     }
 
     private void showDefaultServerUnreachable(String detail) {

@@ -13,23 +13,31 @@ import me.ethanchen.network.dto.RoomInfo;
 
 /**
  * Discrete-slot list. Slot buttons stay in fixed design positions; scrolling only rebinds
- * which {@link RoomInfo} each slot shows.
+ * which item each slot shows via {@link SlotBinder}.
  */
-public class DecoratedScrollableList extends DecoratedElement {
+public class DecoratedScrollableList<T> extends DecoratedElement {
+    @FunctionalInterface
+    public interface SlotBinder<T> {
+        void bind(DecoratedListButton slot, T item);
+    }
+
     private final DecoratedListButton[] slots;
     private final int slotCount;
-    private final List<RoomInfo> items = new ArrayList<>();
+    private final SlotBinder<T> binder;
+    private final List<T> items = new ArrayList<>();
     private int offset;
-    private Consumer<RoomInfo> onSelect;
+    private Consumer<T> onSelect;
 
     public DecoratedScrollableList(float designCenterX, float topSlotCenterY,
-                                   float slotW, float slotH, int slotCount, float gap) {
+                                   float slotW, float slotH, int slotCount, float gap,
+                                   SlotBinder<T> binder) {
         super(
                 DesignUi.nx(designCenterX),
                 DesignUi.ny(listCenterY(topSlotCenterY, slotH, slotCount, gap)),
                 DesignUi.nw(slotW),
                 DesignUi.nh(listHeight(slotH, slotCount, gap)));
         this.slotCount = Math.max(1, slotCount);
+        this.binder = binder;
         this.slots = new DecoratedListButton[this.slotCount];
         this.focusable = false;
         for (int i = 0; i < this.slotCount; i++) {
@@ -42,18 +50,28 @@ public class DecoratedScrollableList extends DecoratedElement {
         rebind();
     }
 
-    public DecoratedScrollableList onSelect(Consumer<RoomInfo> onSelect) {
+    public static DecoratedScrollableList<RoomInfo> rooms(float designCenterX, float topSlotCenterY,
+                                                         float slotW, float slotH, int slotCount, float gap) {
+        return new DecoratedScrollableList<>(designCenterX, topSlotCenterY, slotW, slotH, slotCount, gap,
+                DecoratedScrollableList::bindRoom);
+    }
+
+    public DecoratedScrollableList<T> onSelect(Consumer<T> onSelect) {
         this.onSelect = onSelect;
         rebind();
         return this;
     }
 
-    public void setItems(List<RoomInfo> next) {
+    public void setItems(List<T> next) {
         items.clear();
         if (next != null) {
             items.addAll(next);
         }
         clampOffset();
+        rebind();
+    }
+
+    public void refresh() {
         rebind();
     }
 
@@ -152,25 +170,34 @@ public class DecoratedScrollableList extends DecoratedElement {
             int index = offset + i;
             DecoratedListButton slot = slots[i];
             if (index >= items.size()) {
-                slot.visible = false;
-                slot.focusable = false;
-                slot.text = "";
-                slot.action = null;
-                slot.infoText = null;
-                slot.focused = false;
-                slot.fill(1f, 1f, 1f);
+                clearSlot(slot);
                 continue;
             }
-            RoomInfo room = items.get(index);
+            T item = items.get(index);
             slot.visible = true;
             slot.focusable = true;
-            slot.text = formatLabel(room);
-            slot.info(formatInfo(room));
-            applyRoomTint(slot, room.roomId);
+            slot.icon = null;
+            slot.text = "";
+            slot.infoText = null;
+            slot.fill(1f, 1f, 1f);
+            if (binder != null) {
+                binder.bind(slot, item);
+            }
             slot.action = () -> {
-                if (onSelect != null) onSelect.accept(room);
+                if (onSelect != null) onSelect.accept(item);
             };
         }
+    }
+
+    private static void clearSlot(DecoratedListButton slot) {
+        slot.visible = false;
+        slot.focusable = false;
+        slot.text = "";
+        slot.icon = null;
+        slot.action = null;
+        slot.infoText = null;
+        slot.focused = false;
+        slot.fill(1f, 1f, 1f);
     }
 
     private static float listHeight(float slotH, int slotCount, float gap) {
@@ -182,15 +209,21 @@ public class DecoratedScrollableList extends DecoratedElement {
         return topSlotCenterY - (listHeight(slotH, slotCount, gap) - slotH) * 0.5f;
     }
 
+    private static void bindRoom(DecoratedListButton slot, RoomInfo room) {
+        slot.text = formatLabel(room);
+        slot.info(formatInfo(room));
+        applyRoomTint(slot, room.roomId);
+    }
+
     /** Deterministic HSV tint so the same room id always gets the same hue. */
     static void applyRoomTint(DecoratedListButton slot, String roomId) {
-        float hue = hueFromRoomId(roomId);
+        float hue = hueFromKey(roomId);
         Color c = new Color().fromHsv(hue * 360f, 0.55f, 0.95f);
         slot.fill(c.r, c.g, c.b);
     }
 
-    static float hueFromRoomId(String roomId) {
-        int h = roomId == null ? 0 : roomId.hashCode();
+    static float hueFromKey(String key) {
+        int h = key == null ? 0 : key.hashCode();
         h ^= (h >>> 16);
         h *= 0x7feb352d;
         h ^= (h >>> 15);

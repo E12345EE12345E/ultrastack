@@ -18,10 +18,10 @@ public class DecoratedScrollbar extends DecoratedElement {
     private static final Color THUMB_FILL = new Color(0.45f, 0.45f, 0.45f, 1f);
     private static final Color THUMB_OUTLINE = new Color(1f, 1f, 1f, 1f);
 
-    private final DecoratedScrollableList list;
+    private final DecoratedScrollableList<?> list;
 
     public DecoratedScrollbar(float designCenterX, float designCenterY,
-                              float designW, float designH, DecoratedScrollableList list) {
+                              float designW, float designH, DecoratedScrollableList<?> list) {
         super(DesignUi.nx(designCenterX), DesignUi.ny(designCenterY),
                 DesignUi.nw(designW), DesignUi.nh(designH));
         this.list = list;

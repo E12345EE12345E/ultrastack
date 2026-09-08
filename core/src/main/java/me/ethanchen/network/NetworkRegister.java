@@ -16,6 +16,7 @@ import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.dto.NetFallingColumn;
 import me.ethanchen.network.dto.NetPiece;
 import me.ethanchen.network.dto.NetQueue;
+import me.ethanchen.network.dto.LobbyPlayerInfo;
 import me.ethanchen.network.dto.RoomInfo;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.*;
@@ -34,7 +35,7 @@ import java.util.ArrayList;
 
 public class NetworkRegister {
     // RULES FOR UPDATING: bump this value when modifying the protocol. This is used to ensure that the client and server are using the same protocol version.
-    public static final byte PROTOCOL_VERSION = 33;
+    public static final byte PROTOCOL_VERSION = 34;
 
     public static void registerClasses(Kryo kryo) {
         kryo.register(NetworkPacket.class);
@@ -116,6 +117,8 @@ public class NetworkRegister {
         kryo.register(HostChangedBroadcast.class);
         kryo.register(RoomInfo.class);
         kryo.register(RoomInfo[].class);
+        kryo.register(LobbyPlayerInfo.class);
+        kryo.register(LobbyPlayerInfo[].class);
         // Character and leveling system (implementation.md)
         kryo.register(ArrayList.class);
         kryo.register(ArtifactEffectType.class);

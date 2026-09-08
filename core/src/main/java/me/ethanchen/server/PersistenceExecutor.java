@@ -6,7 +6,8 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Single-threaded executor for blocking persistence (SQLite result rows, XP, profile
- * load/save) so those calls never stall a room-scheduler worker.
+ * load/save, password hashing) so those calls never stall the server-core loop or a
+ * room-scheduler worker.
  */
 public final class PersistenceExecutor {
     private final ExecutorService exec;

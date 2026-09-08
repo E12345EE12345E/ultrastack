@@ -10,4 +10,6 @@ public final class NetConfig {
     public static final int CONNECT_TIMEOUT_MS = 5000;
     /** Short timeout for the automatic default-server connect attempt. */
     public static final int AUTO_CONNECT_TIMEOUT_MS = 500;
+    /** How long the login/register UI waits for an AuthResponse before showing an error. */
+    public static final int AUTH_TIMEOUT_MS = 10_000;
 }

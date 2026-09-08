@@ -3,6 +3,7 @@ package me.ethanchen.testclient;
 import java.util.Arrays;
 
 import me.ethanchen.game.progression.PlayerProfile;
+import me.ethanchen.network.dto.LobbyPlayerInfo;
 import me.ethanchen.network.dto.RoomInfo;
 import me.ethanchen.network.packets.NetworkPacket;
 import me.ethanchen.network.packets.c2s.CreateRoomRequest;
@@ -134,8 +135,7 @@ final class PacketSummarizer {
         }
         if (packet instanceof LobbyPlayerListBroadcast) {
             LobbyPlayerListBroadcast p = (LobbyPlayerListBroadcast) packet;
-            return name + " playerNames=" + Arrays.toString(p.playerNames)
-                    + " spectatorNames=" + Arrays.toString(p.spectatorNames);
+            return name + " players=" + lobbyPlayersSummary(p.players);
         }
         if (packet instanceof LobbySettingsBroadcast) {
             LobbySettingsBroadcast p = (LobbySettingsBroadcast) packet;
@@ -228,6 +228,26 @@ final class PacketSummarizer {
                 + " inventorySize=" + inv
                 + " equipped=" + Arrays.toString(profile.equippedArtifactIds)
                 + " pveUnlockedLevels=" + profile.pveUnlockedLevels;
+    }
+
+    private static String lobbyPlayersSummary(LobbyPlayerInfo[] players) {
+        if (players == null) return "null";
+        StringBuilder sb = new StringBuilder("[").append(players.length).append("] ");
+        for (int i = 0; i < players.length; i++) {
+            if (i > 0) sb.append(", ");
+            LobbyPlayerInfo p = players[i];
+            if (p == null) {
+                sb.append("null");
+                continue;
+            }
+            sb.append(p.name);
+            if (p.spectating) sb.append("(spec)");
+            if (p.accountUuid != null && !p.accountUuid.isEmpty()) {
+                sb.append(" uuid=").append(p.accountUuid);
+            }
+            sb.append(" char=").append(p.characterId);
+        }
+        return sb.toString();
     }
 
     private static String roomListSummary(RoomListBroadcast p) {

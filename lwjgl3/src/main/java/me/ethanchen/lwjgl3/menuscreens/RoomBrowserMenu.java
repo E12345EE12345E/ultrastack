@@ -45,7 +45,7 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
     private static final float ICON_BTN = 96f;
 
     private int tickCount;
-    private final DecoratedScrollableList roomList;
+    private final DecoratedScrollableList<RoomInfo> roomList;
     private final DecoratedTextBox joinIdBox;
     private final DecoratedText statusText;
     private final Widget settingsWidget;
@@ -66,7 +66,7 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
 
         DecoratedText title = new DecoratedText(960f, 1000f, "Multiplayer", 3.4f);
 
-        roomList = new DecoratedScrollableList(LIST_CX, LIST_TOP_SLOT_Y, SLOT_W, SLOT_H, SLOT_COUNT, SLOT_GAP)
+        roomList = DecoratedScrollableList.rooms(LIST_CX, LIST_TOP_SLOT_Y, SLOT_W, SLOT_H, SLOT_COUNT, SLOT_GAP)
                 .onSelect(this::joinRoom);
 
         float listH = SLOT_COUNT * SLOT_H + (SLOT_COUNT - 1) * SLOT_GAP;

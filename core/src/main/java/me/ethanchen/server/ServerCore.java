@@ -97,8 +97,13 @@ public class ServerCore implements PacketSender, Runnable {
         if (authProvider == null) {
             // ---- LAN mode: JoinRequest ----
             d.on(JoinRequest.class, w -> handleLanJoin(w, sessionFor(w)));
+            // Account-mode clients that land here used to hang forever: dispatch dropped
+            // Login/Register with no reply. Always reject with an AuthResponse.
+            d.on(LoginRequest.class, this::handleLanAuthReject);
+            d.on(RegisterRequest.class, this::handleLanAuthReject);
         } else {
             // ---- Account mode: auth + room packets ----
+            d.on(JoinRequest.class, this::handleAccountJoinReject);
             d.on(LoginRequest.class, w -> handleLogin(w, sessionFor(w)));
             d.on(RegisterRequest.class, w -> handleRegister(w, sessionFor(w)));
             d.on(RoomListRequest.class, w -> handleRoomListRequest(w, sessionFor(w)));
@@ -191,7 +196,15 @@ public class ServerCore implements PacketSender, Runnable {
     private void drainInbound() {
         ServerPacketWrapper w;
         while ((w = inbound.poll()) != null) {
-            dispatch(w);
+            try {
+                dispatch(w);
+            } catch (Exception e) {
+                String type = w.packet != null ? w.packet.getClass().getSimpleName() : "null";
+                System.err.println("[ServerCore] Uncaught exception dispatching " + type
+                        + " from connId=" + w.connectionID + ": " + e);
+                e.printStackTrace(System.err);
+                replyAuthFailure(w.connectionID, w.packet, "server error");
+            }
         }
     }
 
@@ -201,7 +214,11 @@ public class ServerCore implements PacketSender, Runnable {
 
     private void dispatch(ServerPacketWrapper w) {
         if (sessionFor(w) == null) return; // shouldn't happen, but guard
-        dispatcher.dispatch(w);
+        if (!dispatcher.dispatch(w)) {
+            String type = w.packet != null ? w.packet.getClass().getSimpleName() : "null";
+            System.err.println("[ServerCore] Unhandled packet " + type
+                    + " from connId=" + w.connectionID);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -356,6 +373,10 @@ public class ServerCore implements PacketSender, Runnable {
             profileStore.saveProfile(session.accountUuid, profile);
         }
         sendProfileSync(w.connectionID, session);
+        if (session.currentRoomId != null) {
+            GameRoom room = rooms.get(session.currentRoomId);
+            if (room != null) room.refreshPlayerList();
+        }
     }
 
     private void handleFusionRequest(ServerPacketWrapper w, Session session) {
@@ -436,68 +457,136 @@ public class ServerCore implements PacketSender, Runnable {
         return null;
     }
 
-    private void handleLogin(ServerPacketWrapper w, Session session) {
-        LoginRequest req = (LoginRequest) w.packet;
-        AuthResponse res = new AuthResponse();
+    private void handleLanAuthReject(ServerPacketWrapper w) {
+        String type = w.packet != null ? w.packet.getClass().getSimpleName() : "packet";
+        System.out.println("[ServerCore] Rejected " + type + " on LAN server from connId="
+                + w.connectionID);
+        sendAuthResponse(w.connectionID, false, "this is a LAN server", null);
+    }
 
-        String versionError = protocolVersionMismatchReason(req.protocolVersion);
-        if (versionError != null) {
-            res.success = false;
-            res.reason = versionError;
-            sendTCP(w.connectionID, res);
+    private void handleAccountJoinReject(ServerPacketWrapper w) {
+        System.out.println("[ServerCore] Rejected JoinRequest on account server from connId="
+                + w.connectionID);
+        JoinResponse res = new JoinResponse();
+        res.accepted = false;
+        res.playerId = -1;
+        res.reason = "this is not a LAN server";
+        sendTCP(w.connectionID, res);
+    }
+
+    private void handleLogin(ServerPacketWrapper w, Session session) {
+        if (session == null) {
+            sendAuthResponse(w.connectionID, false, "server error", null);
             return;
         }
-
-        String error = authProvider.login(req.username, req.passcode, session);
-        if (error == null) {
-            res.success = true;
-            res.reason = "";
-            res.accountUuid = session.accountUuid;
-            session.username = req.username;
-            session.authenticated = true;
-        } else {
-            res.success = false;
-            res.reason = error;
+        LoginRequest req = (LoginRequest) w.packet;
+        String versionError = protocolVersionMismatchReason(req.protocolVersion);
+        if (versionError != null) {
+            sendAuthResponse(w.connectionID, false, versionError, null);
+            return;
         }
-        sendTCP(w.connectionID, res);
-        if (res.success) {
-            loadAndSyncProfile(w.connectionID, session);
-        }
+        // Copy fields: KryoNet may reuse the packet object before the persistence task runs.
+        int connectionId = w.connectionID;
+        String username = req.username;
+        String passcode = req.passcode;
+        persistence.submit(() -> completeLogin(connectionId, session, username, passcode));
     }
 
     private void handleRegister(ServerPacketWrapper w, Session session) {
-        RegisterRequest req = (RegisterRequest) w.packet;
-        AuthResponse res = new AuthResponse();
-
-        String versionError = protocolVersionMismatchReason(req.protocolVersion);
-        if (versionError != null) {
-            res.success = false;
-            res.reason = versionError;
-            sendTCP(w.connectionID, res);
+        if (session == null) {
+            sendAuthResponse(w.connectionID, false, "server error", null);
             return;
         }
+        RegisterRequest req = (RegisterRequest) w.packet;
+        String versionError = protocolVersionMismatchReason(req.protocolVersion);
+        if (versionError != null) {
+            sendAuthResponse(w.connectionID, false, versionError, null);
+            return;
+        }
+        int connectionId = w.connectionID;
+        String username = req.username;
+        String passcode = req.passcode;
+        persistence.submit(() -> completeRegister(connectionId, session, username, passcode));
+    }
 
-        String error = authProvider.register(req.username, req.passcode);
-        if (error == null) {
-            // Registration succeeded — also authenticate the session so the player
-            // can immediately use room operations without a separate login step.
-            String loginError = authProvider.login(req.username, req.passcode, session);
-            if (loginError == null) {
+    private void completeLogin(int connectionId, Session session, String username, String passcode) {
+        if (!sessionStillCurrent(connectionId, session)) return;
+        AuthResponse res = new AuthResponse();
+        try {
+            String error = authProvider.login(username, passcode, session);
+            if (error == null) {
                 res.success = true;
                 res.reason = "";
                 res.accountUuid = session.accountUuid;
+                session.username = username;
+                session.authenticated = true;
             } else {
-                // Account was created but immediate login failed (shouldn't happen).
                 res.success = false;
-                res.reason = "registered but login failed: " + loginError;
+                res.reason = error;
             }
-        } else {
+        } catch (Exception e) {
+            System.err.println("[ServerCore] Login failed for connId=" + connectionId + ": " + e);
+            e.printStackTrace(System.err);
             res.success = false;
-            res.reason = error;
+            res.reason = "authentication failed";
         }
-        sendTCP(w.connectionID, res);
+        finishAuth(connectionId, session, res);
+    }
+
+    private void completeRegister(int connectionId, Session session, String username, String passcode) {
+        if (!sessionStillCurrent(connectionId, session)) return;
+        AuthResponse res = new AuthResponse();
+        try {
+            String error = authProvider.register(username, passcode);
+            if (error == null) {
+                // Registration succeeded — also authenticate the session so the player
+                // can immediately use room operations without a separate login step.
+                String loginError = authProvider.login(username, passcode, session);
+                if (loginError == null) {
+                    res.success = true;
+                    res.reason = "";
+                    res.accountUuid = session.accountUuid;
+                } else {
+                    res.success = false;
+                    res.reason = "registered but login failed: " + loginError;
+                }
+            } else {
+                res.success = false;
+                res.reason = error;
+            }
+        } catch (Exception e) {
+            System.err.println("[ServerCore] Register failed for connId=" + connectionId + ": " + e);
+            e.printStackTrace(System.err);
+            res.success = false;
+            res.reason = "registration failed";
+        }
+        finishAuth(connectionId, session, res);
+    }
+
+    private void finishAuth(int connectionId, Session session, AuthResponse res) {
+        if (!sessionStillCurrent(connectionId, session)) return;
+        sendTCP(connectionId, res);
         if (res.success) {
-            loadAndSyncProfile(w.connectionID, session);
+            loadAndSyncProfile(connectionId, session);
+        }
+    }
+
+    /** True if {@code session} is still the live record for this KryoNet connection id. */
+    private boolean sessionStillCurrent(int connectionId, Session session) {
+        return session != null && sessions.get(connectionId) == session;
+    }
+
+    private void sendAuthResponse(int connectionId, boolean success, String reason, String accountUuid) {
+        AuthResponse res = new AuthResponse();
+        res.success = success;
+        res.reason = reason != null ? reason : "";
+        res.accountUuid = accountUuid;
+        sendTCP(connectionId, res);
+    }
+
+    private void replyAuthFailure(int connectionId, NetworkPacket packet, String reason) {
+        if (packet instanceof LoginRequest || packet instanceof RegisterRequest) {
+            sendAuthResponse(connectionId, false, reason, null);
         }
     }
 

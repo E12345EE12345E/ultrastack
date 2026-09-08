@@ -1,39 +1,66 @@
 package me.ethanchen.lwjgl3.menuscreens;
 
-import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import me.ethanchen.game.GameMode;
+import me.ethanchen.game.progression.CharacterDef;
+import me.ethanchen.game.progression.CharacterRegistry;
 import me.ethanchen.lwjgl3.ClientApp;
-import me.ethanchen.lwjgl3.menuscreens.ui.*;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedChat;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedListButton;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedScrollableList;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
+import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
+import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
+import me.ethanchen.lwjgl3.render.CharacterAssets;
+import me.ethanchen.lwjgl3.render.MenuAssets;
+import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
+import me.ethanchen.network.dto.LobbyPlayerInfo;
 import me.ethanchen.network.packets.c2s.LobbySettingsRequest;
 import me.ethanchen.network.packets.c2s.SpectateRequest;
 import me.ethanchen.network.packets.c2s.StartGameRequest;
 import me.ethanchen.network.packets.c2s.TextMessageRequest;
 import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
 import me.ethanchen.network.packets.s2c.LobbyPlayerListBroadcast;
+import me.ethanchen.network.packets.s2c.ProfileViewResponse;
 import me.ethanchen.network.packets.s2c.RoomClosedBroadcast;
 import me.ethanchen.network.packets.s2c.StartGameBroadcast;
 import me.ethanchen.network.packets.s2c.TextMessageBroadcast;
 import me.ethanchen.util.TextSanitizer;
 
-public class MultiplayerLobby extends MenuScreen {
-    private static final int MAX_CHAT_LINES = 10;
+public class MultiplayerLobby extends DecoratedMenuScreen {
+    private static final float PLAYER_SLOT_W = 360f;
+    private static final float PLAYER_SLOT_H = 56f;
+    private static final int PLAYER_SLOT_COUNT = 8;
+    private static final float PLAYER_SLOT_GAP = 8f;
 
-    private TextBoxOutput chatoutput;
-    private TextInput chat;
-    private TextInput playerNameList;
-    private ArrayDeque<String> chatLines;
+    private final boolean gameInProgress;
     private boolean isHost;
-    private boolean hostButtonsAdded;
-    private final LocalPlayerSidebar sidebar;
-    private final CharacterSidebar characterSidebar;
+    private GameMode lastBoundMode;
+
+    private final DecoratedChat chat;
+    private final DecoratedTextBox chatInput;
+    private final DecoratedScrollableList<LobbyPlayerInfo> playerList;
+    private final DecoratedButton startBtn;
+    private final DecoratedButton scoreBtn;
+    private final DecoratedButton puzzleBtn;
+    private final DecoratedButton characterBtn;
+    private final Widget roomWidget;
+    private final ControllerConfigHub controllerHub;
+    private final AuroraBackgroundRenderer aurora;
+    private PlayerProfileHub profileHub;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(TextMessageBroadcast.class, w -> handleTextMessage((TextMessageBroadcast) w.packet))
             .on(StartGameBroadcast.class, w -> app.switchMenu(new GameScreen(app, (StartGameBroadcast) w.packet, app.isRoomHost())))
             .on(LobbyPlayerListBroadcast.class, w -> handlePlayerList((LobbyPlayerListBroadcast) w.packet))
+            .on(ProfileViewResponse.class, w -> handleProfileView((ProfileViewResponse) w.packet))
             .on(RoomClosedBroadcast.class, w -> handleRoomClosed())
             .on(HostChangedBroadcast.class, w -> handleHostChanged((HostChangedBroadcast) w.packet));
 
@@ -45,65 +72,187 @@ public class MultiplayerLobby extends MenuScreen {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
 
         this.isHost = isHost;
+        this.gameInProgress = gameInProgress;
         app.setRoomHost(isHost);
-        chatLines = new ArrayDeque<String>();
 
-        elements.add(new UIText(0.5, 0.8, "Lobby", 4));
+        DecoratedText title = new DecoratedText(960f, 1000f, "Room Lobby", 3.4f);
+        DecoratedButton backBtn = new DecoratedButton(200f, 1000f, 200f, 68f, "Back", this::leaveRoom);
+        backBtn.fontSize = 1.4f;
 
-        // Leave button — top-left corner
-        elements.add(new UIButton(0.08, 0.93, 0.12, 0.07, "Leave", this::leaveRoom));
-        if (gameInProgress) {
-            elements.add(new UIButton(0.88, 0.93, 0.16, 0.07, "Spectate", this::requestSpectate));
+        DecoratedButton controllerBtn = new DecoratedButton(220f, 740f, 320f, 80f, "Controller",
+                this::openControllerWidget);
+        controllerBtn.fontSize = 1.4f;
+        controllerBtn.info("Keyboard and controller input.");
+
+        DecoratedButton loadoutBtn = new DecoratedButton(220f, 640f, 320f, 80f, "Character Loadout",
+                this::openCharacterLoadout);
+        loadoutBtn.fontSize = 1.25f;
+        loadoutBtn.info("Choose a character and artifacts.");
+
+        chat = new DecoratedChat(960f, 620f, 720f, 500f);
+        for (ClientApp.LobbyChatLine line : app.copyLobbyChat()) {
+            chat.append(line.sender, line.message);
         }
+        chatInput = new DecoratedTextBox(960f, 280f, 720f, 84f);
+        chatInput.sanitize(DecoratedTextBox.SANITIZE_CHAT);
+        chatInput.onEnter(this::sendChat);
 
-        chatoutput = new TextBoxOutput();
-        chat = new TextInput();
-        playerNameList = new TextInput();
-        elements.add(new UIText(0.2, 0.35, chat, 2, UIText.TextAlign.BOTTOM_LEFT));
-        elements.add(new UIText(0.68, 0.6, playerNameList, 1, UIText.TextAlign.TOP_LEFT));
-        UITextBox chatInput = new UITextBox(0.5, 0.25, 0.6, 0.08, chatoutput, null, null);
-        chatInput.runOnEnter = () -> {
-            TextMessageRequest t = new TextMessageRequest();
-            t.message = TextSanitizer.sanitizeChat(chatoutput.get());
-            if (app.sendTCP(t)) {
-                chatInput.text = "";
-                chatoutput.set("");
-            }
-        };
-        chatInput.sanitize = 1;
-        elements.add(chatInput);
+        playerList = new DecoratedScrollableList<>(1600f, 880f, PLAYER_SLOT_W, PLAYER_SLOT_H,
+                PLAYER_SLOT_COUNT, PLAYER_SLOT_GAP, this::bindPlayer)
+                .onSelect(this::openPlayerProfile);
+
+        DecoratedButton roomBtn = new DecoratedButton(260f, 170f, 400f, 80f, "Room Settings",
+                this::openRoomWidget);
+        roomBtn.icon = MenuAssets.settingsIcon();
+        roomBtn.fontSize = 1.25f;
+        roomBtn.info("Room gamemode.");
+
+        startBtn = new DecoratedButton(960f, 170f, 360f, 80f, "Start Game", this::startGame);
+        startBtn.fill(0.95f, 0.32f, 0.68f);
+        startBtn.fontSize = 1.45f;
+        applyHostVisibility();
+
+        addDecorated(title);
+        addDecorated(backBtn);
+        if (gameInProgress) {
+            DecoratedButton spectateBtn = new DecoratedButton(420f, 1000f, 200f, 68f, "Spectate",
+                    this::requestSpectate);
+            spectateBtn.fontSize = 1.3f;
+            addDecorated(spectateBtn);
+        }
+        addDecorated(controllerBtn);
+        addDecorated(loadoutBtn);
+        addDecorated(chat);
+        addDecorated(chatInput);
+        addDecorated(playerList);
+        addDecorated(roomBtn);
+        addDecorated(startBtn);
+
+        roomWidget = new Widget(960f, 520f, 580f, 560f);
+        roomWidget.add(new DecoratedText(0f, 0f, "Room", 2.2f), 0f, 220f);
+        scoreBtn = new DecoratedButton(0f, 0f, 440f, 78f, "SCORE",
+                () -> selectRoomMode(GameMode.MULTIPLAYER_SCORE));
+        puzzleBtn = new DecoratedButton(0f, 0f, 440f, 78f, "PUZZLE",
+                () -> selectRoomMode(GameMode.MULTIPLAYER_PUZZLE));
+        characterBtn = new DecoratedButton(0f, 0f, 440f, 78f, "CHARACTER",
+                () -> selectRoomMode(GameMode.CHARACTER_SCORE));
+        scoreBtn.fontSize = 1.55f;
+        puzzleBtn.fontSize = 1.55f;
+        characterBtn.fontSize = 1.55f;
+        DecoratedButton roomBack = new DecoratedButton(0f, 0f, 300f, 68f, "Back", this::closeTopWidget);
+        roomBack.fontSize = 1.4f;
+        roomWidget.add(scoreBtn, 0f, 110f);
+        roomWidget.add(puzzleBtn, 0f, 10f);
+        roomWidget.add(characterBtn, 0f, -90f);
+        roomWidget.add(roomBack, 0f, -210f);
+        refreshRoomModeButtons();
+
+        controllerHub = ControllerConfigHub.create(app, this, app::sendLocalPlayerCount);
+        aurora = new AuroraBackgroundRenderer();
+        lastBoundMode = app.getLobbySettings().gamemode;
+
         if (isHost) {
-            addHostButtons();
-            // Sync host's local pending settings into the room so peers (and late joiners) match.
             sendPendingLobbySettings();
         }
-
-        sidebar = new LocalPlayerSidebar(app, elements, app::sendLocalPlayerCount);
-        sidebar.setEnabled(app.getLobbySettings().gamemode != GameMode.PVE);
         app.sendLocalPlayerCount();
-
-        characterSidebar = new CharacterSidebar(app, elements, this,
-                () -> app.getLobbySettings().gamemode.supportsCharacters());
     }
 
-    private void addHostButtons() {
-        if (hostButtonsAdded) return;
-        hostButtonsAdded = true;
-        elements.add(new UIButton(0.18, 0.125, 0.28, 0.1, "Settings",
-                () -> app.switchMenu(new LobbySettingsScreen(app, this))));
+    private void applyHostVisibility() {
+        startBtn.visible = isHost;
+        startBtn.focusable = isHost;
+    }
 
-        elements.add(new UIButton(0.5, 0.125, 0.3, 0.1, "Start Game", () -> {
-            StartGameRequest p = new StartGameRequest();
-            p.gamemode = app.getLobbySettings().gamemode;
-            app.sendTCP(p);
-        }));
+    private void openControllerWidget() {
+        if (hasOpenWidget()) return;
+        openWidget(controllerHub.widget);
+    }
+
+    private void openCharacterLoadout() {
+        app.switchMenu(new CharacterScreen(app, new MultiplayerLobby(app, isHost, gameInProgress),
+                () -> app.getLobbySettings().gamemode.supportsCharacters()));
+    }
+
+    private void openRoomWidget() {
+        if (hasOpenWidget()) return;
+        refreshRoomModeButtons();
+        openWidget(roomWidget);
+    }
+
+    private void selectRoomMode(GameMode mode) {
+        if (!isHost) return;
+        app.getLobbySettings().gamemode = mode;
+        app.getLobbySettings().pveLevelId = 0;
+        app.getLobbySettings().pveDifficulty = 0;
+        sendPendingLobbySettings();
+        refreshRoomModeButtons();
+        playerList.refresh();
+    }
+
+    private void refreshRoomModeButtons() {
+        GameMode mode = app.getLobbySettings().gamemode;
+        scoreBtn.selected = mode == GameMode.MULTIPLAYER_SCORE;
+        puzzleBtn.selected = mode == GameMode.MULTIPLAYER_PUZZLE;
+        characterBtn.selected = mode == GameMode.CHARACTER_SCORE;
+        scoreBtn.interactable = isHost;
+        puzzleBtn.interactable = isHost;
+        characterBtn.interactable = isHost;
+    }
+
+    private void startGame() {
+        if (!isHost) return;
+        StartGameRequest p = new StartGameRequest();
+        p.gamemode = app.getLobbySettings().gamemode;
+        app.sendTCP(p);
+    }
+
+    private void sendChat() {
+        TextMessageRequest t = new TextMessageRequest();
+        t.message = TextSanitizer.sanitizeChat(chatInput.get());
+        if (t.message == null || t.message.isEmpty()) return;
+        if (app.sendTCP(t)) {
+            chatInput.set("");
+        }
+    }
+
+    private void bindPlayer(DecoratedListButton slot, LobbyPlayerInfo player) {
+        if (player == null) {
+            slot.text = "";
+            slot.icon = null;
+            slot.fill(1f, 1f, 1f);
+            return;
+        }
+        slot.text = player.name != null ? player.name : "";
+        slot.icon = null;
+        if (player.spectating) {
+            slot.fill(0.12f, 0.12f, 0.14f, 0.50f);
+        } else {
+            slot.fill(1f, 1f, 1f);
+            boolean hasAccount = player.accountUuid != null && !player.accountUuid.isEmpty();
+            if (hasAccount && app.getLobbySettings().gamemode.supportsCharacters()) {
+                CharacterDef def = CharacterRegistry.byId(player.characterId);
+                if (def != null) {
+                    slot.icon = CharacterAssets.portraitFor(def.id);
+                }
+            }
+        }
+    }
+
+    private void openPlayerProfile(LobbyPlayerInfo player) {
+        if (hasOpenWidget()) return;
+        if (player == null || player.accountUuid == null || player.accountUuid.isEmpty()) return;
+        profileHub = PlayerProfileHub.create(app, this, player.accountUuid);
+        openWidget(profileHub.widget);
+    }
+
+    private void handleProfileView(ProfileViewResponse res) {
+        if (profileHub != null) profileHub.apply(res);
     }
 
     private void handleHostChanged(HostChangedBroadcast p) {
         isHost = p.youAreHost;
         app.setRoomHost(p.youAreHost);
+        applyHostVisibility();
         if (p.youAreHost) {
-            addHostButtons();
             sendPendingLobbySettings();
         }
     }
@@ -122,6 +271,7 @@ public class MultiplayerLobby extends MenuScreen {
 
     private void leaveRoom() {
         app.setRoomHost(false);
+        app.clearLobbyChat();
         app.sendLeaveRoomRequest();
         if (app.isLanMode()) {
             app.stopLanServer();
@@ -138,10 +288,26 @@ public class MultiplayerLobby extends MenuScreen {
     }
 
     @Override
-    public void update() {
-        sidebar.setEnabled(app.getLobbySettings().gamemode != GameMode.PVE);
-        sidebar.tick();
-        characterSidebar.tick();
+    protected void updateScreen(long menuElapsedMs, long appElapsedMs) {
+        controllerHub.setEnabled(app.getLobbySettings().gamemode != GameMode.PVE);
+        controllerHub.tick();
+        refreshRoomModeButtons();
+        GameMode mode = app.getLobbySettings().gamemode;
+        if (mode != lastBoundMode) {
+            lastBoundMode = mode;
+            playerList.refresh();
+        }
+    }
+
+    @Override
+    protected void renderBackground(DecorContext ctx) {
+        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
+    }
+
+    @Override
+    public void dispose() {
+        aurora.dispose();
+        super.dispose();
     }
 
     @Override
@@ -150,31 +316,20 @@ public class MultiplayerLobby extends MenuScreen {
     }
 
     private void handleTextMessage(TextMessageBroadcast p) {
-        chatLines.add("[" + p.sender + "] " + p.message + " ");
-        while (chatLines.size() > MAX_CHAT_LINES) {
-            chatLines.removeFirst();
-        }
-        chat.set(String.join("\n", chatLines));
+        chat.append(p.sender, p.message);
     }
 
     private void handlePlayerList(LobbyPlayerListBroadcast p) {
-        StringBuilder sb = new StringBuilder();
-        if (p.playerNames != null) {
-            for (int i = 0; i < p.playerNames.length; i++) {
-                sb.append("p").append(i + 1).append(": ").append(p.playerNames[i]).append("\n");
-            }
+        if (p.players == null || p.players.length == 0) {
+            playerList.setItems(List.of());
+            return;
         }
-        if (p.spectatorNames != null) {
-            for (String name : p.spectatorNames) {
-                sb.append("(Spectator) ").append(name).append("\n");
-            }
-        }
-        playerNameList.set(sb.toString());
+        playerList.setItems(new ArrayList<>(Arrays.asList(p.players)));
     }
 
     private void handleRoomClosed() {
         app.setRoomHost(false);
-        // Host left the lobby — return to the room browser (stay connected online).
+        app.clearLobbyChat();
         if (app.isLanMode()) {
             app.disconnect();
             app.switchMenu(new LanMenu(app));

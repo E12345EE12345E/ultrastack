@@ -13,6 +13,7 @@ import me.ethanchen.game.pve.PveSessionState;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.ServerPacketWrapper;
 import me.ethanchen.network.dto.HardDropEffect;
+import me.ethanchen.network.dto.LobbyPlayerInfo;
 import me.ethanchen.network.dto.NetBoardFull;
 import me.ethanchen.network.dto.NetBoardLight;
 import me.ethanchen.network.packets.NetworkPacket;
@@ -1000,6 +1001,10 @@ public class GameRoom implements Runnable, GameRoomContext {
     // Player list broadcasts
     // -------------------------------------------------------------------------
 
+    public synchronized void refreshPlayerList() {
+        broadcastPlayerList();
+    }
+
     private synchronized void broadcastPlayerList() {
         LobbyPlayerListBroadcast b = buildPlayerListBroadcast();
         broadcastMembersTCP(b);
@@ -1012,15 +1017,47 @@ public class GameRoom implements Runnable, GameRoomContext {
 
     private LobbyPlayerListBroadcast buildPlayerListBroadcast() {
         LobbyPlayerListBroadcast b = new LobbyPlayerListBroadcast();
-        b.playerNames = buildActivePlayerNames();
-        List<String> specs = new ArrayList<>();
+        int playerCount = getActiveSeatCount();
+        LobbyPlayerInfo[] bySlot = new LobbyPlayerInfo[playerCount];
+        List<LobbyPlayerInfo> specs = new ArrayList<>();
         for (RoomMember m : members) {
             for (Seat s : m.seats) {
-                if (s.slot < 0) specs.add(s.displayName);
+                if (s.slot >= 0 && s.slot < playerCount) {
+                    bySlot[s.slot] = infoFor(s, false);
+                } else if (s.slot < 0) {
+                    specs.add(infoFor(s, true));
+                }
             }
         }
-        b.spectatorNames = specs.toArray(new String[0]);
+        List<LobbyPlayerInfo> list = new ArrayList<>(playerCount + specs.size());
+        for (int i = 0; i < playerCount; i++) {
+            list.add(bySlot[i] != null ? bySlot[i] : emptySeat());
+        }
+        list.addAll(specs);
+        b.players = list.toArray(new LobbyPlayerInfo[0]);
         return b;
+    }
+
+    private LobbyPlayerInfo infoFor(Seat s, boolean spectating) {
+        LobbyPlayerInfo info = new LobbyPlayerInfo();
+        info.name = s.displayName != null ? s.displayName : "";
+        info.accountUuid = s.accountUuid != null ? s.accountUuid : "";
+        info.characterId = characterIdFor(s.accountUuid);
+        info.spectating = spectating;
+        return info;
+    }
+
+    private static LobbyPlayerInfo emptySeat() {
+        LobbyPlayerInfo info = new LobbyPlayerInfo();
+        info.name = "";
+        info.accountUuid = "";
+        return info;
+    }
+
+    private int characterIdFor(String accountUuid) {
+        if (accountUuid == null || accountUuid.isEmpty() || profileStore == null) return 0;
+        PlayerProfile profile = profileStore.loadProfile(accountUuid);
+        return profile != null ? profile.selectedCharacterId : 0;
     }
 
     // -------------------------------------------------------------------------

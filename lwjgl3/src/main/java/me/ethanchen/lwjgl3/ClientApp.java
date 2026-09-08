@@ -4,6 +4,10 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -62,6 +66,7 @@ import me.ethanchen.network.packets.s2c.HostChangedBroadcast;
 import me.ethanchen.network.packets.s2c.LobbySettingsBroadcast;
 import me.ethanchen.network.packets.s2c.ProfileSyncBroadcast;
 import me.ethanchen.network.packets.s2c.ArtifactGrantBroadcast;
+import me.ethanchen.network.packets.s2c.TextMessageBroadcast;
 import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.server.ServerCore;
@@ -135,6 +140,9 @@ public class ClientApp extends ApplicationAdapter {
     private volatile String accountUuid;
     /** Most recent victory-granted artifact, consumed by {@link me.ethanchen.lwjgl3.menuscreens.EndGameScreen}. */
     private volatile Artifact pendingVictoryArtifact;
+    /** Room-scoped chat; survives Character Loadout (which rebuilds the lobby). Cleared on leave. */
+    private static final int MAX_LOBBY_CHAT_LINES = 40;
+    private final ArrayDeque<LobbyChatLine> lobbyChat = new ArrayDeque<>();
 
     /** Wall-clock start of this process; used by decorated menus for intro timelines. */
     private long appStartMs;
@@ -188,6 +196,10 @@ public class ClientApp extends ApplicationAdapter {
                 }
                 roomHost = false;
                 clearSessionAccount();
+                // A dropped connection must not leave an embedded LAN server bound to the
+                // default port — that server ignores Login/Register, which looks like a hang.
+                stopLanServer();
+                setLanMode(false);
             }
 
             if (wrapper.packet instanceof AuthResponse) {
@@ -220,6 +232,11 @@ public class ClientApp extends ApplicationAdapter {
                 profile = p.profile;
                 profileReadOnly = p.readOnly;
                 if (profile != null) profile.sortInventory();
+            }
+
+            if (wrapper.packet instanceof TextMessageBroadcast) {
+                TextMessageBroadcast chat = (TextMessageBroadcast) wrapper.packet;
+                recordLobbyChat(chat.sender, chat.message);
             }
 
             if (wrapper.packet instanceof ArtifactGrantBroadcast) {
@@ -761,6 +778,32 @@ public class ClientApp extends ApplicationAdapter {
         accountUuid = null;
         profile = null;
         profileReadOnly = false;
+        clearLobbyChat();
+    }
+
+    public static final class LobbyChatLine {
+        public final String sender;
+        public final String message;
+
+        public LobbyChatLine(String sender, String message) {
+            this.sender = sender != null ? sender : "";
+            this.message = message != null ? message : "";
+        }
+    }
+
+    private void recordLobbyChat(String sender, String message) {
+        lobbyChat.addLast(new LobbyChatLine(sender, message));
+        while (lobbyChat.size() > MAX_LOBBY_CHAT_LINES) {
+            lobbyChat.removeFirst();
+        }
+    }
+
+    public List<LobbyChatLine> copyLobbyChat() {
+        return Collections.unmodifiableList(new ArrayList<>(lobbyChat));
+    }
+
+    public void clearLobbyChat() {
+        lobbyChat.clear();
     }
 
     /**
