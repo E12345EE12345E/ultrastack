@@ -24,6 +24,10 @@ final class ScoreFormulas {
     }
 
     static long baseScore(SpinType spinType, int lines, byte pieceType) {
+        if (lines > 4) {
+            return GameConstants.SCORE_QUAD
+                    + GameConstants.SCORE_ADDITIONAL_LINE * (lines - 4L);
+        }
         switch (spinType) {
             case T_SPIN:
                 switch (lines) {

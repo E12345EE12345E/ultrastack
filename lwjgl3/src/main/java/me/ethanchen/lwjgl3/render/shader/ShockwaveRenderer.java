@@ -28,6 +28,7 @@ public class ShockwaveRenderer implements ShaderRenderer {
     /** Speed multiplier; {@code 1} finishes a wave in {@link #LIFE_S}. */
     public static final float SPEED_NORMAL = 1f;
     public static final float SPEED_FAST = 2.25f;
+    public static final float SPEED_VERY_FAST = 4.5f;
     public static final float SPEED_LOW = 0.4f;
     /** Ring half-width in aspect-corrected UV (1 = screen height). */
     public static final float THICKNESS = 0.13f;

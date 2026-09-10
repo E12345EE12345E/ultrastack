@@ -44,6 +44,7 @@ public class CardDealerScreen extends DecoratedMenuScreen {
     private static final long DEAL_STAGGER_MS = 80L;
     private static final long STRIKE_DELAY_MS = 350L;
     private static final long BETWEEN_STRIKES_MS = 700L;
+    private static final long POST_STRIKE_MS = 350L;
     private static final long FLASH_MS = 200L;
     private static final long FLIP_BACK_MS = 75L;
     private static final long FLIP_MID_MS = 100L;
@@ -51,7 +52,7 @@ public class CardDealerScreen extends DecoratedMenuScreen {
     private static final long FLIP_STAGGER_MS = 500L;
 
     private enum Phase {
-        IDLE, FADE_UI, DEAL_IN, ROULETTE, STRIKE_DELAY, FLASH, BETWEEN_STRIKES, FLIP, RESULT
+        IDLE, FADE_UI, DEAL_IN, ROULETTE, STRIKE_DELAY, FLASH, BETWEEN_STRIKES, POST_STRIKE, FLIP, RESULT
     }
 
     private final CharacterScreen parent;
@@ -193,12 +194,16 @@ public class CardDealerScreen extends DecoratedMenuScreen {
                         phase = Phase.BETWEEN_STRIKES;
                         phaseStartMs = nowMs;
                     } else {
-                        enterFlip(nowMs);
+                        phase = Phase.POST_STRIKE;
+                        phaseStartMs = nowMs;
                     }
                 }
                 break;
             case BETWEEN_STRIKES:
                 if (elapsed >= BETWEEN_STRIKES_MS) enterFlash(nowMs);
+                break;
+            case POST_STRIKE:
+                if (elapsed >= POST_STRIKE_MS) enterFlip(nowMs);
                 break;
             case FLIP:
                 if (elapsed >= flipDurationMs()) {
@@ -367,7 +372,8 @@ public class CardDealerScreen extends DecoratedMenuScreen {
         if (phase == Phase.DEAL_IN) {
             drawDealingCards(ctx);
         } else if (phase == Phase.ROULETTE || phase == Phase.STRIKE_DELAY
-                || phase == Phase.FLASH || phase == Phase.BETWEEN_STRIKES) {
+                || phase == Phase.FLASH || phase == Phase.BETWEEN_STRIKES
+                || phase == Phase.POST_STRIKE) {
             drawSettledBacks(ctx);
             drawArrow(ctx, phase == Phase.ROULETTE ? arrowIndex : upgradeTarget);
             if (phase == Phase.FLASH) {

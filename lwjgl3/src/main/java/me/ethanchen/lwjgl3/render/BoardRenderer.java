@@ -155,7 +155,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f, true, null, 0f);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, null, 0f, true, null, 0f, 0f);
     }
 
     /**
@@ -164,7 +164,7 @@ public class BoardRenderer {
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows) {
-        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f, true, null, 0f);
+        drawBoard(board, originX, originY, tileSize, sprites, glowStrengths, shadows, 0f, true, null, 0f, 0f);
     }
 
     /**
@@ -176,22 +176,29 @@ public class BoardRenderer {
      *                                indices as non-local. When null and grayscaleAmt &gt; 0, all
      *                                pieces stay full colour (spectator / disabled).
      * @param otherPlayerGrayscaleAmt 0 = full color for other players; 1 = fully grayscale.
+     * @param boardGrayscaleAmt       0 = full color; 1 = grayscale for all board pieces.
      */
     public void drawBoard(Board board, float originX, float originY, float tileSize,
                           SpriteBatch sprites, float[] glowStrengths, Board.ShadowInfo[] shadows,
                           float blockedWhiteAmt, boolean drawActivePieces,
-                          boolean[] isLocalPlayer, float otherPlayerGrayscaleAmt) {
-        if (drawActivePieces) drawGlow(board, originX, originY, tileSize, glowStrengths);
+                          boolean[] isLocalPlayer, float otherPlayerGrayscaleAmt,
+                          float boardGrayscaleAmt) {
+        float grayscaleAmt = clamp01(boardGrayscaleAmt);
+        if (drawActivePieces) {
+            glowRenderer.draw(board, originX, originY, tileSize, glowStrengths,
+                    Gdx.graphics.getDeltaTime(), grayscaleAmt);
+        }
         sprites.begin();
-        drawLockedTiles(board, originX, originY, tileSize, sprites);
+        drawLockedTiles(board, originX, originY, tileSize, sprites, grayscaleAmt);
         sprites.end();
         clusterOutline.draw(board, originX, originY, tileSize, sprites.getProjectionMatrix());
         sprites.begin();
-        drawFallingColumns(board, originX, originY, tileSize, sprites);
+        drawFallingColumns(board, originX, originY, tileSize, sprites, grayscaleAmt);
         if (drawActivePieces) {
             drawShadowPieces(board, shadows, originX, originY, tileSize, sprites,
-                    isLocalPlayer, otherPlayerGrayscaleAmt);
-            drawActivePiecesWithBlocked(board, originX, originY, tileSize, sprites, blockedWhiteAmt);
+                    isLocalPlayer, otherPlayerGrayscaleAmt, grayscaleAmt);
+            drawActivePiecesWithBlocked(board, originX, originY, tileSize, sprites,
+                    blockedWhiteAmt, grayscaleAmt);
         }
         sprites.setColor(Color.WHITE);
         sprites.end();
@@ -229,6 +236,25 @@ public class BoardRenderer {
                 if (!allowed[y][x]) continue;
                 shapes.rect(originX + x * tileSize, originY + y * tileSize, tileSize, tileSize);
             }
+        }
+        shapes.end();
+    }
+
+    /** Draws 3-Mino's prospective fill cells as full-tile overlays or centered one-third squares. */
+    public void drawAbilityFillPreview(float originX, float originY, float tileSize,
+                                       ShapeRenderer shapes, int[][] cells,
+                                       Color color, float alpha, boolean centerSquare) {
+        if (cells == null || cells.length == 0 || color == null) return;
+        float size = centerSquare ? tileSize / 3f : tileSize;
+        float inset = (tileSize - size) * 0.5f;
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        shapes.setColor(color.r, color.g, color.b, clamp01(alpha));
+        for (int[] cell : cells) {
+            if (cell == null || cell.length < 2) continue;
+            shapes.rect(originX + cell[0] * tileSize + inset,
+                    originY + cell[1] * tileSize + inset, size, size);
         }
         shapes.end();
     }
@@ -510,7 +536,8 @@ public class BoardRenderer {
     private void drawShadowPieces(Board board, Board.ShadowInfo[] shadows,
                                   float originX, float originY, float tileSize,
                                   SpriteBatch sprites,
-                                  boolean[] isLocalPlayer, float otherPlayerGrayscaleAmt) {
+                                  boolean[] isLocalPlayer, float otherPlayerGrayscaleAmt,
+                                  float boardGrayscaleAmt) {
         if (shadows == null) return;
         float grayscaleAmt = Math.max(0f, Math.min(1f, otherPlayerGrayscaleAmt));
         for (int i = 0; i < shadows.length && i < board.getActivePieces().size(); i++) {
@@ -534,7 +561,8 @@ public class BoardRenderer {
                             FALL_TRIGGER_WHITE.b, alpha);
                 } else {
                     // When isLocalPlayer is null, treat as "no grayscale" (legacy / spectator).
-                    float colorAmt = otherPlayer ? 1f - grayscaleAmt : 1f;
+                    float colorAmt = (otherPlayer ? 1f - grayscaleAmt : 1f)
+                            * (1f - boardGrayscaleAmt);
                     Color c = PieceTints.blendGrayscale(piece.type, colorAmt, false);
                     baseColor = new Color(c.r, c.g, c.b, alpha);
                 }
@@ -554,22 +582,22 @@ public class BoardRenderer {
     }
 
     private void drawLockedTiles(Board board, float originX, float originY, float tileSize,
-                                 SpriteBatch sprites) {
+                                 SpriteBatch sprites, float grayscaleAmt) {
         for (int y = 0; y < board.bh(); y++) {
             for (int x = 0; x < board.bw(); x++) {
                 byte type = board.tileTypeAt(x, y);
                 if (type == Tile.EMPTY) continue;
                 float sx = originX + x * tileSize;
                 float sy = originY + y * tileSize;
-                drawTileBackground(sprites, sx, sy, tileSize, type);
-                drawTile(sprites, sx, sy, tileSize, type, board.tileTexAt(x, y));
+                drawTileBackground(sprites, sx, sy, tileSize, type, grayscaleAmt);
+                drawTile(sprites, sx, sy, tileSize, type, board.tileTexAt(x, y), grayscaleAmt);
             }
         }
     }
 
     /** Draws airborne falling columns at their interpolated sub-tile Y positions. */
     private void drawFallingColumns(Board board, float originX, float originY, float tileSize,
-                                    SpriteBatch sprites) {
+                                    SpriteBatch sprites, float grayscaleAmt) {
         for (FallingColumn col : board.getFallingColumns()) {
             if (col.types == null) continue;
             for (int i = 0; i < col.types.length; i++) {
@@ -579,15 +607,16 @@ public class BoardRenderer {
                 if (col.pieceTrigger) {
                     drawFallTriggerTile(sprites, sx, sy, tileSize, Tile.SINGLE_TILE);
                 } else {
-                    drawTileBackground(sprites, sx, sy, tileSize, col.types[i]);
-                    drawTile(sprites, sx, sy, tileSize, col.types[i], Tile.SINGLE_TILE);
+                    drawTileBackground(sprites, sx, sy, tileSize, col.types[i], grayscaleAmt);
+                    drawTile(sprites, sx, sy, tileSize, col.types[i], Tile.SINGLE_TILE, grayscaleAmt);
                 }
             }
         }
     }
 
     private void drawActivePiecesWithBlocked(Board board, float originX, float originY, float tileSize,
-                                             SpriteBatch sprites, float blockedWhiteAmt) {
+                                             SpriteBatch sprites, float blockedWhiteAmt,
+                                             float grayscaleAmt) {
         for (Piece piece : board.getActivePieces()) {
             if (piece.tiles == null || piece.location == null || piece.type == Tile.EMPTY) continue;
             boolean blocked = piece.isBlockedFromSpawning;
@@ -608,8 +637,8 @@ public class BoardRenderer {
                 } else if (piece.fallTrigger) {
                     drawFallTriggerTile(sprites, sx, sy, tileSize, connection);
                 } else {
-                    drawTileBackground(sprites, sx, sy, tileSize, piece.type);
-                    drawTile(sprites, sx, sy, tileSize, piece.type, connection);
+                    drawTileBackground(sprites, sx, sy, tileSize, piece.type, grayscaleAmt);
+                    drawTile(sprites, sx, sy, tileSize, piece.type, connection, grayscaleAmt);
                 }
             }
         }
@@ -626,14 +655,28 @@ public class BoardRenderer {
 
     private void drawTile(SpriteBatch sprites, float sx, float sy, float tileSize,
                           byte pieceType, byte connectionstate) {
-        sprites.setColor(PieceTints.forType(pieceType));
+        drawTile(sprites, sx, sy, tileSize, pieceType, connectionstate, 0f);
+    }
+
+    private void drawTile(SpriteBatch sprites, float sx, float sy, float tileSize,
+                          byte pieceType, byte connectionstate, float grayscaleAmt) {
+        sprites.setColor(PieceTints.blendGrayscale(pieceType, 1f - clamp01(grayscaleAmt), false));
         sprites.draw(tileRegions[connectionstate & 0xF], sx, sy, tileSize, tileSize);
     }
 
     private void drawTileBackground(SpriteBatch sprites, float sx, float sy, float tileSize,
                                     byte pieceType) {
-        sprites.setColor(PieceTints.forTileBackground(pieceType));
+        drawTileBackground(sprites, sx, sy, tileSize, pieceType, 0f);
+    }
+
+    private void drawTileBackground(SpriteBatch sprites, float sx, float sy, float tileSize,
+                                    byte pieceType, float grayscaleAmt) {
+        sprites.setColor(PieceTints.blendGrayscale(pieceType, 1f - clamp01(grayscaleAmt), true));
         sprites.draw(tileBackground, sx, sy, tileSize, tileSize);
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     /**

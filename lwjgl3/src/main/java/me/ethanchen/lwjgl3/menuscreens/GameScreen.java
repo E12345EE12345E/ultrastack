@@ -6,6 +6,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.controllers.Controller;
 import com.badlogic.gdx.controllers.ControllerAdapter;
@@ -31,11 +32,13 @@ import me.ethanchen.game.pve.boss.BossIntroAnim;
 import me.ethanchen.game.pve.boss.BossPhaseDef;
 import me.ethanchen.game.pve.boss.BossRegistry;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
+import me.ethanchen.lwjgl3.render.AbilityLightning;
 import me.ethanchen.lwjgl3.render.BossParticle;
 import me.ethanchen.lwjgl3.render.BossTextureShard;
 import me.ethanchen.lwjgl3.render.CharacterAssets;
 import me.ethanchen.lwjgl3.render.CharacterMeterRenderer;
 import me.ethanchen.lwjgl3.render.Particle;
+import me.ethanchen.lwjgl3.render.LightningRenderer;
 import me.ethanchen.lwjgl3.render.shader.PlayerRipples;
 import me.ethanchen.lwjgl3.render.shader.RippleCircleRenderer;
 import me.ethanchen.lwjgl3.render.shader.RippleShaderColor;
@@ -76,6 +79,14 @@ public class GameScreen extends MenuScreen {
 
     private final ArrayList<Particle> particles = new ArrayList<>();
     private final Random particleRng = new Random();
+    private final ArrayList<AbilityLightning> abilityLightning = new ArrayList<>();
+    private final LightningRenderer.Style lightningStyle =
+            new LightningRenderer.Style().frameDuration(AbilityLightning.DURATION_MS);
+    private final LightningRenderer lightningRenderer = new LightningRenderer(lightningStyle);
+    private final ArrayList<NoobShockwaveRequest> pendingNoobShockwaves = new ArrayList<>();
+    private int[][][] abilityFillPreviews;
+    private float abilityPreviewPulseTime;
+    private static final float ABILITY_PREVIEW_PULSE_SECONDS = 1f;
 
     // Server-authoritative shared state
     private float latestExplodeProgress = -1f;
@@ -157,6 +168,7 @@ public class GameScreen extends MenuScreen {
         // PvE's GameMode.rules() fallback is a single score-mode board; install the real
         // server boards and slot mapping so 3–4 player splits have the right seat counts.
         game.applyNetBoards(b.boards, b.slotBoardIndex, b.slotSeatIndex);
+        abilityFillPreviews = new int[game.getBoards().size()][][];
         if (b.mode == GameMode.NONE) {
             drawMode = GameDrawMode.NONE;
         } else {
@@ -248,6 +260,9 @@ public class GameScreen extends MenuScreen {
         deltaTime = (int)(System.currentTimeMillis() - lastUpdateMs);
         game.update(deltaTime);
         lastUpdateMs = System.currentTimeMillis();
+        abilityPreviewPulseTime = (abilityPreviewPulseTime + deltaTime / 1000f)
+                % ABILITY_PREVIEW_PULSE_SECONDS;
+        updateAbilityFillPreviews();
 
         for (LocalPlayer lp : localPlayers) {
             Board lpBoard = boardFor(lp.slot);
@@ -281,6 +296,12 @@ public class GameScreen extends MenuScreen {
             Particle p = pit.next();
             p.update(deltaTime);
             if (p.isDead()) pit.remove();
+        }
+        Iterator<AbilityLightning> lightningIt = abilityLightning.iterator();
+        while (lightningIt.hasNext()) {
+            AbilityLightning bolt = lightningIt.next();
+            bolt.update(deltaTime);
+            if (bolt.isDead()) lightningIt.remove();
         }
         Iterator<BossTextureShard> sit = bossShards.iterator();
         while (sit.hasNext()) {
@@ -474,7 +495,12 @@ public class GameScreen extends MenuScreen {
         }
         BoardRenderer.getInstance().drawBoard(board, originX, originY, tileSize, sprites,
                 glowValues, shadows, blockedWhiteAmt, !exploded,
-                localPlayers.isEmpty() ? null : localFlags, otherPlayerGrayscaleAmt);
+                localPlayers.isEmpty() ? null : localFlags, otherPlayerGrayscaleAmt,
+                boardGrayscaleAmount(boardIndex));
+
+        drawAbilityLightning(boardIndex, originX, originY, tileSize);
+        drawAbilityFillPreview(board, boardIndex, originX, originY, tileSize);
+        spawnPendingNoobShockwaves(board, boardIndex, originX, originY, tileSize);
 
         if (boardIndex == primaryBoardIndex()) {
             int repeatCol = -1;
@@ -498,6 +524,115 @@ public class GameScreen extends MenuScreen {
 
         BoardRenderer.getInstance().drawParticles(particles, originX, originY, tileSize, shapes, boardIndex);
         BoardRenderer.getInstance().drawTextParticles(particles, originX, originY, tileSize, sprites, font, boardIndex);
+    }
+
+    private void updateAbilityFillPreviews() {
+        if (abilityFillPreviews == null || abilityFillPreviews.length != game.getBoards().size()) {
+            abilityFillPreviews = new int[game.getBoards().size()][][];
+        }
+        for (int boardIndex = 0; boardIndex < abilityFillPreviews.length; boardIndex++) {
+            Board board = game.getBoards().get(boardIndex);
+            abilityFillPreviews[boardIndex] =
+                    abilityReadySlotsOnBoard(board, CharacterDef.THREE_MINO.id).isEmpty()
+                            ? null : board.previewSkylineGaps();
+        }
+    }
+
+    private List<Integer> abilityReadySlotsOnBoard(Board board, int characterId) {
+        ArrayList<Integer> ready = new ArrayList<>();
+        if (board == null || latestCharacterMode == null
+                || latestCharacterMode.characterIds == null
+                || latestCharacterMode.meterFill == null
+                || latestCharacterMode.meterMax == null) {
+            return ready;
+        }
+        int limit = Math.min(latestCharacterMode.characterIds.length,
+                Math.min(latestCharacterMode.meterFill.length, latestCharacterMode.meterMax.length));
+        for (int seat = 0; seat < board.getSpawnPositions().length; seat++) {
+            int slot = board.globalSlotForSeat(seat);
+            if (slot < 0 || slot >= limit
+                    || latestCharacterMode.characterIds[slot] != characterId) {
+                continue;
+            }
+            float max = latestCharacterMode.meterMax[slot];
+            if (max > 0f && latestCharacterMode.meterFill[slot] >= max) ready.add(slot);
+        }
+        return ready;
+    }
+
+    private void drawAbilityFillPreview(Board board, int boardIndex,
+                                        float originX, float originY, float tileSize) {
+        if (abilityFillPreviews == null || boardIndex < 0
+                || boardIndex >= abilityFillPreviews.length) return;
+        int[][] cells = abilityFillPreviews[boardIndex];
+        if (cells == null || cells.length == 0) return;
+        List<Integer> ready = abilityReadySlotsOnBoard(board, CharacterDef.THREE_MINO.id);
+        if (ready.isEmpty()) return;
+
+        Integer localReady = null;
+        for (int slot : ready) {
+            if (isLocalSlot(slot)) {
+                localReady = slot;
+                break;
+            }
+        }
+        boolean centerSquare = localReady == null;
+        Color color = Color.WHITE;
+        if (centerSquare && ready.size() == 1) color = PlayerRipples.colorForSlot(ready.get(0));
+        float phase = abilityPreviewPulseTime / ABILITY_PREVIEW_PULSE_SECONDS;
+        float alpha = 0.2f + 0.4f * (0.5f
+                + 0.5f * (float) Math.sin(Math.PI * 2f * phase));
+        BoardRenderer.getInstance().drawAbilityFillPreview(
+                originX, originY, tileSize, shapes, cells, color, alpha, centerSquare);
+    }
+
+    private float boardGrayscaleAmount(int boardIndex) {
+        if (latestCharacterMode == null || latestCharacterMode.boardGravitySpeedFactor == null
+                || boardIndex < 0
+                || boardIndex >= latestCharacterMode.boardGravitySpeedFactor.length) {
+            return 0f;
+        }
+        float factor = latestCharacterMode.boardGravitySpeedFactor[boardIndex];
+        return 1f - Math.max(0f, Math.min(1f, factor));
+    }
+
+    private void drawAbilityLightning(int boardIndex, float originX, float originY, float tileSize) {
+        if (abilityLightning.isEmpty()) return;
+        lightningStyle.thickness(tileSize * 0.65f, tileSize * 0.2f)
+                .shape(tileSize * 1.5f, tileSize * 1.25f);
+        for (AbilityLightning bolt : abilityLightning) {
+            if (bolt.boardIndex != boardIndex || bolt.isDead()) continue;
+            lightningRenderer.renderFromTop(shapes,
+                    originX + bolt.tileX * tileSize,
+                    originY + bolt.tileY * tileSize,
+                    bolt.ageMs(), bolt.seed);
+        }
+    }
+
+    private void spawnPendingNoobShockwaves(Board board, int boardIndex,
+                                            float originX, float originY, float tileSize) {
+        Iterator<NoobShockwaveRequest> it = pendingNoobShockwaves.iterator();
+        while (it.hasNext()) {
+            NoobShockwaveRequest request = it.next();
+            if (request.boardIndex != boardIndex) continue;
+            if (request.seat >= 0 && request.seat < board.getActivePieces().size()) {
+                Piece piece = board.getActivePieces().get(request.seat);
+                if (piece.tiles != null && piece.tiles.length > 0 && piece.location != null) {
+                    float cx = 0f;
+                    float cy = 0f;
+                    for (Vector2 tile : piece.tiles) {
+                        cx += piece.location.x + tile.x + 0.5f;
+                        cy += piece.location.y + tile.y + 0.5f;
+                    }
+                    cx = originX + cx / piece.tiles.length * tileSize;
+                    cy = originY + cy / piece.tiles.length * tileSize;
+                    if (shockwave == null) shockwave = new ShockwaveRenderer();
+                    shockwave.spawn(cx, cy, ShockwaveRenderer.AMPLITUDE_NORMAL,
+                            ShockwaveRenderer.SPEED_VERY_FAST);
+                }
+            }
+            it.remove();
+        }
     }
 
     /** Draws the shared HUD (hold box, next box, timer, countdown, names, meters) attached to one board. */
@@ -987,6 +1122,7 @@ public class GameScreen extends MenuScreen {
     /** Capture the scene when a wave is live, or this frame will spawn one. */
     private boolean shouldCaptureShockwave() {
         if (shockwave != null && shockwave.hasActive()) return true;
+        if (!pendingNoobShockwaves.isEmpty()) return true;
         if (latestPveMode == null) return false;
         int phase = latestPveMode.bossPhase;
         long elapsed = latestPveMode.bossPhaseElapsedMs;
@@ -1262,16 +1398,20 @@ public class GameScreen extends MenuScreen {
      */
     private void applyCharacterGravityPrediction(LightGameStateBroadcast p) {
         if (p.characterMode == null || p.characterMode.characterIds == null) {
-            game.setGlobalGravitySpeedFactor(1f);
+            for (int boardIndex = 0; boardIndex < game.getBoards().size(); boardIndex++) {
+                game.setGravitySpeedFactor(boardIndex, 1f);
+            }
             for (int i = 0; i < game.getNumPlayers(); i++) {
                 game.setPlayerGravitySpeedMult(i, 1f);
             }
             return;
         }
-        float global = p.characterMode.globalGravitySpeedFactor;
-        // Legacy packets / unset float default to 0; treat non-positive as "no override" only when
-        // the effect is truly inactive — server always sends an explicit [0,1] factor.
-        game.setGlobalGravitySpeedFactor(global);
+        float[] boardFactors = p.characterMode.boardGravitySpeedFactor;
+        for (int boardIndex = 0; boardIndex < game.getBoards().size(); boardIndex++) {
+            float factor = boardFactors != null && boardIndex < boardFactors.length
+                    ? boardFactors[boardIndex] : 1f;
+            game.setGravitySpeedFactor(boardIndex, factor);
+        }
         int[] ids = p.characterMode.characterIds;
         for (int i = 0; i < game.getNumPlayers(); i++) {
             float mult = 1f;
@@ -1369,8 +1509,47 @@ public class GameScreen extends MenuScreen {
     private void handlePieceSwap(PieceSwapBroadcast p) {
         Board board = boardFor(p.playerId);
         if (board == null) return;
-        board.swapActivePiece(seatFor(p.playerId), p.pieceType);
-        if (ripples != null && board == primaryBoard()) ripples.poof(seatFor(p.playerId));
+        int seat = seatFor(p.playerId);
+        if (seat < 0 || seat >= board.getActivePieces().size()) return;
+        Piece old = board.getActivePieces().get(seat);
+        if (old.tiles != null && old.tiles.length > 0 && old.location != null) {
+            float oldCenterX = 0f;
+            float oldCenterY = 0f;
+            for (Vector2 tile : old.tiles) {
+                float cellX = old.location.x + tile.x;
+                float cellY = old.location.y + tile.y;
+                oldCenterX += cellX + 0.5f;
+                oldCenterY += cellY + 0.5f;
+                NetParticle tileBreak = new NetParticle();
+                tileBreak.boardIndex = p.boardIndex;
+                tileBreak.kind = NetParticle.KIND_TILE_BREAK;
+                tileBreak.tileType = old.type;
+                tileBreak.x = (float) Math.floor(cellX);
+                tileBreak.y = (float) Math.floor(cellY);
+                ParticleFactory.expandNetParticle(tileBreak, particles, particleRng);
+            }
+            oldCenterX /= old.tiles.length;
+            oldCenterY /= old.tiles.length;
+            abilityLightning.add(new AbilityLightning(p.boardIndex & 0xFF,
+                    oldCenterX, oldCenterY, particleRng.nextLong()));
+        }
+
+        Piece replacement = Piece.defaultPiece(p.pieceType);
+        Vector2 spawn = board.getSpawnPos(seat);
+        float spawnCenterX = spawn.x;
+        float spawnCenterY = spawn.y;
+        if (replacement.tiles != null && replacement.tiles.length > 0) {
+            for (Vector2 tile : replacement.tiles) {
+                spawnCenterX += (tile.x + 0.5f) / replacement.tiles.length;
+                spawnCenterY += (tile.y + 0.5f) / replacement.tiles.length;
+            }
+        }
+        abilityLightning.add(new AbilityLightning(p.boardIndex & 0xFF,
+                spawnCenterX, spawnCenterY, particleRng.nextLong()));
+
+        board.swapActivePiece(seat, p.pieceType);
+        if (ripples != null && board == primaryBoard()) ripples.poof(seat);
+        AudioManager.getInstance().playLightningSound(isLocalSlot(p.playerId));
     }
 
     private void handleHoldSound(HoldSoundBroadcast p) {
@@ -1383,6 +1562,16 @@ public class GameScreen extends MenuScreen {
 
     private void handleAbilityActivate(AbilityActivateBroadcast p) {
         AudioManager.getInstance().playAbilityActivateSound();
+        int playerId = p.playerId & 0xFF;
+        if (latestCharacterMode == null || latestCharacterMode.characterIds == null
+                || playerId >= latestCharacterMode.characterIds.length
+                || latestCharacterMode.characterIds[playerId] != CharacterDef.NOOB.id) {
+            return;
+        }
+        int seat = seatFor(playerId);
+        if (seat >= 0) {
+            pendingNoobShockwaves.add(new NoobShockwaveRequest(p.boardIndex & 0xFF, seat));
+        }
     }
 
     /**
@@ -1461,4 +1650,14 @@ public class GameScreen extends MenuScreen {
     }
 
     private enum GameDrawMode { NONE, SINGLE_BOARD, DUAL_BOARD, BOSSFIGHT }
+
+    private static final class NoobShockwaveRequest {
+        final int boardIndex;
+        final int seat;
+
+        NoobShockwaveRequest(int boardIndex, int seat) {
+            this.boardIndex = boardIndex;
+            this.seat = seat;
+        }
+    }
 }

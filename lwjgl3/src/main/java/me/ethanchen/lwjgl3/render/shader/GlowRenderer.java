@@ -69,11 +69,17 @@ public class GlowRenderer implements ShaderRenderer {
     }
 
     public void draw(Board board, float originX, float originY, float tileSize, float[] glowStrengths) {
-        draw(board, originX, originY, tileSize, glowStrengths, Gdx.graphics.getDeltaTime());
+        draw(board, originX, originY, tileSize, glowStrengths, Gdx.graphics.getDeltaTime(), 0f);
     }
 
     public void draw(Board board, float originX, float originY, float tileSize, float[] glowStrengths, float deltaTime) {
+        draw(board, originX, originY, tileSize, glowStrengths, deltaTime, 0f);
+    }
+
+    public void draw(Board board, float originX, float originY, float tileSize,
+                     float[] glowStrengths, float deltaTime, float grayscaleAmt) {
         if (!blurShader.isCompiled() || glowStrengths == null) return;
+        float colorAmt = 1f - Math.max(0f, Math.min(1f, grayscaleAmt));
 
         boolean anyGlow = false;
         for (int i = 0; i < board.getActivePieces().size(); i++) {
@@ -102,14 +108,22 @@ public class GlowRenderer implements ShaderRenderer {
             } else if (strength > 1f) {
                 float whiteBlend = Math.min(strength - 1f, 1f);
                 Color c = PieceTints.forGlow(piece.type);
-                r = c.r + (1f - c.r) * whiteBlend;
-                g = c.g + (1f - c.g) * whiteBlend;
-                b = c.b + (1f - c.b) * whiteBlend;
+                c.toHsv(GLOW_HSV);
+                GLOW_GRAY.fromHsv(GLOW_HSV[0], GLOW_HSV[1] * colorAmt,
+                        GLOW_HSV[2] * (PieceTints.GRAYSCALE_VALUE
+                                + (1f - PieceTints.GRAYSCALE_VALUE) * colorAmt));
+                r = GLOW_GRAY.r + (1f - GLOW_GRAY.r) * whiteBlend;
+                g = GLOW_GRAY.g + (1f - GLOW_GRAY.g) * whiteBlend;
+                b = GLOW_GRAY.b + (1f - GLOW_GRAY.b) * whiteBlend;
             } else {
                 Color c = PieceTints.forGlow(piece.type);
-                r = c.r * strength;
-                g = c.g * strength;
-                b = c.b * strength;
+                c.toHsv(GLOW_HSV);
+                GLOW_GRAY.fromHsv(GLOW_HSV[0], GLOW_HSV[1] * colorAmt,
+                        GLOW_HSV[2] * (PieceTints.GRAYSCALE_VALUE
+                                + (1f - PieceTints.GRAYSCALE_VALUE) * colorAmt));
+                r = GLOW_GRAY.r * strength;
+                g = GLOW_GRAY.g * strength;
+                b = GLOW_GRAY.b * strength;
             }
             glowShapes.setColor(r, g, b, 1f);
             for (Vector2 offset : piece.tiles) {
@@ -202,4 +216,7 @@ public class GlowRenderer implements ShaderRenderer {
         if (glowStrengths == null || pieceIndex >= glowStrengths.length) return 0f;
         return glowStrengths[pieceIndex];
     }
+
+    private static final float[] GLOW_HSV = new float[3];
+    private static final Color GLOW_GRAY = new Color();
 }

@@ -92,6 +92,8 @@ public final class GameConstants {
     public static final long SCORE_DOUBLE = 200;
     public static final long SCORE_TRIPLE = 300;
     public static final long SCORE_QUAD = 800;
+    /** Flat pre-multiplier bonus for each line cleared beyond four. */
+    public static final long SCORE_ADDITIONAL_LINE = 200;
 
     /** Base score for a 3-line clear with an I3 (vertical 3-mino), analogous to a quad. */
     public static final long SCORE_I3_TRIPLE = 600;

@@ -393,16 +393,16 @@ public class Board {
     }
 
     /**
-     * 3-Mino active ability: records the highest solid board tile per column, then fills empty
-     * playable cells in the band between the global min and max of those heights. Columns with
+     * Computes the cells affected by 3-Mino's active ability without mutating the board. Records
+     * the highest solid board tile per column, then finds empty playable cells in the band between
+     * the global min and max of those heights. Columns with
      * no solid tiles pull the band down to {@code y=0} but are never filled themselves (nothing
      * sits above those cells). A cell is filled only when it is strictly below that column's own
-     * peak, not covered by any active player piece, and currently empty. Filled cells become
-     * garbage with {@link Tile#SINGLE_TILE}.
+     * peak, not covered by any active player piece, and currently empty.
      *
-     * @return packed {@code [x, y]} pairs of every cell that was filled (empty if nothing changed)
+     * @return packed {@code [x, y]} pairs of every cell that would be filled
      */
-    public int[][] fillSkylineGaps() {
+    public int[][] previewSkylineGaps() {
         int[] highest = new int[width];
         Arrays.fill(highest, -1);
         boolean anySolid = false;
@@ -437,11 +437,19 @@ public class Board {
                 if (tileTypeAt(x, y) != Tile.EMPTY) continue;
                 if (occupiedByPiece[y][x]) continue;
                 if (isFallingOccupied(x, y)) continue;
-                setTile(x, y, Tile.GARBAGE, Tile.SINGLE_TILE);
                 filled.add(new int[]{x, y});
             }
         }
         return filled.toArray(new int[filled.size()][]);
+    }
+
+    /** Fills every current {@link #previewSkylineGaps()} cell with single-tile garbage. */
+    public int[][] fillSkylineGaps() {
+        int[][] filled = previewSkylineGaps();
+        for (int[] cell : filled) {
+            setTile(cell[0], cell[1], Tile.GARBAGE, Tile.SINGLE_TILE);
+        }
+        return filled;
     }
 
     /**

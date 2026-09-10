@@ -666,8 +666,8 @@ public class ServerGame {
     /**
      * Populates the mode-specific data fields of {@code b} for the current game mode.
      * Replaces the {@code switch (gameMode)} that previously lived in
-     * {@link GameRoom#sendNetUpdates}. Uses board 0's data — every client currently renders only
-     * board 0, so this matches today's single-board reality.
+     * {@link GameRoom#sendNetUpdates}. Mode summaries remain board-0 scoped where their DTOs are
+     * singular, while character gravity factors are populated for every board.
      */
     public void populateModeData(me.ethanchen.network.packets.s2c.LightGameStateBroadcast b) {
         if (gameMode == me.ethanchen.game.GameMode.MULTIPLAYER_SCORE) {
@@ -678,7 +678,7 @@ public class ServerGame {
             b.scoreMode = getScoreModeData(0);
             if (loadouts != null) {
                 b.characterMode = meterController.getCharacterModeData();
-                b.characterMode.globalGravitySpeedFactor = game.getGravitySpeedFactor(0);
+                populateBoardGravityFactors(b.characterMode);
             }
         } else if (gameMode == me.ethanchen.game.GameMode.PVE) {
             if (pveSectionController != null) {
@@ -691,8 +691,17 @@ public class ServerGame {
             }
             if (loadouts != null) {
                 b.characterMode = meterController.getCharacterModeData();
-                b.characterMode.globalGravitySpeedFactor = game.getGravitySpeedFactor(0);
+                populateBoardGravityFactors(b.characterMode);
             }
+        }
+    }
+
+    private void populateBoardGravityFactors(
+            me.ethanchen.network.packets.s2c.gamemode.CharacterModeData mode) {
+        int boardCount = game.getBoards().size();
+        mode.boardGravitySpeedFactor = new float[boardCount];
+        for (int boardIndex = 0; boardIndex < boardCount; boardIndex++) {
+            mode.boardGravitySpeedFactor[boardIndex] = game.getGravitySpeedFactor(boardIndex);
         }
     }
 

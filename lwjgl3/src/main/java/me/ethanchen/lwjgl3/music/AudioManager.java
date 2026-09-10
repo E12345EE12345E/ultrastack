@@ -28,7 +28,8 @@ public class AudioManager {
     private static final float HOLD_BASE        = 1.0f;
     private static final float BUMP_SELF_BASE   = 1.0f;
     private static final float BUMP_OTHER_BASE  = 0.5f;
-    private static final float LIGHTNING_BASE   = 1.0f;
+    private static final float LIGHTNING_SELF_BASE  = 1.0f;
+    private static final float LIGHTNING_OTHER_BASE = 0.5f;
     private static final float MENU_SELECT_BASE = 0.0f;
     private static final float MENU_PRESS_BASE  = 0.5f;
     private static final float MUSIC_BASE       = 0.5f;
@@ -212,7 +213,11 @@ public class AudioManager {
     }
 
     public void playLightningSound() {
-        lightningSound.play(sfxVol(LIGHTNING_BASE));
+        playLightningSound(true);
+    }
+
+    public void playLightningSound(boolean self) {
+        lightningSound.play(sfxVol(self ? LIGHTNING_SELF_BASE : LIGHTNING_OTHER_BASE));
     }
 
     public void playMenuSelectSound() {
