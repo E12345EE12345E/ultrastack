@@ -50,6 +50,14 @@ public abstract class MenuScreen extends InputAdapter {
     /** Called when this screen is shown, including when a retained instance is switched back to. */
     public void resumeInput() {}
 
+    /**
+     * True when this screen draws the shared aurora backdrop. {@link ClientApp} creates the
+     * renderer when switching to such a screen and disposes it when leaving for one that does not.
+     */
+    public boolean usesAurora() {
+        return false;
+    }
+
     protected void onEscPressed() {
         // no-op by default; override in subclasses to handle escape
     }

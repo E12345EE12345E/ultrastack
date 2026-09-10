@@ -119,6 +119,8 @@ public class AuroraBackgroundRenderer implements ShaderRenderer {
         blankTexture = null;
         fbo = null;
         fboRegion = null;
+        fboWidth = -1;
+        fboHeight = -1;
     }
 
     private void ensureFboSize(int w, int h) {

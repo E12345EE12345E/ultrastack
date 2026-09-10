@@ -87,6 +87,19 @@ public class PlayerProfile {
         tokens = (tokens == null ? 0L : tokens) + amount;
     }
 
+    /** Returns the spendable balance, treating an unmigrated null value as zero. */
+    public long tokenBalance() {
+        return tokens == null ? 0L : tokens;
+    }
+
+    /** Deducts {@code amount} atomically when affordable; otherwise changes nothing. */
+    public boolean spendTokens(long amount) {
+        long have = tokenBalance();
+        if (amount < 0L || have < amount) return false;
+        tokens = have - amount;
+        return true;
+    }
+
     public Artifact findArtifact(String artifactId) {
         if (artifactId == null) return null;
         for (Artifact a : inventory) {

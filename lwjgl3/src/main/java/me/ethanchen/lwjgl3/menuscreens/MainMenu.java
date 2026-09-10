@@ -12,7 +12,6 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedImage;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
 import me.ethanchen.lwjgl3.menuscreens.ui.DesignUi;
 import me.ethanchen.lwjgl3.render.MenuAssets;
-import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.NetConfig;
 
 /**
@@ -46,7 +45,6 @@ public class MainMenu extends DecoratedMenuScreen {
     private final DecoratedButton wikiBtn;
     private final DecoratedButton exitBtn;
     private final Widget settingsWidget;
-    private final AuroraBackgroundRenderer aurora;
 
     public MainMenu(ClientApp app) {
         super(app, app.getShapes(), app.getSprites(), app.getFont());
@@ -95,8 +93,12 @@ public class MainMenu extends DecoratedMenuScreen {
         }
 
         settingsWidget = SettingsHub.createWidget(app, this, () -> new MainMenu(app));
-        aurora = new AuroraBackgroundRenderer();
         applyIntro(appElapsedMs());
+    }
+
+    @Override
+    public boolean usesAurora() {
+        return true;
     }
 
     private void openSettingsWidget() {
@@ -108,20 +110,14 @@ public class MainMenu extends DecoratedMenuScreen {
     protected void updateScreen(long menuElapsedMs, long appMs) {
         applyIntro(appMs);
         if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
-            aurora.reloadShader();
+            app.reloadAuroraShader();
         }
     }
 
     @Override
     protected void renderBackground(DecorContext ctx) {
         float fade = Anim.smoothstep(Anim.progress(ctx.appElapsedMs, 0L, FADE_MS));
-        aurora.draw(ctx.appElapsedMs / 1000f, fade);
-    }
-
-    @Override
-    public void dispose() {
-        aurora.dispose();
-        super.dispose();
+        app.drawAurora(ctx.appElapsedMs / 1000f, fade);
     }
 
     private void applyIntro(long t) {

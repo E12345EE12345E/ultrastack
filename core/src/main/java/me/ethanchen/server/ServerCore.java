@@ -4,6 +4,8 @@ import com.esotericsoftware.kryonet.Server;
 import me.ethanchen.game.GameConstants;
 import me.ethanchen.game.progression.Artifact;
 import me.ethanchen.game.progression.CharacterRegistry;
+import me.ethanchen.game.progression.GachaRoll;
+import me.ethanchen.game.progression.GachaTables;
 import me.ethanchen.game.progression.PlayerProfile;
 import me.ethanchen.network.NetEndpoints;
 import me.ethanchen.network.NetworkRegister;
@@ -115,6 +117,7 @@ public class ServerCore implements PacketSender, Runnable {
         // ---- Character/artifact profile packets (both modes) ----
         d.on(LoadoutRequest.class, w -> handleLoadoutRequest(w, sessionFor(w)));
         d.on(FusionRequest.class, w -> handleFusionRequest(w, sessionFor(w)));
+        d.on(DealerRequest.class, w -> handleDealerRequest(w, sessionFor(w)));
         d.on(ProfileViewRequest.class, w -> handleProfileViewRequest(w, sessionFor(w)));
 
         // ---- In-room packets (both modes) ----
@@ -477,6 +480,75 @@ public class ServerCore implements PacketSender, Runnable {
             Uncaught.log("[ServerCore] Fusion failed for connId=" + connectionId + ": ", t);
             res.success = false;
             res.reason = "fusion failed";
+            if (sessionStillCurrent(connectionId, session)) sendTCP(connectionId, res);
+        }
+    }
+
+    private void handleDealerRequest(ServerPacketWrapper w, Session session) {
+        if (session == null || session.profile == null) return;
+        int count = ((DealerRequest) w.packet).count;
+        persistence.submit(() -> completeDeal(w.connectionID, session, count));
+    }
+
+    private void completeDeal(int connectionId, Session session, int count) {
+        if (!sessionStillCurrent(connectionId, session) || session.profile == null) return;
+        DealerResultBroadcast res = new DealerResultBroadcast();
+
+        if (session.profileReadOnly) {
+            res.success = false;
+            res.reason = "the card dealer is not available in LAN mode";
+            sendTCP(connectionId, res);
+            return;
+        }
+
+        final long cost;
+        try {
+            cost = GachaTables.costFor(count);
+        } catch (IllegalArgumentException e) {
+            res.success = false;
+            res.reason = e.getMessage();
+            sendTCP(connectionId, res);
+            return;
+        }
+
+        PlayerProfile profile = session.profile;
+        if (profile.tokenBalance() < cost) {
+            res.success = false;
+            res.reason = "not enough tokens";
+            sendTCP(connectionId, res);
+            return;
+        }
+
+        try {
+            List<GachaRoll.Card> cards = GachaRoll.deal(count, new Random());
+            if (!profile.spendTokens(cost)) {
+                res.success = false;
+                res.reason = "not enough tokens";
+                sendTCP(connectionId, res);
+                return;
+            }
+
+            res.rarities = new byte[cards.size()];
+            res.artifacts = new Artifact[cards.size()];
+            for (int i = 0; i < cards.size(); i++) {
+                GachaRoll.Card card = cards.get(i);
+                res.rarities[i] = card.rarity;
+                res.artifacts[i] = card.artifact;
+                profile.inventory.add(card.artifact);
+            }
+            profile.sortInventory();
+            if (profileStore != null) profileStore.saveProfile(session.accountUuid, profile);
+
+            res.success = true;
+            res.reason = "";
+            res.tokensSpent = cost;
+            if (!sessionStillCurrent(connectionId, session)) return;
+            sendTCP(connectionId, res);
+            sendProfileSync(connectionId, session);
+        } catch (Throwable t) {
+            Uncaught.log("[ServerCore] Card Dealer failed for connId=" + connectionId + ": ", t);
+            res.success = false;
+            res.reason = "card dealer failed";
             if (sessionStillCurrent(connectionId, session)) sendTCP(connectionId, res);
         }
     }

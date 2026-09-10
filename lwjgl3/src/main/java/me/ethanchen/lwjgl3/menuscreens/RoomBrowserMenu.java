@@ -17,7 +17,6 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
 import me.ethanchen.lwjgl3.render.MenuAssets;
-import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.dto.RoomInfo;
@@ -51,7 +50,6 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
     private final Widget settingsWidget;
     private final ControllerConfigHub controllerHub;
     private PlayerProfileHub profileHub;
-    private final AuroraBackgroundRenderer aurora;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(RoomListBroadcast.class, w -> handleRoomList((RoomListBroadcast) w.packet))
@@ -147,7 +145,11 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
 
         settingsWidget = SettingsHub.createWidget(app, this, () -> new RoomBrowserMenu(app));
         controllerHub = ControllerConfigHub.create(app, this, null);
-        aurora = new AuroraBackgroundRenderer();
+    }
+
+    @Override
+    public boolean usesAurora() {
+        return true;
     }
 
     private void openSettingsWidget() {
@@ -161,8 +163,8 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
     }
 
     private void openCharacterLoadout() {
-        // Switching away disposes this screen (and its aurora), so hand the loadout screen a
-        // fresh browser to return to rather than this soon-to-be-dead instance.
+        // Switching away disposes this screen, so hand the loadout a fresh browser to return
+        // to rather than this soon-to-be-dead instance. Aurora is owned by ClientApp.
         app.switchMenu(new CharacterScreen(app, new RoomBrowserMenu(app), () -> true));
     }
 
@@ -230,13 +232,7 @@ public class RoomBrowserMenu extends DecoratedMenuScreen {
 
     @Override
     protected void renderBackground(DecorContext ctx) {
-        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
-    }
-
-    @Override
-    public void dispose() {
-        aurora.dispose();
-        super.dispose();
+        app.drawAurora(ctx.appElapsedMs / 1000f, 1f);
     }
 
     @Override

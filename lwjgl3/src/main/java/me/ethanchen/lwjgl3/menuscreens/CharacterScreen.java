@@ -185,25 +185,30 @@ public class CharacterScreen extends DecoratedMenuScreen {
     }
 
     private Widget createManageWidget() {
-        Widget w = new Widget(960f, 520f, 580f, 480f);
-        w.add(new DecoratedText(0f, 0f, "Manage Artifacts", 2.2f), 0f, 168f);
+        Widget w = new Widget(960f, 520f, 580f, 580f);
+        w.add(new DecoratedText(0f, 0f, "Manage Artifacts", 2.2f), 0f, 230f);
 
         DecoratedButton fusion = new DecoratedButton(0f, 0f, 440f, 78f, "Fusion",
                 () -> app.switchMenu(new FusionScreen(app, this, charactersEnabled)));
+        DecoratedButton dealer = new DecoratedButton(0f, 0f, 440f, 78f, "Dealer",
+                () -> app.switchMenu(new CardDealerScreen(app, this)));
         DecoratedButton effects = new DecoratedButton(0f, 0f, 440f, 78f, "Artifact Effects",
                 () -> app.switchMenu(new ArtifactLoadoutScreen(app, this)));
         DecoratedButton back = new DecoratedButton(0f, 0f, 300f, 68f, "Back", this::closeTopWidget);
         fusion.fontSize = 1.55f;
+        dealer.fontSize = 1.55f;
         effects.fontSize = 1.55f;
         back.fontSize = 1.4f;
 
         float btnH = 78f;
         float backH = 68f;
         float gap = 32f;
-        float fusionY = 70f;
-        float effectsY = fusionY - btnH - gap;
+        float fusionY = 115f;
+        float dealerY = fusionY - btnH - gap;
+        float effectsY = dealerY - btnH - gap;
         float backY = effectsY - btnH * 0.5f - gap - backH * 0.5f;
         w.add(fusion, 0f, fusionY);
+        w.add(dealer, 0f, dealerY);
         w.add(effects, 0f, effectsY);
         w.add(back, 0f, backY);
         return w;

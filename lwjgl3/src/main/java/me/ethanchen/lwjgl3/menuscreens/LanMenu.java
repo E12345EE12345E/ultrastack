@@ -7,7 +7,6 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
-import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.lwjgl3.util.AddressParser;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
@@ -36,7 +35,6 @@ public class LanMenu extends DecoratedMenuScreen {
     private final DecoratedText statusText;
     private final DecoratedText widgetStatusText;
     private final Widget joinWidget;
-    private final AuroraBackgroundRenderer aurora;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(ConnectionEstablishedPacket.class, w -> {
@@ -100,7 +98,11 @@ public class LanMenu extends DecoratedMenuScreen {
 
         widgetStatusText = new DecoratedText(0f, 0f, "", 1.1f);
         joinWidget = buildJoinWidget();
-        aurora = new AuroraBackgroundRenderer();
+    }
+
+    @Override
+    public boolean usesAurora() {
+        return true;
     }
 
     private Widget buildJoinWidget() {
@@ -222,13 +224,7 @@ public class LanMenu extends DecoratedMenuScreen {
 
     @Override
     protected void renderBackground(DecorContext ctx) {
-        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
-    }
-
-    @Override
-    public void dispose() {
-        aurora.dispose();
-        super.dispose();
+        app.drawAurora(ctx.appElapsedMs / 1000f, 1f);
     }
 
     @Override

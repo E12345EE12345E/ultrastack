@@ -4,11 +4,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
+
 import me.ethanchen.game.GameMode;
 import me.ethanchen.game.progression.CharacterDef;
 import me.ethanchen.game.progression.CharacterRegistry;
 import me.ethanchen.lwjgl3.ClientApp;
-import me.ethanchen.lwjgl3.menuscreens.decorated.DecorContext;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedChat;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedListButton;
@@ -18,7 +20,6 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
 import me.ethanchen.lwjgl3.menuscreens.decorated.Widget;
 import me.ethanchen.lwjgl3.render.CharacterAssets;
 import me.ethanchen.lwjgl3.render.MenuAssets;
-import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.PacketDispatcher;
 import me.ethanchen.network.dto.LobbyPlayerInfo;
@@ -53,7 +54,6 @@ public class MultiplayerLobby extends DecoratedMenuScreen {
     private final DecoratedButton characterBtn;
     private final Widget roomWidget;
     private final ControllerConfigHub controllerHub;
-    private final AuroraBackgroundRenderer aurora;
     private PlayerProfileHub profileHub;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
@@ -148,7 +148,6 @@ public class MultiplayerLobby extends DecoratedMenuScreen {
         refreshRoomModeButtons();
 
         controllerHub = ControllerConfigHub.create(app, this, app::sendLocalPlayerCount);
-        aurora = new AuroraBackgroundRenderer();
         lastBoundMode = app.getLobbySettings().gamemode;
 
         if (isHost) {
@@ -289,6 +288,9 @@ public class MultiplayerLobby extends DecoratedMenuScreen {
 
     @Override
     protected void updateScreen(long menuElapsedMs, long appElapsedMs) {
+        if (Gdx.input.isKeyJustPressed(Input.Keys.F3)) {
+            debugSetScenario();
+        }
         controllerHub.setEnabled(app.getLobbySettings().gamemode != GameMode.PVE);
         controllerHub.tick();
         refreshRoomModeButtons();
@@ -299,15 +301,15 @@ public class MultiplayerLobby extends DecoratedMenuScreen {
         }
     }
 
-    @Override
-    protected void renderBackground(DecorContext ctx) {
-        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
-    }
-
-    @Override
-    public void dispose() {
-        aurora.dispose();
-        super.dispose();
+    /** Host-only debug: Scenario (PvE) level 0, Normal. */
+    private void debugSetScenario() {
+        if (!isHost) return;
+        app.getLobbySettings().gamemode = GameMode.PVE;
+        app.getLobbySettings().pveLevelId = 0;
+        app.getLobbySettings().pveDifficulty = 0;
+        sendPendingLobbySettings();
+        refreshRoomModeButtons();
+        playerList.refresh();
     }
 
     @Override

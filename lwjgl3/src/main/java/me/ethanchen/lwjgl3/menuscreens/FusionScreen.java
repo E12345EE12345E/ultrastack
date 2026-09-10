@@ -42,8 +42,9 @@ public class FusionScreen extends DecoratedMenuScreen {
     private static final int MAX_EFFECT_LINES = 6;
 
     private static final float SLOT_SIZE = 120f;
-    private static final float SLOT_Y = 540f;
+    private static final float SLOT_Y = 600f;
     private static final float[] SLOT_X = {640f, 800f, 960f, 1120f, 1280f};
+    private static final long SLOT_BOX_FADE_MS = 180L;
 
     private static final float POINT_A_X = 820f;
     private static final float POINT_A_Y = 800f;
@@ -152,7 +153,7 @@ public class FusionScreen extends DecoratedMenuScreen {
         float dtS = Math.max(0f, Gdx.graphics.getDeltaTime());
         if (shockwave != null) shockwave.update(dtS);
 
-        if (phase == Phase.IDLE) {
+        if (phase != Phase.CONVERGE && phase != Phase.IMPACT) {
             for (int i = 0; i < fusionSlots.length; i++) {
                 fusionSlots[i].offsetYDesign = 12f * (float) Math.sin(menuElapsedMs / 620.0 + i * 0.9);
             }
@@ -161,6 +162,23 @@ public class FusionScreen extends DecoratedMenuScreen {
         tickPhase(menuElapsedMs);
         refresh();
         tickFuseButton(dtS);
+        applySlotBoxAlpha(menuElapsedMs);
+    }
+
+    private void applySlotBoxAlpha(long menuElapsedMs) {
+        float a = 1f;
+        long elapsed = menuElapsedMs - phaseStartMs;
+        if (phase == Phase.CONVERGE) {
+            a = 1f - Anim.clamp01(elapsed / (float) SLOT_BOX_FADE_MS);
+        } else if (phase == Phase.IMPACT || phase == Phase.REVEAL) {
+            a = 0f;
+        } else if (phase == Phase.FADE_OUT) {
+            a = Anim.clamp01(elapsed / (float) FADE_OUT_MS);
+        }
+        for (DecoratedSlot slot : fusionSlots) {
+            slot.alpha = a;
+            slot.visible = true;
+        }
     }
 
     private void tickFuseButton(float dtS) {
@@ -184,9 +202,9 @@ public class FusionScreen extends DecoratedMenuScreen {
         if (phase == Phase.IDLE) return;
         long elapsed = menuElapsedMs - phaseStartMs;
 
-        if (skipRequested) {
+        if (skipRequested && phase != Phase.FADE_OUT) {
             tryFinishSkip();
-            return;
+            if (phase == Phase.IDLE || phase == Phase.FADE_OUT) return;
         }
 
         if (phase == Phase.CONVERGE && elapsed >= CONVERGE_MS) {
@@ -334,7 +352,6 @@ public class FusionScreen extends DecoratedMenuScreen {
             f.startX = SLOT_X[i];
             f.startY = SLOT_Y + fusionSlots[i].offsetYDesign;
             flying[i] = f;
-            fusionSlots[i].visible = false;
             fusionIds[i] = null;
         }
 
@@ -374,8 +391,12 @@ public class FusionScreen extends DecoratedMenuScreen {
     @Override
     protected boolean interceptInput() {
         if (phase == Phase.IDLE) return false;
-        skipAnimation();
+        if (canSkip()) skipAnimation();
         return true;
+    }
+
+    private boolean canSkip() {
+        return shockwaveSpawned && phase != Phase.IDLE;
     }
 
     @Override
@@ -384,7 +405,7 @@ public class FusionScreen extends DecoratedMenuScreen {
     }
 
     private void skipAnimation() {
-        if (phase == Phase.IDLE) return;
+        if (!canSkip()) return;
         skipRequested = true;
         tryFinishSkip();
     }
@@ -395,13 +416,19 @@ public class FusionScreen extends DecoratedMenuScreen {
             failToIdle();
             return;
         }
-        if (pendingResult != null) finishNow();
+        if (pendingResult == null) return;
+        if (phase == Phase.FADE_OUT) {
+            finishNow();
+            return;
+        }
+        enterFadeOut(menuElapsedMs());
     }
 
     private void failToIdle() {
         if (phase == Phase.IDLE) return;
         for (int i = 0; i < fusionSlots.length; i++) {
             fusionSlots[i].visible = true;
+            fusionSlots[i].alpha = 1f;
             fusionIds[i] = flying[i] != null && flying[i].artifact != null ? flying[i].artifact.id : null;
             flying[i] = null;
         }
@@ -425,6 +452,7 @@ public class FusionScreen extends DecoratedMenuScreen {
         shockwaveSpawned = false;
         for (int i = 0; i < fusionSlots.length; i++) {
             fusionSlots[i].visible = true;
+            fusionSlots[i].alpha = 1f;
             fusionIds[i] = null;
             flying[i] = null;
         }

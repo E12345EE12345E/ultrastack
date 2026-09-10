@@ -28,6 +28,7 @@ public class AudioManager {
     private static final float HOLD_BASE        = 1.0f;
     private static final float BUMP_SELF_BASE   = 1.0f;
     private static final float BUMP_OTHER_BASE  = 0.5f;
+    private static final float LIGHTNING_BASE   = 1.0f;
     private static final float MENU_SELECT_BASE = 0.0f;
     private static final float MENU_PRESS_BASE  = 0.5f;
     private static final float MUSIC_BASE       = 0.5f;
@@ -48,6 +49,7 @@ public class AudioManager {
     private Sound dieSound;
     private Sound[] holdSound;
     private Sound bumpSound;
+    private Sound lightningSound;
     private Sound menuSelectSound;
     private Sound menuPressSound;
 
@@ -92,6 +94,7 @@ public class AudioManager {
             Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_holdunable.wav")),
         };
         bumpSound   = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_bump.wav"));
+        lightningSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_lightning.wav"));
         menuSelectSound = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_menuselect.wav"));
         menuPressSound  = Gdx.audio.newSound(Gdx.files.internal("sfx/sfx_menuselect.wav"));
     }
@@ -208,6 +211,10 @@ public class AudioManager {
         bumpSound.play(sfxVol(self ? BUMP_SELF_BASE : BUMP_OTHER_BASE));
     }
 
+    public void playLightningSound() {
+        lightningSound.play(sfxVol(LIGHTNING_BASE));
+    }
+
     public void playMenuSelectSound() {
         menuSelectSound.play(sfxVol(MENU_SELECT_BASE));
     }
@@ -267,6 +274,7 @@ public class AudioManager {
         dieSound.dispose();
         for (Sound s : holdSound) s.dispose();
         bumpSound.dispose();
+        lightningSound.dispose();
         menuSelectSound.dispose();
         menuPressSound.dispose();
         for (MusicContainer c : registeredMusic) {

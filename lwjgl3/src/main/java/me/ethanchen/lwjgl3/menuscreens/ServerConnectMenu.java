@@ -6,7 +6,6 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
-import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.lwjgl3.util.AddressParser;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
@@ -24,7 +23,6 @@ public class ServerConnectMenu extends DecoratedMenuScreen {
     private boolean connectingToDefault;
     private final DecoratedTextBox addressBox;
     private final DecoratedText statusText;
-    private final AuroraBackgroundRenderer aurora;
 
     private final PacketDispatcher<ClientPacketWrapper> dispatcher = new PacketDispatcher<ClientPacketWrapper>()
             .on(ConnectionEstablishedPacket.class, w -> {
@@ -65,10 +63,14 @@ public class ServerConnectMenu extends DecoratedMenuScreen {
         addDecorated(statusText);
         addDecorated(backBtn);
 
-        aurora = new AuroraBackgroundRenderer();
         if (connectingToDefault) {
             setStatus("Connecting to " + NetConfig.DEFAULT_SERVER_HOST + ":" + NetConfig.PORT + "...");
         }
+    }
+
+    @Override
+    public boolean usesAurora() {
+        return true;
     }
 
     private void connect() {
@@ -135,13 +137,7 @@ public class ServerConnectMenu extends DecoratedMenuScreen {
 
     @Override
     protected void renderBackground(DecorContext ctx) {
-        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
-    }
-
-    @Override
-    public void dispose() {
-        aurora.dispose();
-        super.dispose();
+        app.drawAurora(ctx.appElapsedMs / 1000f, 1f);
     }
 
     @Override

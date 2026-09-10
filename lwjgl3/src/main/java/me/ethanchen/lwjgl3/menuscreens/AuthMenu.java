@@ -6,7 +6,6 @@ import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedButton;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedText;
 import me.ethanchen.lwjgl3.menuscreens.decorated.DecoratedTextBox;
 import me.ethanchen.lwjgl3.menuscreens.ui.UIText;
-import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
@@ -23,7 +22,6 @@ public class AuthMenu extends DecoratedMenuScreen {
     private final DecoratedTextBox usernameBox;
     private final DecoratedTextBox passwordBox;
     private final DecoratedText statusText;
-    private final AuroraBackgroundRenderer aurora;
 
     private boolean authInFlight;
     private long authDeadlineMs;
@@ -74,8 +72,11 @@ public class AuthMenu extends DecoratedMenuScreen {
         addDecorated(registerBtn);
         addDecorated(statusText);
         addDecorated(backBtn);
+    }
 
-        aurora = new AuroraBackgroundRenderer();
+    @Override
+    public boolean usesAurora() {
+        return true;
     }
 
     private void login() {
@@ -148,13 +149,7 @@ public class AuthMenu extends DecoratedMenuScreen {
 
     @Override
     protected void renderBackground(DecorContext ctx) {
-        aurora.draw(ctx.appElapsedMs / 1000f, 1f);
-    }
-
-    @Override
-    public void dispose() {
-        aurora.dispose();
-        super.dispose();
+        app.drawAurora(ctx.appElapsedMs / 1000f, 1f);
     }
 
     @Override

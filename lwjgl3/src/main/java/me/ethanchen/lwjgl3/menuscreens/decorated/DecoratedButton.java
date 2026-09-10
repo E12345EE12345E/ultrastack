@@ -26,7 +26,7 @@ public class DecoratedButton extends DecoratedElement {
     public float outlineDesignPx = OUTLINE_DESIGN_PX;
     /** Stays highlighted while true; used for mutually-exclusive option groups. */
     public boolean selected;
-    /** When false, the button is visible but ignores click, hover, and focus. */
+    /** When false, the button is visible and may show hover info, but ignores click and focus. */
     public boolean interactable = true;
 
     public DecoratedButton(float designX, float designY, float designW, float designH,
@@ -92,12 +92,12 @@ public class DecoratedButton extends DecoratedElement {
         float mouseX = Gdx.input.getX();
         float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();
         boolean wasHovered = hovered;
-        hovered = interactable && mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
+        hovered = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
         if (hovered && !wasHovered && isFocusable()) {
             AudioManager.getInstance().playMenuSelectSound();
         }
 
-        boolean hot = highlighted() || selected;
+        boolean hot = (interactable && highlighted()) || selected;
         float a = Anim.clamp01(alpha) * (interactable ? 1f : 0.45f);
         drawFramedPanel(ctx, fillColor, outlineColor, a, hot, outlineDesignPx);
 

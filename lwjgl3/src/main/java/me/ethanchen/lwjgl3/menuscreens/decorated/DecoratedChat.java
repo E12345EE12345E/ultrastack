@@ -17,6 +17,7 @@ import me.ethanchen.lwjgl3.menuscreens.ui.UIFont;
  */
 public class DecoratedChat extends DecoratedElement {
     private static final int MAX_LINES = 40;
+    private static final String EMPTY_HINT = "Welcome to chat! Please be respectful.";
 
     public float fontSize = 1.2f;
     public final Color fillColor = new Color(1f, 1f, 1f, 0.16f);
@@ -60,9 +61,8 @@ public class DecoratedChat extends DecoratedElement {
         float a = Anim.clamp01(alpha);
         drawFramedPanel(ctx, fillColor, outlineColor, a, false);
 
-        if (lines.isEmpty()) return;
-
-        String text = String.join("\n", lines);
+        boolean empty = lines.isEmpty();
+        String text = empty ? EMPTY_HINT : String.join("\n", lines);
         float pad = Math.max(10f, h * 0.06f);
         float innerX = x + pad;
         float innerY = y + pad;

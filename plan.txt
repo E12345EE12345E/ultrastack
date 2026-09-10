@@ -1,25 +1,6 @@
-ui update
 better artifact system
 
 more visual settings
 ping button (z?)
 built in vc?
 replays
-
-MainMenu
-  ├─ Multiplayer  → ServerConnectMenu → AuthMenu → RoomBrowserMenu
-  ├─ LAN          → LanMenu
-  └─ Settings     → MainSettingsScreen
-                      ├─ MovementSettingsScreen
-                      ├─ ColorSettingsScreen
-                      └─ SoundSettingsScreen
-
-RoomBrowserMenu ──┬── MultiplayerLobby
-                  └── GameScreen (if a match is already running)
-
-MultiplayerLobby ──┬── LobbySettingsScreen  (host only; keeps lobby instance)
-                   ├── CharacterScreen ── FusionScreen
-                   │                   └─ ArtifactLoadoutScreen
-                   └── GameScreen
-
-GameScreen ── EndGameScreen ── MultiplayerLobby

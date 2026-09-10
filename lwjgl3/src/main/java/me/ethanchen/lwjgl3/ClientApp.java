@@ -41,6 +41,7 @@ import me.ethanchen.lwjgl3.settings.GameSettings;
 import me.ethanchen.lwjgl3.settings.LobbySettings;
 import me.ethanchen.lwjgl3.settings.SettingsManager;
 import me.ethanchen.lwjgl3.render.BoardRenderer;
+import me.ethanchen.lwjgl3.render.shader.AuroraBackgroundRenderer;
 import me.ethanchen.network.ClientNetworkListener;
 import me.ethanchen.network.ClientPacketWrapper;
 import me.ethanchen.network.NetConfig;
@@ -56,6 +57,7 @@ import me.ethanchen.network.packets.c2s.RegisterRequest;
 import me.ethanchen.network.packets.c2s.RoomListRequest;
 import me.ethanchen.network.packets.c2s.LoadoutRequest;
 import me.ethanchen.network.packets.c2s.FusionRequest;
+import me.ethanchen.network.packets.c2s.DealerRequest;
 import me.ethanchen.network.packets.c2s.AbilityRequest;
 import me.ethanchen.network.packets.c2s.ProfileViewRequest;
 import me.ethanchen.network.packets.other.ConnectFailedPacket;
@@ -144,6 +146,9 @@ public class ClientApp extends ApplicationAdapter {
     private static final int MAX_LOBBY_CHAT_LINES = 40;
     private final ArrayDeque<LobbyChatLine> lobbyChat = new ArrayDeque<>();
 
+    /** Shared aurora backdrop. Created and disposed with the active screen's {@link MenuScreen#usesAurora()}. */
+    private AuroraBackgroundRenderer aurora;
+
     /** Wall-clock start of this process; used by decorated menus for intro timelines. */
     private long appStartMs;
 
@@ -173,6 +178,7 @@ public class ClientApp extends ApplicationAdapter {
         font = createGameFont();
 
         menuScreen = new MainMenu(this);
+        syncAurora(menuScreen);
         //menuScreen = new ShaderTestScreen(this);
 
         // create()/resize() run before glfwPollEvents, so the first size can miss the
@@ -264,6 +270,7 @@ public class ClientApp extends ApplicationAdapter {
             if (menuScreen != null) menuScreen.dispose();
             menuScreen = switchToMenu;
             switchToMenu = null;
+            syncAurora(menuScreen);
         }
         update();
         ScreenUtils.clear(0, 0, 0, 1f);
@@ -299,6 +306,7 @@ public class ClientApp extends ApplicationAdapter {
             switchToMenu.dispose();
             switchToMenu = null;
         }
+        disposeAurora();
 
         stopLanServer();
 
@@ -385,6 +393,35 @@ public class ClientApp extends ApplicationAdapter {
         // correctly regains input focus.
         Gdx.input.setInputProcessor(newMenu);
         newMenu.resumeInput();
+    }
+
+    /**
+     * Creates the aurora renderer when the new screen needs it, and disposes it when switching
+     * to a screen that does not (lobby, gameplay, loadout). Recreates on the way back so a
+     * retained Room Browser is not left holding a disposed renderer.
+     */
+    private void syncAurora(MenuScreen screen) {
+        if (screen != null && screen.usesAurora()) {
+            if (aurora == null) {
+                aurora = new AuroraBackgroundRenderer();
+            }
+        } else {
+            disposeAurora();
+        }
+    }
+
+    public void drawAurora(float timeS, float alpha) {
+        if (aurora != null) aurora.draw(timeS, alpha);
+    }
+
+    public void reloadAuroraShader() {
+        if (aurora != null) aurora.reloadShader();
+    }
+
+    private void disposeAurora() {
+        if (aurora == null) return;
+        aurora.dispose();
+        aurora = null;
     }
 
     // -------------------------------------------------------------------------
@@ -837,6 +874,13 @@ public class ClientApp extends ApplicationAdapter {
     public boolean sendFusionRequest(String[] artifactIds) {
         FusionRequest req = new FusionRequest();
         req.artifactIds = artifactIds;
+        return sendTCP(req);
+    }
+
+    /** Requests one or ten Card Dealer results; the server commits them before replying. */
+    public boolean sendDealerRequest(int count) {
+        DealerRequest req = new DealerRequest();
+        req.count = count;
         return sendTCP(req);
     }
 
