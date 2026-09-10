@@ -14,6 +14,11 @@ public class AccountExtra {
     public BestGameRecord bestPuzzle;
     public BestGameRecord bestCharacterScore;
     /**
+     * True after the account has received its one-time starting token grant. Missing/false in
+     * legacy JSON causes the grant to be applied on the next successful login.
+     */
+    public boolean receivedInitialTokenBonus;
+    /**
      * True after a one-shot {@code game_results} backfill (or for accounts created after bests
      * existed). Missing/false on legacy extra_json means the next profile view should migrate.
      */

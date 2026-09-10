@@ -38,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class AccountStore implements XpAwarder, ProfileStore {
     private static final int SCHEMA_VERSION = 1;
+    public static final long INITIAL_TOKEN_BONUS = 2000L;
 
     private final ConcurrentHashMap<String, Account> byUsername = new ConcurrentHashMap<>(); // key: lowercase username
     private final ConcurrentHashMap<String, Account> byUuid = new ConcurrentHashMap<>();
@@ -93,9 +94,11 @@ public class AccountStore implements XpAwarder, ProfileStore {
         long createdAtMs = System.currentTimeMillis();
 
         PlayerProfile starter = PlayerProfile.newAccountProfile(new Random());
+        starter.addTokens(INITIAL_TOKEN_BONUS);
         AccountExtra extra = new AccountExtra();
         extra.profile = starter;
         extra.bestsMigrated = true;
+        extra.receivedInitialTokenBonus = true;
         Json json = new Json();
         json.setOutputType(JsonWriter.OutputType.json);
         String extraJson = json.toJson(extra);
@@ -166,6 +169,20 @@ public class AccountStore implements XpAwarder, ProfileStore {
     public synchronized PlayerProfile loadProfile(String accountUuid) {
         AccountExtra extra = extraFor(accountUuid);
         return extra != null ? extra.profile : PlayerProfile.defaultProfile();
+    }
+
+    /**
+     * Applies and persists the one-time starting token grant. New accounts are marked during
+     * creation; legacy accounts reach this method after their next successful login.
+     */
+    public synchronized boolean ensureInitialTokenBonus(String accountUuid) {
+        Account acct = accountUuid == null ? null : byUuid.get(accountUuid);
+        AccountExtra extra = extraFor(accountUuid);
+        if (acct == null || extra == null || extra.receivedInitialTokenBonus) return false;
+        extra.profile.addTokens(INITIAL_TOKEN_BONUS);
+        extra.receivedInitialTokenBonus = true;
+        writeExtra(acct, extra);
+        return true;
     }
 
     @Override

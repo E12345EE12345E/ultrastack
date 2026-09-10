@@ -42,13 +42,17 @@ public class CardDealerScreen extends DecoratedMenuScreen {
     private static final long PACKET_TIMEOUT_MS = 5000L;
     private static final long DEAL_CARD_MS = 600L;
     private static final long DEAL_STAGGER_MS = 80L;
+    private static final long STRIKE_DELAY_MS = 350L;
+    private static final long BETWEEN_STRIKES_MS = 700L;
     private static final long FLASH_MS = 200L;
     private static final long FLIP_BACK_MS = 75L;
     private static final long FLIP_MID_MS = 100L;
     private static final long FLIP_FACE_MS = 75L;
     private static final long FLIP_STAGGER_MS = 500L;
 
-    private enum Phase { IDLE, FADE_UI, DEAL_IN, ROULETTE, FLASH, FLIP, RESULT }
+    private enum Phase {
+        IDLE, FADE_UI, DEAL_IN, ROULETTE, STRIKE_DELAY, FLASH, BETWEEN_STRIKES, FLIP, RESULT
+    }
 
     private final CharacterScreen parent;
     private final Random animationRng = new Random();
@@ -179,11 +183,22 @@ public class CardDealerScreen extends DecoratedMenuScreen {
             case ROULETTE:
                 tickRoulette(nowMs);
                 break;
+            case STRIKE_DELAY:
+                if (elapsed >= STRIKE_DELAY_MS) enterFlash(nowMs);
+                break;
             case FLASH:
                 if (elapsed >= FLASH_MS) {
-                    displayRarities[upgradeTarget] = rarities[upgradeTarget];
-                    enterFlip(nowMs);
+                    displayRarities[upgradeTarget]++;
+                    if (displayRarities[upgradeTarget] < rarities[upgradeTarget]) {
+                        phase = Phase.BETWEEN_STRIKES;
+                        phaseStartMs = nowMs;
+                    } else {
+                        enterFlip(nowMs);
+                    }
                 }
+                break;
+            case BETWEEN_STRIKES:
+                if (elapsed >= BETWEEN_STRIKES_MS) enterFlash(nowMs);
                 break;
             case FLIP:
                 if (elapsed >= flipDurationMs()) {
@@ -222,9 +237,8 @@ public class CardDealerScreen extends DecoratedMenuScreen {
             arrowIndex = rouletteHops % requestedCount;
             if (rouletteHops >= rouletteTotalHops) {
                 arrowIndex = upgradeTarget;
-                phase = Phase.FLASH;
+                phase = Phase.STRIKE_DELAY;
                 phaseStartMs = nowMs;
-                AudioManager.getInstance().playLightningSound();
                 return;
             }
             nextRouletteHopMs += rouletteIntervalMs(rouletteHops);
@@ -236,6 +250,12 @@ public class CardDealerScreen extends DecoratedMenuScreen {
         if (remaining > 8) return 45L + animationRng.nextInt(26);
         float progress = (8 - Math.max(0, remaining)) / 8f;
         return Math.round(90f + 330f * progress * progress);
+    }
+
+    private void enterFlash(long nowMs) {
+        phase = Phase.FLASH;
+        phaseStartMs = nowMs;
+        AudioManager.getInstance().playLightningSound();
     }
 
     private void enterFlip(long nowMs) {
@@ -270,7 +290,12 @@ public class CardDealerScreen extends DecoratedMenuScreen {
                 return;
             }
             upgradeTarget = eligible.get(animationRng.nextInt(eligible.size()));
-            displayRarities[upgradeTarget] = (byte) (rarities[upgradeTarget] - 1);
+            if (rarities[upgradeTarget] == GachaTables.LEGENDARY
+                    && animationRng.nextFloat() < 0.20f) {
+                displayRarities[upgradeTarget] = GachaTables.RARE;
+            } else {
+                displayRarities[upgradeTarget] = (byte) (rarities[upgradeTarget] - 1);
+            }
         }
     }
 
@@ -341,9 +366,10 @@ public class CardDealerScreen extends DecoratedMenuScreen {
         if (artifacts == null || displayRarities == null) return;
         if (phase == Phase.DEAL_IN) {
             drawDealingCards(ctx);
-        } else if (phase == Phase.ROULETTE || phase == Phase.FLASH) {
+        } else if (phase == Phase.ROULETTE || phase == Phase.STRIKE_DELAY
+                || phase == Phase.FLASH || phase == Phase.BETWEEN_STRIKES) {
             drawSettledBacks(ctx);
-            drawArrow(ctx, phase == Phase.FLASH ? upgradeTarget : arrowIndex);
+            drawArrow(ctx, phase == Phase.ROULETTE ? arrowIndex : upgradeTarget);
             if (phase == Phase.FLASH) {
                 drawFlash(ctx, upgradeTarget);
                 drawLightning(ctx, upgradeTarget);
@@ -450,7 +476,8 @@ public class CardDealerScreen extends DecoratedMenuScreen {
         float targetY = viewport.toScreenY((float) DesignUi.ny(targetY(index)));
         long elapsed = menuElapsedMs() - phaseStartMs;
         lightningRenderer.renderFromTop(
-                ctx.shapes, targetX, targetY, elapsed, 0x434152444445414cL ^ index);
+                ctx.shapes, targetX, targetY, elapsed,
+                0x434152444445414cL ^ index ^ ((long) displayRarities[index] << 32));
     }
 
     private float targetX(int index) {

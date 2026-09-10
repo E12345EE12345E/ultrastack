@@ -27,6 +27,7 @@ public class AccountAuthProvider implements AuthProvider {
         if (username == null || passcode == null) return "invalid credentials";
         Account acct = store.authenticate(username, passcode);
         if (acct == null) return "invalid username or passcode";
+        store.ensureInitialTokenBonus(acct.uuid);
         session.username = acct.username;
         session.accountUuid = acct.uuid;
         session.authenticated = true;
